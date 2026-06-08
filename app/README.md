@@ -2,9 +2,9 @@
 
 Current Android source for `kia.app`.
 
-- `versionName`: `22.13`
-- `versionCode`: `323`
-- release APK name: `kia_323.apk`
+- `versionName`: `22.14`
+- `versionCode`: `324`
+- release APK name: `kia_324.apk`
 
 ## Runtime Flow
 

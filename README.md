@@ -14,16 +14,17 @@ Source was copied from:
 - `tools/` - local CAN, UART, navigation and APK utilities.
 - `signing/` - intentionally public debug release keystore used by release builds.
 - `updates/latest.json` - manifest for Kia, Yandex mod and firmware updates.
+- `updates/kia_*.apk` - published Kia APKs used by in-app updates.
 
-Not tracked here: Gradle caches, build outputs, APK release archive, screenshots,
+Not tracked here: Gradle caches, build outputs, local APK dumps, screenshots,
 logs, `.DS_Store`, temporary captures and old generated artifacts.
 
 ## Current App
 
 - `applicationId`: `kia.app`
-- `versionName`: `22.13`
-- `versionCode`: `323`
-- release APK name: `kia_323.apk`
+- `versionName`: `22.14`
+- `versionCode`: `324`
+- release APK name: `kia_324.apk`
 
 ## Build
 

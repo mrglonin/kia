@@ -5,6 +5,8 @@
 **/build/
 local.properties
 *.apk
+!updates/kia_*.apk
+!updates/yandex/**/*.apk
 *.idsig
 *.log
 *.tmp
