@@ -141,6 +141,7 @@
                 <action android:name="com.kia.navi.ACTION_NAVI_ON_DATA" />
                 <action android:name="com.kia.navi.ACTION_SPEED_DATA" />
                 <action android:name="com.kia.navi.ACTION_EXCEEDED_DATA" />
+                <action android:name="kia.yandex.v2.NAV_SNAPSHOT" />
                 <action android:name="com.yf.navinfo" />
                 <action android:name="com.teyes.MapAssistantService" />
                 <action android:name="android.action.MOBILE_NAVIGATION" />

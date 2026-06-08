@@ -92,6 +92,10 @@ public final class QaReceiver extends BroadcastReceiver {
             AppSettings.setNavMicroMaxDistanceMeters(context, intent.getIntExtra("meters", 100));
             AppLog.line(context, "QA nav micro max distance: "
                     + AppSettings.navMicroMaxDistanceMeters(context));
+        } else if ("nav_micro_maneuvers".equals(scenario)) {
+            boolean enabled = intent.getBooleanExtra("enabled", false);
+            AppSettings.setNavMicroManeuvers(context, enabled);
+            AppLog.line(context, "QA nav micro maneuvers: " + enabled);
         } else if ("tpms_sample".equals(scenario)) {
             TpmsController.get(context).handleAdapterFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS,
                     new byte[]{(byte) 148, (byte) 149, (byte) 150, (byte) 147,

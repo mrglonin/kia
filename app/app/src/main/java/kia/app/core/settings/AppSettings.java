@@ -475,7 +475,7 @@ public final class AppSettings {
     }
 
     public static boolean navMicroManeuvers(Context context) {
-        return prefs(context).getBoolean(KEY_NAV_MICRO_MANEUVERS, true);
+        return prefs(context).getBoolean(KEY_NAV_MICRO_MANEUVERS, false);
     }
 
     public static void setNavMicroManeuvers(Context context, boolean value) {

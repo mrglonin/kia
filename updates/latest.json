@@ -4,16 +4,22 @@
     "version_code": 324,
     "asset_name": "kia_324.apk",
     "download_url": "https://raw.githubusercontent.com/mrglonin/kia/main/updates/kia_324.apk",
-    "sha256": "8df3ccbfa9d339f00f64df9846f3fc6d51c1a94e802a1028b9df4db5d9dfbf82",
-    "size": 5733807
+    "sha256": "09ed85f1c1e3459aeebf3ce35af4f95d98225e4c81f3d3cee2975556c710978c",
+    "size": 5762607
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
-    "version": "",
-    "version_code": 0,
+    "version": "7.10-kia.20260608",
+    "version_code": 71011061,
     "package": "ru.yandex.yandexnavi",
     "apk_dir": "updates/yandex",
-    "files": []
+    "files": [
+      {
+        "name": "yandex_navi-7_10-arm7-kia-mod.apk",
+        "sha256": "35794831b77f4a6070ec7921e0e47d707e79794b94d1686782d471f322d52d12",
+        "size": 90242546
+      }
+    ]
   },
   "firmware": {
     "version": "",

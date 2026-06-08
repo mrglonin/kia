@@ -6,6 +6,7 @@
 local.properties
 *.apk
 !updates/kia_*.apk
+!updates/yandex/*.apk
 !updates/yandex/**/*.apk
 *.idsig
 *.log
@@ -22,3 +23,13 @@ logs/
 captures/
 tools/climate_button_review_state.json
 tools/climate_button_review_events.jsonl
+
+# Local Yandex Navigator reverse-engineering workspace. Keep the installable
+# APK in updates/yandex; do not track decoded APK/decompiled/cache trees.
+yandex mod/
+tools/apktool.jar
+tools/apktool_3.0.2.jar
+tools/jadx
+tools/jadx-*/
+tools/*.zip
+tools/reverse-tools.sha256

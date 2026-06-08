@@ -108,6 +108,11 @@ public final class StateStore {
                     navigation.grayRoadId, navigation.grayRoadScheme,
                     next.updatedAt);
         }
+        if (next.active && !hasNavigationRaw(next) && navigation != null
+                && hasNavigationRaw(navigation)) {
+            next = next.withNavigationRaw(navigation.laneRaw, navigation.lanePosition,
+                    navigation.roadSchemeRaw, navigation.upcomingRaw, next.updatedAt);
+        }
         navigation = next;
         persistNavigation(context, navigation);
         changed(context);
@@ -146,6 +151,11 @@ public final class StateStore {
         if (laneHint != null && !laneHint.isEmpty()) {
             restored = restored.withLaneHint(laneHint, laneSource, restored.updatedAt);
         }
+        String eventHint = p.getString(NAV_PREFIX + "eventHint", "");
+        String eventSource = p.getString(NAV_PREFIX + "eventSource", "");
+        if (eventHint != null && !eventHint.isEmpty()) {
+            restored = restored.withEventHint(eventHint, eventSource, restored.updatedAt);
+        }
         restored = restored.withNavigationDebug(
                 p.getString(NAV_PREFIX + "mainManeuverId", ""),
                 p.getString(NAV_PREFIX + "routeActionId", ""),
@@ -154,6 +164,12 @@ public final class StateStore {
                 p.getString(NAV_PREFIX + "microStatus", ""),
                 p.getString(NAV_PREFIX + "grayRoadId", ""),
                 p.getString(NAV_PREFIX + "grayRoadScheme", ""),
+                restored.updatedAt);
+        restored = restored.withNavigationRaw(
+                p.getString(NAV_PREFIX + "laneRaw", ""),
+                p.getString(NAV_PREFIX + "lanePosition", ""),
+                p.getString(NAV_PREFIX + "roadSchemeRaw", ""),
+                p.getString(NAV_PREFIX + "upcomingRaw", ""),
                 restored.updatedAt);
         String clusterVisual = p.getString(NAV_PREFIX + "clusterVisual", "");
         if (clusterVisual != null && !clusterVisual.isEmpty()) {
@@ -175,6 +191,14 @@ public final class StateStore {
                 || notEmpty(value.microStatus)
                 || notEmpty(value.grayRoadId)
                 || notEmpty(value.grayRoadScheme);
+    }
+
+    private static boolean hasNavigationRaw(NavigationState value) {
+        if (value == null) return false;
+        return notEmpty(value.laneRaw)
+                || notEmpty(value.lanePosition)
+                || notEmpty(value.roadSchemeRaw)
+                || notEmpty(value.upcomingRaw);
     }
 
     private static boolean notEmpty(String value) {
@@ -209,8 +233,14 @@ public final class StateStore {
                 .putString(NAV_PREFIX + "grayRoadScheme", value.grayRoadScheme)
                 .putString(NAV_PREFIX + "laneHint", value.laneHint)
                 .putString(NAV_PREFIX + "laneSource", value.laneSource)
+                .putString(NAV_PREFIX + "eventHint", value.eventHint)
+                .putString(NAV_PREFIX + "eventSource", value.eventSource)
                 .putString(NAV_PREFIX + "clusterVisual", value.clusterVisual)
                 .putString(NAV_PREFIX + "clusterTx", value.clusterTx)
+                .putString(NAV_PREFIX + "laneRaw", value.laneRaw)
+                .putString(NAV_PREFIX + "lanePosition", value.lanePosition)
+                .putString(NAV_PREFIX + "roadSchemeRaw", value.roadSchemeRaw)
+                .putString(NAV_PREFIX + "upcomingRaw", value.upcomingRaw)
                 .putLong(NAV_PREFIX + "updatedAt", value.updatedAt)
                 .apply();
     }

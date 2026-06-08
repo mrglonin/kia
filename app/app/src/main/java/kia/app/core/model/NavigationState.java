@@ -35,8 +35,14 @@ public final class NavigationState {
     public final String grayRoadScheme;
     public final String laneHint;
     public final String laneSource;
+    public final String eventHint;
+    public final String eventSource;
     public final String clusterVisual;
     public final String clusterTx;
+    public final String laneRaw;
+    public final String lanePosition;
+    public final String roadSchemeRaw;
+    public final String upcomingRaw;
     public final long updatedAt;
 
     public NavigationState(boolean active, String maneuver, String distance, String eta,
@@ -53,7 +59,7 @@ public final class NavigationState {
         this(active, finishReached, speedExceeded, maneuver, maneuverText, maneuverDistance,
                 routeDistance, routeTime, arrivalTime, currentStreet, nextStreet, finishStreet,
                 speedLimit, currentSpeed, source, "", "", "", "", "", "", "",
-                "", "", "", "", updatedAt);
+                "", "", "", "", "", "", "", "", "", "", updatedAt);
     }
 
     private NavigationState(boolean active, boolean finishReached, boolean speedExceeded,
@@ -65,8 +71,12 @@ public final class NavigationState {
                             String microManeuverId, String microDistance,
                             String microStatus,
                             String grayRoadId, String grayRoadScheme,
-                            String laneHint, String laneSource, String clusterVisual,
-                            String clusterTx, long updatedAt) {
+                            String laneHint, String laneSource,
+                            String eventHint, String eventSource,
+                            String clusterVisual, String clusterTx,
+                            String laneRaw, String lanePosition,
+                            String roadSchemeRaw, String upcomingRaw,
+                            long updatedAt) {
         this.active = active;
         this.finishReached = finishReached;
         this.speedExceeded = speedExceeded;
@@ -91,8 +101,14 @@ public final class NavigationState {
         this.grayRoadScheme = safe(grayRoadScheme);
         this.laneHint = safe(laneHint);
         this.laneSource = safe(laneSource);
+        this.eventHint = safe(eventHint);
+        this.eventSource = safe(eventSource);
         this.clusterVisual = safe(clusterVisual);
         this.clusterTx = safe(clusterTx);
+        this.laneRaw = safe(laneRaw);
+        this.lanePosition = safe(lanePosition);
+        this.roadSchemeRaw = safe(roadSchemeRaw);
+        this.upcomingRaw = safe(upcomingRaw);
         this.updatedAt = updatedAt;
         this.distance = this.maneuverDistance;
         this.eta = this.routeDistance;
@@ -115,7 +131,21 @@ public final class NavigationState {
                 mainManeuverId, routeActionId, microManeuverId, microDistance,
                 microStatus,
                 grayRoadId, grayRoadScheme,
-                laneHint, laneSource, clusterVisual, clusterTx, updatedAt);
+                laneHint, laneSource, eventHint, eventSource, clusterVisual, clusterTx,
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
+    }
+
+    public NavigationState withEventHint(String eventHint, String eventSource, long updatedAt) {
+        return new NavigationState(active, finishReached, speedExceeded,
+                maneuver, maneuverText, maneuverDistance,
+                routeDistance, routeTime, arrivalTime,
+                currentStreet, nextStreet, finishStreet,
+                speedLimit, currentSpeed, source,
+                mainManeuverId, routeActionId, microManeuverId, microDistance,
+                microStatus,
+                grayRoadId, grayRoadScheme,
+                laneHint, laneSource, eventHint, eventSource, clusterVisual, clusterTx,
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
     }
 
     public NavigationState withManeuverDistance(String maneuverDistance, long updatedAt) {
@@ -127,7 +157,23 @@ public final class NavigationState {
                 mainManeuverId, routeActionId, microManeuverId, microDistance,
                 microStatus,
                 grayRoadId, grayRoadScheme,
-                laneHint, laneSource, clusterVisual, clusterTx, updatedAt);
+                laneHint, laneSource, eventHint, eventSource, clusterVisual, clusterTx,
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
+    }
+
+    public NavigationState withMainManeuver(String maneuver, String maneuverText,
+                                            String maneuverDistance, String source,
+                                            long updatedAt) {
+        return new NavigationState(active, finishReached, speedExceeded,
+                maneuver, maneuverText, maneuverDistance,
+                routeDistance, routeTime, arrivalTime,
+                currentStreet, nextStreet, finishStreet,
+                speedLimit, currentSpeed, source,
+                mainManeuverId, routeActionId, microManeuverId, microDistance,
+                microStatus,
+                grayRoadId, grayRoadScheme,
+                laneHint, laneSource, eventHint, eventSource, clusterVisual, clusterTx,
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
     }
 
     public NavigationState withNavigationDebug(String mainManeuverId, String routeActionId,
@@ -157,7 +203,23 @@ public final class NavigationState {
                 mainManeuverId, routeActionId, microManeuverId, microDistance,
                 microStatus,
                 grayRoadId, grayRoadScheme,
-                laneHint, laneSource, clusterVisual, clusterTx, updatedAt);
+                laneHint, laneSource, eventHint, eventSource, clusterVisual, clusterTx,
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
+    }
+
+    public NavigationState withNavigationRaw(String laneRaw, String lanePosition,
+                                             String roadSchemeRaw, String upcomingRaw,
+                                             long updatedAt) {
+        return new NavigationState(active, finishReached, speedExceeded,
+                maneuver, maneuverText, maneuverDistance,
+                routeDistance, routeTime, arrivalTime,
+                currentStreet, nextStreet, finishStreet,
+                speedLimit, currentSpeed, source,
+                mainManeuverId, routeActionId, microManeuverId, microDistance,
+                microStatus,
+                grayRoadId, grayRoadScheme,
+                laneHint, laneSource, eventHint, eventSource, clusterVisual, clusterTx,
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
     }
 
     public NavigationState withClusterVisual(String imageId, int progressBucket,
@@ -177,7 +239,8 @@ public final class NavigationState {
                 mainManeuverId, routeActionId, microManeuverId, microDistance,
                 microStatus,
                 grayRoadId, grayRoadScheme,
-                laneHint, laneSource, safe(visual), clusterTx, updatedAt);
+                laneHint, laneSource, eventHint, eventSource, safe(visual), clusterTx,
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
     }
 
     public NavigationState withClusterTxText(String tx, long updatedAt) {
@@ -189,7 +252,8 @@ public final class NavigationState {
                 mainManeuverId, routeActionId, microManeuverId, microDistance,
                 microStatus,
                 grayRoadId, grayRoadScheme,
-                laneHint, laneSource, clusterVisual, safe(tx), updatedAt);
+                laneHint, laneSource, eventHint, eventSource, clusterVisual, safe(tx),
+                laneRaw, lanePosition, roadSchemeRaw, upcomingRaw, updatedAt);
     }
 
     public String summary() {
@@ -224,6 +288,10 @@ public final class NavigationState {
         out.append("Лимит скорости: ").append(orDash(speedLimit)).append('\n');
         out.append("Превышение: ").append(speedExceeded ? "да" : "нет").append('\n');
         out.append("Источник: ").append(orDash(source));
+        appendDebugLine(out, "Lana raw", laneRaw);
+        appendDebugLine(out, "Lana pos", lanePosition);
+        appendDebugLine(out, "Road raw", roadSchemeRaw);
+        appendDebugLine(out, "Upcoming", upcomingRaw);
         return out.toString();
     }
 
@@ -253,6 +321,13 @@ public final class NavigationState {
 
         out.append("Серая дорога").append('\n');
         out.append("Схема: ").append(orDash(grayRoadScheme)).append('\n');
+        if (!laneRaw.isEmpty() || !lanePosition.isEmpty()
+                || !roadSchemeRaw.isEmpty() || !upcomingRaw.isEmpty()) {
+            out.append("Lana raw: ").append(orDash(laneRaw)).append('\n');
+            out.append("Lana pos: ").append(orDash(lanePosition)).append('\n');
+            out.append("Road raw: ").append(orDash(roadSchemeRaw)).append('\n');
+            out.append("Upcoming: ").append(orDash(upcomingRaw)).append('\n');
+        }
 
         out.append("События").append('\n');
         out.append("Событие: ").append(orDash(eventHintText())).append('\n');
@@ -289,7 +364,8 @@ public final class NavigationState {
     }
 
     private ClusterTxMode clusterTxMode(boolean tbtMode, boolean finishDirectionMode) {
-        if (!active || finishReached) return ClusterTxMode.COMPASS;
+        if (!active) return ClusterTxMode.COMPASS;
+        if (finishReached) return ClusterTxMode.NAV_NORMAL;
         if (finishDirectionMode) return ClusterTxMode.FINISH_DIRECTION;
         if (tbtMode) return ClusterTxMode.NAV_TBT;
         return ClusterTxMode.NAV_NORMAL;
@@ -380,6 +456,11 @@ public final class NavigationState {
         return safe(value).isEmpty() ? "-" : safe(value);
     }
 
+    private static void appendDebugLine(StringBuilder out, String label, String value) {
+        if (out == null || safe(value).isEmpty()) return;
+        out.append('\n').append(label).append(": ").append(safe(value));
+    }
+
     private String providerLabel() {
         String all = (source + " " + laneSource).toLowerCase();
         if (all.contains("2gis") || all.contains("2гис")) return "2GIS";
@@ -413,15 +494,19 @@ public final class NavigationState {
     }
 
     private String eventHintText() {
-        String source = safe(laneSource).toLowerCase();
         String txEvent = clusterEventTextValue();
         if (!txEvent.isEmpty()) return txEvent;
+        String explicit = humanClusterLine(eventHint);
+        if (!explicit.isEmpty()) return explicit;
+        String source = (safe(laneSource) + " " + safe(eventSource)).toLowerCase();
+        String hint = humanClusterLine(laneHint);
+        if (eventLikeText(hint) || hint.toLowerCase().contains("знак")) return hint;
         if (!(source.contains("direction_sign") || source.contains("road_sign")
                 || source.contains("roadsign") || source.contains("event")
                 || source.contains("camera") || source.contains("warning"))) {
             return "";
         }
-        return humanClusterLine(laneHint);
+        return hint;
     }
 
     private String humanClusterVisual() {

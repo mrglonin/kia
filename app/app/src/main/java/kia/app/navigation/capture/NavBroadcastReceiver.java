@@ -32,6 +32,10 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
         ensureServiceStarted(context);
         if (duplicate(intent)) return;
         String action = intent.getAction();
+        if (YandexCoreBridgeContract.ACTION_V2_SNAPSHOT.equals(action)) {
+            YandexCoreBridgeClient.get(context).acceptBroadcastSnapshot(intent.getExtras());
+            return;
+        }
         NavigationFeature feature = NavigationFeature.get(context);
         if ("com.yf.navinfo".equals(action)
                 || "com.teyes.MapAssistantService".equals(action)
@@ -56,6 +60,7 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
         filter.addAction(NavigationFeature.KIA_ACTION_NAVI_ON);
         filter.addAction(NavigationFeature.KIA_ACTION_SPEED);
         filter.addAction(NavigationFeature.KIA_ACTION_EXCEEDED);
+        filter.addAction(YandexCoreBridgeContract.ACTION_V2_SNAPSHOT);
         filter.addAction("com.yf.navinfo");
         filter.addAction("com.teyes.MapAssistantService");
         filter.addAction("android.action.MOBILE_NAVIGATION");
