@@ -1,0 +1,25 @@
+{
+  "app": {
+    "version_name": "22.13",
+    "version_code": 323,
+    "asset_name": "",
+    "download_url": "",
+    "sha256": "",
+    "size": 0
+  },
+  "navigator": {
+    "name": "Yandex Navigator Kia mod",
+    "version": "",
+    "version_code": 0,
+    "package": "ru.yandex.yandexnavi",
+    "apk_dir": "updates/yandex",
+    "files": []
+  },
+  "firmware": {
+    "version": "",
+    "asset_name": "",
+    "download_url": "",
+    "sha256": "",
+    "size": 0
+  }
+}

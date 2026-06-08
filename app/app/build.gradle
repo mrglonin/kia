@@ -1,0 +1,68 @@
+plugins {
+    id "com.android.application"
+}
+
+def kiaVersionCode = 323
+def kiaVersionName = "22.13"
+def kiaReleaseApk = "kia_323.apk"
+def publicReleaseKey = rootProject.file("../signing/kia-debug-release.keystore")
+
+android {
+    namespace "kia.app"
+    compileSdk 35
+    buildToolsVersion "37.0.0"
+
+    signingConfigs {
+        release {
+            storeFile publicReleaseKey.exists()
+                    ? publicReleaseKey
+                    : file("${System.properties["user.home"]}/.android/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+
+    defaultConfig {
+        applicationId "kia.app"
+        minSdk 29
+        targetSdk 35
+        versionCode kiaVersionCode
+        versionName kiaVersionName
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    applicationVariants.configureEach { variant ->
+        if (variant.buildType.name == "release") {
+            variant.outputs.configureEach { output ->
+                outputFileName = kiaReleaseApk
+            }
+        }
+    }
+}
+
+dependencies {
+    implementation "com.github.mik3y:usb-serial-for-android:3.8.0"
+}
+
+tasks.register("copyKiaRelease", Copy) {
+    dependsOn("assembleRelease")
+
+    def repoRoot = rootProject.projectDir.toPath().resolve("../..").normalize().toFile()
+    def workspaceRoot = repoRoot.parentFile != null && repoRoot.parentFile.name == "canbus" ? repoRoot.parentFile : repoRoot
+
+    from(layout.buildDirectory.dir("outputs/apk/release"))
+    include(kiaReleaseApk)
+    into(new File(workspaceRoot, "release"))
+}

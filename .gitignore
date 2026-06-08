@@ -1,0 +1,22 @@
+.DS_Store
+*.iml
+**/.gradle/
+**/.idea/
+**/build/
+local.properties
+*.apk
+*.idsig
+*.log
+*.tmp
+
+# Keep private signing keys out by default. The repo contains one intentionally
+# public Android debug keystore so users can rebuild the provided APK signature.
+*.jks
+*.keystore
+!signing/kia-debug-release.keystore
+
+release/
+logs/
+captures/
+tools/climate_button_review_state.json
+tools/climate_button_review_events.jsonl

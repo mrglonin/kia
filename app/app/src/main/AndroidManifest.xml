@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="com.spd.media" />
+        <package android:name="com.spd.radio" />
+        <package android:name="com.spd.home" />
+        <package android:name="com.spd.bluetooth" />
+        <package android:name="com.spd.carinfo" />
+        <package android:name="com.spd.tpms" />
+        <package android:name="com.teyes.music.widget" />
+        <package android:name="com.teyes.tpms" />
+        <package android:name="com.teyes.tpms.widget" />
+        <package android:name="com.syu.tpms" />
+        <package android:name="com.syu.tire" />
+        <package android:name="com.syu.canbus" />
+        <package android:name="com.yf.navinfo" />
+        <package android:name="com.teyes.assistant" />
+        <package android:name="ru.yandex.yandexnavi" />
+        <package android:name="ru.dublgis.dgismobile" />
+        <package android:name="ru.dublgis.dgismobile4preview" />
+        <provider android:authorities="ru.yandex.yandexnavi.kia.bridge" />
+        <provider android:authorities="com.teyes.music.provider" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:directBootAware="true"
+        android:icon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:name=".entry.UsbAttachActivity"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:finishOnTaskLaunch="true"
+            android:noHistory="true"
+            android:theme="@style/NoDisplayTheme">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
+        </activity>
+
+        <activity
+            android:name=".entry.MainActivity"
+            android:excludeFromRecents="false"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:configChanges="keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".entry.AppService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|location" />
+
+        <service
+            android:name=".media.capture.MediaNotificationListener"
+            android:enabled="true"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".entry.BootReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.USER_UNLOCKED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
+        </receiver>
+
+        <receiver android:name=".entry.UsbPermissionReceiver" android:exported="false" />
+
+        <receiver android:name=".update.NavigatorInstallResultReceiver" android:exported="false" />
+
+        <receiver
+            android:name=".navigation.capture.NavBroadcastReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="kia.app.ACTION_MANEUVER_DATA" />
+                <action android:name="kia.app.ACTION_ETA_DATA" />
+                <action android:name="kia.app.ACTION_NAVI_ON_DATA" />
+                <action android:name="kia.app.ACTION_SPEED_DATA" />
+                <action android:name="kia.app.ACTION_EXCEEDED_DATA" />
+                <action android:name="com.kia.navi.ACTION_MANEUVER_DATA" />
+                <action android:name="com.kia.navi.ACTION_ETA_DATA" />
+                <action android:name="com.kia.navi.ACTION_NAVI_ON_DATA" />
+                <action android:name="com.kia.navi.ACTION_SPEED_DATA" />
+                <action android:name="com.kia.navi.ACTION_EXCEEDED_DATA" />
+                <action android:name="com.yf.navinfo" />
+                <action android:name="com.teyes.MapAssistantService" />
+                <action android:name="android.action.MOBILE_NAVIGATION" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name=".update.UpdateApkProvider"
+            android:authorities="${applicationId}.updateprovider"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <receiver
+            android:name=".media.capture.MediaBroadcastReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="kia.app.MEDIA_STATE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".qa.QaReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="kia.app.QA_SCENARIO" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
