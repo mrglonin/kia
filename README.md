@@ -22,9 +22,9 @@ logs, `.DS_Store`, temporary captures and old generated artifacts.
 ## Current App
 
 - `applicationId`: `kia.app`
-- `versionName`: `22.14`
-- `versionCode`: `324`
-- release APK name: `kia_324.apk`
+- `versionName`: `22.15`
+- `versionCode`: `325`
+- release APK name: `kia_325.apk`
 
 ## Build
 
