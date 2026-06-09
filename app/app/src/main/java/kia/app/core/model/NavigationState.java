@@ -287,11 +287,16 @@ public final class NavigationState {
         out.append("Скорость сейчас: ").append(orDash(currentSpeed)).append('\n');
         out.append("Лимит скорости: ").append(orDash(speedLimit)).append('\n');
         out.append("Превышение: ").append(speedExceeded ? "да" : "нет").append('\n');
-        out.append("Источник: ").append(orDash(source));
-        appendDebugLine(out, "Lana raw", laneRaw);
-        appendDebugLine(out, "Lana pos", lanePosition);
-        appendDebugLine(out, "Road raw", roadSchemeRaw);
-        appendDebugLine(out, "Upcoming", upcomingRaw);
+        out.append("Источник: ").append(orDash(source)).append('\n');
+        out.append("Основной ID: ").append(orDash(humanManeuverId(first(maneuver, mainManeuverId)))).append('\n');
+        out.append("Route action: ").append(orDash(humanManeuverId(routeActionId))).append('\n');
+        out.append("Micro: ").append(orDash(microDebugLine())).append('\n');
+        out.append("TX-схема: ").append(orDash(txGrayRoadText())).append('\n');
+        out.append("Полосы Яндекса: ").append(orDash(yandexLaneDirectionsText())).append('\n');
+        out.append("Подсветка: ").append(orDash(laneHighlightText())).append('\n');
+        out.append("До подсказки: ").append(orDash(laneDistanceDebugText())).append('\n');
+        out.append("Ближайшие подсказки: ").append(orDash(upcomingLaneHintsText())).append('\n');
+        out.append("События: ").append(orDash(first(eventHintText(), upcomingEventText())));
         return out.toString();
     }
 
@@ -320,17 +325,15 @@ public final class NavigationState {
         out.append("Статус: ").append(orDash(first(microStatus, inferredMicroStatus()))).append('\n');
 
         out.append("Серая дорога").append('\n');
-        out.append("Схема: ").append(orDash(grayRoadScheme)).append('\n');
-        if (!laneRaw.isEmpty() || !lanePosition.isEmpty()
-                || !roadSchemeRaw.isEmpty() || !upcomingRaw.isEmpty()) {
-            out.append("Lana raw: ").append(orDash(laneRaw)).append('\n');
-            out.append("Lana pos: ").append(orDash(lanePosition)).append('\n');
-            out.append("Road raw: ").append(orDash(roadSchemeRaw)).append('\n');
-            out.append("Upcoming: ").append(orDash(upcomingRaw)).append('\n');
-        }
+        out.append("TX-схема: ").append(orDash(txGrayRoadText())).append('\n');
+        out.append("Полосы Яндекса: ").append(orDash(yandexLaneDirectionsText())).append('\n');
+        out.append("Подсветка: ").append(orDash(laneHighlightText())).append('\n');
+        out.append("До подсказки: ").append(orDash(laneDistanceDebugText())).append('\n');
+        out.append("Ближайшие: ").append(orDash(upcomingLaneHintsText())).append('\n');
 
         out.append("События").append('\n');
-        out.append("Событие: ").append(orDash(eventHintText())).append('\n');
+        out.append("Событие: ").append(orDash(first(eventHintText(), upcomingEventText()))).append('\n');
+        out.append("Ближайшие: ").append(orDash(upcomingEventText())).append('\n');
         out.append("Скорость: ").append(orDash(currentSpeed))
                 .append("  Лимит: ").append(orDash(speedLimit))
                 .append("  Превышение: ").append(speedExceeded ? "да" : "нет");
@@ -456,11 +459,6 @@ public final class NavigationState {
         return safe(value).isEmpty() ? "-" : safe(value);
     }
 
-    private static void appendDebugLine(StringBuilder out, String label, String value) {
-        if (out == null || safe(value).isEmpty()) return;
-        out.append('\n').append(label).append(": ").append(safe(value));
-    }
-
     private String providerLabel() {
         String all = (source + " " + laneSource).toLowerCase();
         if (all.contains("2gis") || all.contains("2гис")) return "2GIS";
@@ -485,6 +483,97 @@ public final class NavigationState {
         if (id.isEmpty()) return "";
         String label = maneuverLabel(id);
         return label.isEmpty() ? id : label;
+    }
+
+    private String microDebugLine() {
+        String label = microLabel();
+        if (label.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(label);
+        if (!safe(microDistance).isEmpty()) out.append(", ").append(microDistance);
+        String status = first(microStatus, inferredMicroStatus());
+        if (!status.isEmpty()) out.append(", ").append(status);
+        return out.toString();
+    }
+
+    private String txGrayRoadText() {
+        return first(grayRoadScheme, grayRoadLabel(grayRoadId));
+    }
+
+    private String yandexLaneDirectionsText() {
+        return first(humanDirectionsText(roadSchemeRaw), humanDirectionsText(laneRaw));
+    }
+
+    private String laneHighlightText() {
+        String token = first(fieldAfter(lanePosition, "highlight="),
+                fieldAfter(laneRaw, "highlight="));
+        token = first(token, fieldAfter(laneRaw, "highlighted_direction="));
+        token = first(token, fieldAfter(laneRaw, "lane_highlight="));
+        token = first(token, fieldAfter(roadSchemeRaw, "highlight="));
+        return humanDirectionToken(token);
+    }
+
+    private String laneDistanceDebugText() {
+        return first(microDistance, first(fieldAfter(lanePosition, "dist="),
+                firstDistanceToken(first(lanePosition, laneRaw))));
+    }
+
+    private String upcomingLaneHintsText() {
+        return upcomingText(false);
+    }
+
+    private String upcomingEventText() {
+        return upcomingText(true);
+    }
+
+    private String upcomingText(boolean eventsOnly) {
+        String raw = safe(upcomingRaw);
+        if (raw.isEmpty()) return "";
+        String normalized = raw.replace('\n', '|');
+        String[] parts = normalized.split("\\|\\||;");
+        StringBuilder out = new StringBuilder();
+        int count = 0;
+        for (String part : parts) {
+            String item = humanUpcomingItem(part, eventsOnly);
+            if (item.isEmpty()) continue;
+            if (out.length() > 0) out.append("; ");
+            out.append(item);
+            count++;
+            if (count >= 3) break;
+        }
+        return out.toString();
+    }
+
+    private static String humanUpcomingItem(String value, boolean eventMode) {
+        String text = safe(value);
+        if (text.isEmpty()) return "";
+        boolean event = eventLikeText(text) || containsAnyLower(text,
+                "camera", "камера", "accident", "дтп", "road_work", "works",
+                "ремонт", "warning", "event", "police", "полиция", "дпс");
+        if (eventMode && !event) return "";
+        if (!eventMode && event) return "";
+        String distance = firstDistanceToken(text);
+        String label = event ? humanEventLabel(text)
+                : first(humanDirectionToken(fieldAfter(text, "highlight=")),
+                humanDirectionsText(text));
+        if (label.isEmpty()) label = event ? "событие" : "подсказка";
+        return distance.isEmpty() ? label : label + ", " + distance;
+    }
+
+    private static String humanEventLabel(String value) {
+        String text = safe(value).toLowerCase();
+        if (text.contains("lane") || text.contains("полос")) return "камера на полосу";
+        if (text.contains("speed") || text.contains("limit") || text.contains("скор")) {
+            return "камера скорости";
+        }
+        if (text.contains("camera") || text.contains("камера")) return "камера";
+        if (text.contains("accident") || text.contains("дтп")) return "ДТП";
+        if (text.contains("road_work") || text.contains("works") || text.contains("ремонт")) {
+            return "ремонт";
+        }
+        if (text.contains("police") || text.contains("дпс") || text.contains("полиция")) {
+            return "пост ДПС";
+        }
+        return "событие";
     }
 
     private String inferredMicroStatus() {
@@ -675,6 +764,133 @@ public final class NavigationState {
         return text.contains("превыш") || text.contains("overspeed")
                 || text.contains("камера") || text.contains("camera")
                 || text.contains("warning") || text.contains("event");
+    }
+
+    private static String humanManeuverId(String value) {
+        String id = safe(value);
+        if (id.isEmpty()) return "";
+        String label = maneuverLabel(id);
+        return label.isEmpty() ? humanClusterLine(id) : label;
+    }
+
+    private static String humanDirectionsText(String value) {
+        String text = safe(value).toLowerCase().replace('-', '_');
+        if (text.isEmpty()) return "";
+        boolean uturnLeft = hasDirectionToken(text, "left180")
+                || hasDirectionToken(text, "uturn_left")
+                || hasDirectionToken(text, "turn_back_left");
+        boolean uturnRight = hasDirectionToken(text, "right180")
+                || hasDirectionToken(text, "uturn_right")
+                || hasDirectionToken(text, "turn_back_right");
+        boolean straight = hasDirectionToken(text, "straight")
+                || hasDirectionToken(text, "straight_ahead")
+                || hasDirectionToken(text, "forward")
+                || text.contains("прям");
+        boolean exitRight = containsAnyLower(text, "exit_right", "ramp_right",
+                "take_right", "slip_right", "fork_right", "съезд направо");
+        boolean exitLeft = containsAnyLower(text, "exit_left", "ramp_left",
+                "take_left", "slip_left", "fork_left", "съезд налево");
+        boolean hardRight = containsAnyLower(text, "hard_right", "sharp_right");
+        boolean hardLeft = containsAnyLower(text, "hard_left", "sharp_left");
+        boolean right = exitRight || hardRight || hasDirectionToken(text, "right")
+                || hasDirectionToken(text, "right90") || hasDirectionToken(text, "turn_right")
+                || text.contains("направо") || text.contains("правее");
+        boolean left = exitLeft || hardLeft || hasDirectionToken(text, "left")
+                || hasDirectionToken(text, "left90") || hasDirectionToken(text, "turn_left")
+                || text.contains("налево") || text.contains("левее");
+        StringBuilder out = new StringBuilder();
+        appendDirection(out, "разворот налево", uturnLeft);
+        appendDirection(out, "разворот направо", uturnRight);
+        appendDirection(out, "прямо", straight);
+        appendDirection(out, hardLeft ? "резко налево" : exitLeft ? "съезд налево" : "налево",
+                left && !uturnLeft);
+        appendDirection(out, hardRight ? "резко направо" : exitRight ? "съезд направо" : "направо",
+                right && !uturnRight);
+        return out.toString();
+    }
+
+    private static void appendDirection(StringBuilder out, String value, boolean enabled) {
+        if (!enabled || out == null || safe(value).isEmpty()) return;
+        if (out.length() > 0) out.append(" + ");
+        out.append(value);
+    }
+
+    private static String humanDirectionToken(String value) {
+        String text = safe(value).toLowerCase().replace('-', '_');
+        if (text.isEmpty()) return "";
+        if (hasDirectionToken(text, "left180") || hasDirectionToken(text, "uturn_left")
+                || hasDirectionToken(text, "turn_back_left")) {
+            return "разворот налево";
+        }
+        if (hasDirectionToken(text, "right180") || hasDirectionToken(text, "uturn_right")
+                || hasDirectionToken(text, "turn_back_right")) {
+            return "разворот направо";
+        }
+        if (containsAnyLower(text, "exit_right", "ramp_right", "take_right",
+                "slip_right", "fork_right")) {
+            return "съезд направо";
+        }
+        if (containsAnyLower(text, "exit_left", "ramp_left", "take_left",
+                "slip_left", "fork_left")) {
+            return "съезд налево";
+        }
+        if (containsAnyLower(text, "hard_right", "sharp_right")) return "резко направо";
+        if (containsAnyLower(text, "hard_left", "sharp_left")) return "резко налево";
+        if (hasDirectionToken(text, "right") || hasDirectionToken(text, "right90")
+                || hasDirectionToken(text, "turn_right") || text.contains("направ")) {
+            return "направо";
+        }
+        if (hasDirectionToken(text, "left") || hasDirectionToken(text, "left90")
+                || hasDirectionToken(text, "turn_left") || text.contains("налев")) {
+            return "налево";
+        }
+        if (hasDirectionToken(text, "straight") || hasDirectionToken(text, "straight_ahead")
+                || hasDirectionToken(text, "forward") || text.contains("прям")) {
+            return "прямо";
+        }
+        return "";
+    }
+
+    private static boolean hasDirectionToken(String value, String token) {
+        String text = safe(value).toLowerCase().replace('-', '_');
+        String needle = safe(token).toLowerCase().replace('-', '_');
+        if (text.isEmpty() || needle.isEmpty()) return false;
+        String[] parts = text.split("[^a-z0-9_а-я]+");
+        for (String part : parts) {
+            if (needle.equals(part)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsAnyLower(String value, String... tokens) {
+        String text = safe(value).toLowerCase();
+        if (text.isEmpty()) return false;
+        for (String token : tokens) {
+            if (!safe(token).isEmpty() && text.contains(token.toLowerCase())) return true;
+        }
+        return false;
+    }
+
+    private static String fieldAfter(String value, String marker) {
+        String text = safe(value);
+        String cleanMarker = safe(marker);
+        if (text.isEmpty() || cleanMarker.isEmpty()) return "";
+        int start = text.toLowerCase().indexOf(cleanMarker.toLowerCase());
+        if (start < 0) return "";
+        String tail = text.substring(start + cleanMarker.length()).trim();
+        int end = tail.length();
+        int pipe = tail.indexOf('|');
+        if (pipe >= 0) end = Math.min(end, pipe);
+        int semicolon = tail.indexOf(';');
+        if (semicolon >= 0) end = Math.min(end, semicolon);
+        int comma = tail.indexOf(',');
+        if (comma >= 0) end = Math.min(end, comma);
+        return safe(tail.substring(0, end));
+    }
+
+    private static String firstDistanceToken(String value) {
+        Matcher matcher = DISTANCE_TOKEN.matcher(safe(value));
+        return matcher.find() ? normalizeClusterDistance(matcher.group()) : "";
     }
 
     private static String tokenAfter(String value, String marker) {
