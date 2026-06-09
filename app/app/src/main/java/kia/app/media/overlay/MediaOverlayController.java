@@ -13,6 +13,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
+import android.util.TypedValue;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -26,6 +27,7 @@ import kia.app.core.StateStore;
 import kia.app.core.model.CallState;
 import kia.app.core.model.MediaState;
 import kia.app.core.settings.AppSettings;
+import kia.app.media.domain.RadioStationStore;
 
 public final class MediaOverlayController {
     private static MediaOverlayController instance;
@@ -36,7 +38,9 @@ public final class MediaOverlayController {
     private final WindowManager windowManager;
     private LinearLayout overlay;
     private TextView closeButton;
-    private TextView statusText;
+    private TextView modeText;
+    private TextView sourceText;
+    private TextView txText;
     private BroadcastReceiver receiver;
     private boolean receiverRegistered;
     private boolean permissionLogged;
@@ -121,7 +125,9 @@ public final class MediaOverlayController {
         if (overlay == null || windowManager == null) {
             hideCloseButton();
             overlay = null;
-            statusText = null;
+            modeText = null;
+            sourceText = null;
+            txText = null;
             return;
         }
         try {
@@ -130,7 +136,9 @@ public final class MediaOverlayController {
         }
         hideCloseButton();
         overlay = null;
-        statusText = null;
+        modeText = null;
+        sourceText = null;
+        txText = null;
     }
 
     private void showCloseButton() {
@@ -187,46 +195,61 @@ public final class MediaOverlayController {
     }
 
     private LinearLayout createOverlay() {
-        LinearLayout box = new LinearLayout(windowContext);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setGravity(Gravity.START);
-        box.setPadding(dp(24), dp(22), dp(24), dp(22));
-        box.setBackground(background());
+        DisplayMetrics metrics = displayMetrics();
+        int panelWidth = Math.max(1, Math.round(overlayWidth(metrics) * 0.5f));
+        int padX = Math.max(dp(6), Math.round(panelWidth * 0.025f));
+        int padY = Math.max(dp(5), Math.round(metrics.heightPixels * 0.012f));
+        float modePx = responsiveTextPx(metrics, 0.042f, 17, 25);
+        float bodyPx = responsiveTextPx(metrics, 0.038f, 15, 22);
+        float txPx = responsiveTextPx(metrics, 0.034f, 13, 19);
 
-        TextView title = new TextView(windowContext);
-        title.setText("Медиа / BT");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(24f);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setGravity(Gravity.START);
-        box.addView(title, new LinearLayout.LayoutParams(
+        LinearLayout root = new LinearLayout(windowContext);
+        root.setOrientation(LinearLayout.HORIZONTAL);
+        root.setGravity(Gravity.START);
+
+        LinearLayout left = panel(redBackground(), padX, padY);
+        LinearLayout right = panel(greenBackground(), padX, padY);
+
+        modeText = headerText(modePx);
+        left.addView(modeText, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        statusText = new TextView(windowContext);
-        statusText.setTextColor(Color.WHITE);
-        statusText.setTextSize(19f);
-        statusText.setLineSpacing(dp(3), 1.0f);
-        statusText.setGravity(Gravity.START);
-        LinearLayout.LayoutParams textLp = new LinearLayout.LayoutParams(
+        sourceText = bodyText(bodyPx, false);
+        LinearLayout.LayoutParams sourceLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        textLp.setMargins(0, dp(12), 0, 0);
-        box.addView(statusText, textLp);
-        return box;
+        sourceLp.setMargins(0, Math.max(dp(4), Math.round(metrics.heightPixels * 0.006f)), 0, 0);
+        left.addView(sourceText, sourceLp);
+
+        TextView txHeader = headerText(modePx);
+        txHeader.setText("Приборка");
+        right.addView(txHeader, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        txText = bodyText(txPx, true);
+        LinearLayout.LayoutParams txLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        txLp.setMargins(0, Math.max(dp(4), Math.round(metrics.heightPixels * 0.006f)), 0, 0);
+        right.addView(txText, txLp);
+
+        root.addView(left, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        root.addView(right, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        return root;
     }
 
     private WindowManager.LayoutParams layoutParams() {
-        DisplayMetrics metrics = new DisplayMetrics();
-        windowManager.getDefaultDisplay().getMetrics(metrics);
+        DisplayMetrics metrics = displayMetrics();
         int flags = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                Math.max(dp(540), metrics.widthPixels / 2),
+                overlayWidth(metrics),
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 overlayWindowType(),
                 flags,
                 PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.END;
+        params.gravity = Gravity.TOP | Gravity.START;
         params.x = 0;
         params.y = 0;
         return params;
@@ -248,28 +271,43 @@ public final class MediaOverlayController {
     }
 
     private void updateText() {
-        if (statusText == null) return;
-        statusText.setText(mediaDetails() + "\n\n" + callDetails());
+        if (modeText == null || sourceText == null || txText == null) return;
+        modeText.setText("Режим: " + AppSettings.mediaProfileLabel(app));
+        sourceText.setText(mediaDetails() + "\n\n" + callDetails());
+        txText.setText(txDetails());
     }
 
     private String mediaDetails() {
-        if (!AppSettings.mediaEnabled(app)) return "Музыка: выключена";
+        if (!AppSettings.mediaEnabled(app)) {
+            return "Профиль: " + AppSettings.mediaProfileLabel(app)
+                    + "\nРежим: Kia media выключен"
+                    + "\nЗахват: остановлен"
+                    + "\nОтправка: нет";
+        }
         MediaState media = StateStore.media();
+        StringBuilder out = new StringBuilder();
+        out.append("Профиль: ").append(AppSettings.mediaProfileLabel(app));
+        out.append("\nРежим: ").append(profileModeText());
+        out.append("\nЗахват: ").append(captureText());
+        out.append("\nТекст: ").append(AppSettings.mediaTextModeLabel(app));
+        out.append("\nOther: ").append(AppSettings.otherMediaSourceLabel(app));
         if (media == null || (media.title.isEmpty() && media.artist.isEmpty() && media.source.isEmpty())) {
-            return "Музыка: нет данных"
-                    + "\nШильдик other: " + AppSettings.otherMediaSourceLabel(app)
-                    + "\nСтрока: " + AppSettings.mediaTextModeLabel(app);
+            out.append("\n\nМузыка: нет данных");
+            appendRadioDetails(out, media);
+            return out.toString();
         }
         String artist = media.artist.isEmpty() || "<unknown>".equalsIgnoreCase(media.artist)
                 ? "-" : media.artist;
         String title = media.title.isEmpty() ? "-" : media.title;
         String source = media.source.isEmpty() ? "-" : media.source;
-        return "Музыка: " + (media.playing ? "играет" : "пауза")
-                + "\nИсточник: " + source
-                + "\nТрек: " + title
-                + "\nИсполнитель: " + artist
-                + "\nШильдик other: " + AppSettings.otherMediaSourceLabel(app)
-                + "\nСтрока: " + AppSettings.mediaTextModeLabel(app);
+        out.append("\n\nМузыка: ").append(media.playing ? "играет" : "пауза");
+        out.append("\nИсточник: ").append(source);
+        if (!media.packageName.isEmpty()) out.append("\nПакет: ").append(media.packageName);
+        out.append("\nТрек: ").append(title);
+        out.append("\nИсполнитель: ").append(artist);
+        if (media.durationMs >= 0L) out.append("\nДлительность: ").append(formatDuration(media.durationMs));
+        appendRadioDetails(out, media);
+        return out.toString();
     }
 
     private String callDetails() {
@@ -286,6 +324,46 @@ public final class MediaOverlayController {
                 + "\nИсточник: " + call.subtitle()
                 + "\nВремя: " + call.elapsedText(now)
                 + "\nШильдик: " + AppSettings.callSourceLabel(app);
+    }
+
+    private String txDetails() {
+        if (!AppSettings.mediaEnabled(app)) {
+            return "Media выключено\nTX не отправляется";
+        }
+        MediaState media = StateStore.media();
+        String tx = media == null ? "" : media.clusterTx;
+        if (tx == null || tx.trim().isEmpty()) {
+            return "Профиль: " + AppSettings.mediaProfileLabel(app)
+                    + "\nTX: ожидание"
+                    + "\n\nКоманды появятся после смены источника, трека, радио или звонка.";
+        }
+        return formatTxFrames(tx);
+    }
+
+    private String profileModeText() {
+        int profile = AppSettings.mediaProfile(app);
+        if (profile == AppSettings.MEDIA_PROFILE_TEYES) return "TEYES / CC4 Pro";
+        if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID) return "Universal Android";
+        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) return "UART real + Android";
+        return "выключен";
+    }
+
+    private String captureText() {
+        int profile = AppSettings.mediaProfile(app);
+        if (profile == AppSettings.MEDIA_PROFILE_TEYES) return "TEYES widget + SPD media/radio/bt";
+        if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID) return "MediaSession + радио по базе Kia";
+        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) return "MediaSession, source 0x7A не трогаем";
+        return "нет";
+    }
+
+    private void appendRadioDetails(StringBuilder out, MediaState media) {
+        String frequency = RadioStationStore.currentFrequency(media);
+        if (frequency == null || frequency.isEmpty()) return;
+        String band = RadioStationStore.currentBand(media);
+        String station = RadioStationStore.resolve(app, band, frequency, "");
+        out.append("\nРадио: ").append(band).append(' ').append(frequency);
+        if (station != null && !station.isEmpty()) out.append(" -> ").append(station);
+        out.append("\nБаза станций: ").append(RadioStationStore.summary(app, 3));
     }
 
     private void registerReceiver() {
@@ -315,10 +393,53 @@ public final class MediaOverlayController {
         receiver = null;
     }
 
-    private GradientDrawable background() {
+    private GradientDrawable redBackground() {
         GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(Color.argb(190, 13, 15, 19));
+        drawable.setColor(Color.argb(170, 170, 0, 0));
         return drawable;
+    }
+
+    private GradientDrawable greenBackground() {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(Color.argb(170, 0, 120, 0));
+        return drawable;
+    }
+
+    private LinearLayout panel(GradientDrawable background, int padX, int padY) {
+        LinearLayout panel = new LinearLayout(windowContext);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.START);
+        panel.setPadding(padX, padY, padX, padY);
+        panel.setBackground(background);
+        return panel;
+    }
+
+    private TextView headerText(float sizePx) {
+        TextView view = new TextView(windowContext);
+        view.setTextColor(Color.WHITE);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, sizePx);
+        view.setIncludeFontPadding(false);
+        view.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        return view;
+    }
+
+    private TextView bodyText(float sizePx, boolean mono) {
+        TextView view = new TextView(windowContext);
+        view.setTextColor(Color.WHITE);
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, sizePx);
+        view.setLineSpacing(0f, 0.95f);
+        view.setIncludeFontPadding(false);
+        view.setGravity(mono ? (Gravity.START | Gravity.BOTTOM) : Gravity.START);
+        view.setSingleLine(false);
+        if (mono) view.setTypeface(Typeface.MONOSPACE);
+        if (Build.VERSION.SDK_INT >= 26) {
+            view.setAutoSizeTextTypeUniformWithConfiguration(
+                    Math.max(1, Math.round(sizePx * (mono ? 0.58f : 0.66f))),
+                    Math.max(2, Math.round(sizePx)),
+                    1,
+                    TypedValue.COMPLEX_UNIT_PX);
+        }
+        return view;
     }
 
     private GradientDrawable closeButtonBackground(int color) {
@@ -327,6 +448,51 @@ public final class MediaOverlayController {
         drawable.setStroke(dp(1), Color.argb(150, 255, 255, 255));
         drawable.setCornerRadius(dp(10));
         return drawable;
+    }
+
+    private String formatTxFrames(String tx) {
+        String clean = tx == null ? "" : tx.trim();
+        if (clean.isEmpty()) return "TX: ожидание";
+        String[] lines = clean.split("\\n");
+        StringBuilder out = new StringBuilder();
+        int start = Math.max(0, lines.length - 5);
+        int visibleIndex = 1;
+        for (int i = start; i < lines.length; i++) {
+            String line = lines[i] == null ? "" : lines[i].trim();
+            if (line.isEmpty()) continue;
+            int bytes = line.indexOf(" bytes=");
+            String label = bytes >= 0 ? line.substring(0, bytes).trim() : line;
+            String frame = bytes >= 0 ? line.substring(bytes + " bytes=".length()).trim() : "";
+            if (out.length() > 0) out.append("\n\n");
+            out.append("Кадр ").append(visibleIndex++).append(": ").append(label);
+            if (!frame.isEmpty()) {
+                out.append('\n').append(frame);
+            }
+        }
+        return out.toString();
+    }
+
+    private DisplayMetrics displayMetrics() {
+        DisplayMetrics metrics = new DisplayMetrics();
+        if (windowManager != null) {
+            try {
+                windowManager.getDefaultDisplay().getMetrics(metrics);
+                return metrics;
+            } catch (Exception ignored) {
+            }
+        }
+        return app.getResources().getDisplayMetrics();
+    }
+
+    private int overlayWidth(DisplayMetrics metrics) {
+        int width = metrics == null ? app.getResources().getDisplayMetrics().widthPixels : metrics.widthPixels;
+        return Math.max(1, width);
+    }
+
+    private float responsiveTextPx(DisplayMetrics metrics, float heightRatio, int minDp, int maxDp) {
+        int height = metrics == null ? app.getResources().getDisplayMetrics().heightPixels : metrics.heightPixels;
+        float px = height * heightRatio;
+        return Math.max(dp(minDp), Math.min(dp(maxDp), px));
     }
 
     private static Context createWindowContext(Context context) {
@@ -350,5 +516,13 @@ public final class MediaOverlayController {
 
     private int dp(int value) {
         return Math.round(value * app.getResources().getDisplayMetrics().density);
+    }
+
+    private static String formatDuration(long value) {
+        if (value < 0L) return "-";
+        long seconds = value / 1000L;
+        long minutes = seconds / 60L;
+        long rest = seconds % 60L;
+        return minutes + ":" + (rest < 10 ? "0" : "") + rest;
     }
 }

@@ -1,11 +1,11 @@
 {
   "app": {
-    "version_name": "22.34",
-    "version_code": 344,
-    "asset_name": "kia_344.apk",
-    "download_url": "https://raw.githubusercontent.com/mrglonin/kia/main/updates/kia_344.apk",
-    "sha256": "45bed007ee5758be538526906de1315b50a8b4c3c97a9692a6ba5b22cf5825f1",
-    "size": 5830303
+    "version_name": "22.36",
+    "version_code": 346,
+    "asset_name": "kia_346.apk",
+    "download_url": "https://raw.githubusercontent.com/mrglonin/kia/main/updates/kia_346.apk",
+    "sha256": "bc1b1767e959474c7bc3743fcc0384ee7a84040073f4cfc5f6ef28312b5271b5",
+    "size": 5837955
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",

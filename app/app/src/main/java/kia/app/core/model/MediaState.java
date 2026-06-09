@@ -7,6 +7,7 @@ public final class MediaState {
     public final String title;
     public final long durationMs;
     public final boolean playing;
+    public final String clusterTx;
     public final long updatedAt;
 
     public MediaState(String source, String packageName, String artist, String title,
@@ -16,12 +17,18 @@ public final class MediaState {
 
     public MediaState(String source, String packageName, String artist, String title,
                       long durationMs, boolean playing, long updatedAt) {
+        this(source, packageName, artist, title, durationMs, playing, "", updatedAt);
+    }
+
+    public MediaState(String source, String packageName, String artist, String title,
+                      long durationMs, boolean playing, String clusterTx, long updatedAt) {
         this.source = safe(source);
         this.packageName = safe(packageName);
         this.artist = safe(artist);
         this.title = safe(title);
         this.durationMs = durationMs;
         this.playing = playing;
+        this.clusterTx = safeMultiline(clusterTx);
         this.updatedAt = updatedAt;
     }
 
@@ -40,7 +47,15 @@ public final class MediaState {
                 + " | " + (playing ? "играет" : "не играет");
     }
 
+    public MediaState withClusterTxText(String value, long updatedAt) {
+        return new MediaState(source, packageName, artist, title, durationMs, playing, value, updatedAt);
+    }
+
     private static String safe(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private static String safeMultiline(String value) {
         return value == null ? "" : value.trim();
     }
 

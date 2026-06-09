@@ -86,7 +86,14 @@ public final class StateStore {
     }
 
     public static synchronized void setMedia(Context context, MediaState value) {
-        media = value == null ? MediaState.empty() : value;
+        MediaState next = value == null ? MediaState.empty() : value;
+        if (media != null
+                && media.clusterTx != null
+                && !media.clusterTx.isEmpty()
+                && (next.clusterTx == null || next.clusterTx.isEmpty())) {
+            next = next.withClusterTxText(media.clusterTx, next.updatedAt);
+        }
+        media = next;
         changed(context);
     }
 
@@ -252,6 +259,15 @@ public final class StateStore {
         navigation = current.withClusterTxText(appendNavigationTxLine(current.clusterTx, line),
                 System.currentTimeMillis());
         persistNavigation(context, navigation);
+        changed(context);
+    }
+
+    public static synchronized void appendMediaTx(Context context, String value) {
+        String line = value == null ? "" : value.trim();
+        if (line.isEmpty()) return;
+        MediaState current = media == null ? MediaState.empty() : media;
+        media = current.withClusterTxText(appendRollingLine(current.clusterTx, line, 14, 3400),
+                System.currentTimeMillis());
         changed(context);
     }
 

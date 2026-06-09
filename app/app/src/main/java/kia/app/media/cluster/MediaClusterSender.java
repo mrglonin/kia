@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 
+import kia.app.core.StateStore;
 import kia.app.core.settings.AppSettings;
 import kia.app.core.model.CallState;
 import kia.app.core.model.MediaState;
@@ -66,7 +67,8 @@ public final class MediaClusterSender {
                 if (!TextUtils.equals(sourceKey, lastSourceKey)) {
                     sendMediaOff(gateway);
                 }
-                gateway.send(AdapterCommand.quiet("radio source", radioSourceStatus(kind, artist, title)));
+                gateway.send(quiet("Источник 0x7A радио " + firstNonEmpty(artist, title, source),
+                        radioSourceStatus(kind, artist, title)));
                 rememberSource(sourceKey);
             }
             if (!sameMedia && kind != MediaSourceKind.AM_RADIO) {
@@ -78,7 +80,7 @@ public final class MediaClusterSender {
         if (sendSource) {
             sendMediaOff(gateway);
             if (!textOnlySource(kind)) {
-                gateway.send(AdapterCommand.quiet("media source status",
+                gateway.send(quiet("Источник 0x7A " + kind.defaultLabel(),
                         AdapterProtocol.mediaSourceStatus(kind, title)));
             }
             rememberSource(sourceKey);
@@ -101,7 +103,7 @@ public final class MediaClusterSender {
         if (AppSettings.uartRealMediaProfile(app)) {
             String line = firstNonEmpty(cleanDisplay(state.title), cleanDisplay(state.artist), source);
             if (!TextUtils.isEmpty(line)) {
-                gateway.send(AdapterCommand.quiet("media source text real",
+                gateway.send(quiet(textTxLabel(textCommand(kind, state), "source", line),
                         AdapterProtocol.textPacket(textCommand(kind, state), line)));
             }
             rememberSource(sourceKey);
@@ -109,10 +111,10 @@ public final class MediaClusterSender {
         }
         sendMediaOff(gateway);
         if (textOnlySource(kind)) {
-            gateway.send(AdapterCommand.quiet("media source text only",
+            gateway.send(quiet(textTxLabel(textCommand(kind, state), "source", source),
                     AdapterProtocol.textPacket(textCommand(kind, state), source)));
         } else {
-            gateway.send(AdapterCommand.quiet("media source only",
+            gateway.send(quiet("Источник 0x7A " + source,
                     radioLikeSource(kind)
                             ? radioSourceStatus(kind, "", "")
                             : AdapterProtocol.mediaSourceStatus(kind, source)));
@@ -138,7 +140,8 @@ public final class MediaClusterSender {
         AdapterGateway gateway = AdapterGateway.get(app);
         if (kind == MediaSourceKind.AM_RADIO) {
             if (!sameSource || !wasSearch) {
-                gateway.send(AdapterCommand.quiet("radio search text",
+                gateway.send(quiet(textTxLabel(AdapterProtocol.CMD_RADIO_TEXT, "search",
+                        radioSearchText(source, frequency)),
                         AdapterProtocol.textPacket(AdapterProtocol.CMD_RADIO_TEXT,
                                 radioSearchText(source, frequency))));
             }
@@ -146,10 +149,11 @@ public final class MediaClusterSender {
             return;
         }
         if (!sameSource) sendMediaOff(gateway);
-        gateway.send(AdapterCommand.quiet("radio search source",
+        gateway.send(quiet("Источник 0x7A поиск радио " + frequency,
                 radioSourceStatus(kind, frequency, "")));
         if (!sameSource || !wasSearch) {
-            gateway.send(AdapterCommand.quiet("radio search text",
+            gateway.send(quiet(textTxLabel(AdapterProtocol.CMD_RADIO_TEXT, "search",
+                    radioSearchText(source, frequency)),
                     AdapterProtocol.textPacket(AdapterProtocol.CMD_RADIO_TEXT,
                             radioSearchText(source, frequency))));
         }
@@ -168,18 +172,18 @@ public final class MediaClusterSender {
         boolean sameMedia = TextUtils.equals(mediaKey, lastMediaKey);
         boolean sameSource = TextUtils.equals(sourceKey, lastSourceKey);
         if (!sameSource) {
-            gateway.send(AdapterCommand.loud("call media off before " + AppSettings.callSourceLabel(app),
+            gateway.send(loud("Звонок: сброс media перед " + AppSettings.callSourceLabel(app),
                     AdapterProtocol.mediaOffStatus()));
             byte[] sourceStatus = callSourceStatus(callSource);
             if (sourceStatus != null) {
-                gateway.send(AdapterCommand.loud("call " + AppSettings.callSourceLabel(app) + " source",
+                gateway.send(loud("Звонок: источник " + AppSettings.callSourceLabel(app),
                         sourceStatus));
             }
             rememberSource(sourceKey);
         }
         if (!sameMedia) {
             lastMediaKey = mediaKey;
-            gateway.send(AdapterCommand.loud("call text",
+            gateway.send(loud(textTxLabel(callTextCommand(callSource), "call", line),
                     AdapterProtocol.textPacket(callTextCommand(callSource), line)));
         }
     }
@@ -188,7 +192,7 @@ public final class MediaClusterSender {
         cancelPendingTrackText();
         lastMediaKey = "";
         lastSourceKey = "";
-        AdapterGateway.get(app).send(AdapterCommand.loud("call release media off",
+        AdapterGateway.get(app).send(loud("Звонок: завершение, media off",
                 AdapterProtocol.mediaOffStatus()));
     }
 
@@ -197,13 +201,13 @@ public final class MediaClusterSender {
         lastMediaKey = mediaKey;
         cancelPendingTrackText();
         if (TextUtils.isEmpty(firstText)) return;
-        gateway.send(AdapterCommand.quiet("media text first",
+        gateway.send(quiet(textTxLabel(command, "first", firstText),
                 AdapterProtocol.textPacket(command, firstText)));
         if (TextUtils.isEmpty(trackText) || TextUtils.equals(firstText, trackText)) return;
         pendingTrackText = () -> {
             synchronized (MediaClusterSender.this) {
                 if (!TextUtils.equals(mediaKey, lastMediaKey)) return;
-                AdapterGateway.get(app).send(AdapterCommand.quiet("media text track",
+                AdapterGateway.get(app).send(quiet(textTxLabel(command, "track", trackText),
                         AdapterProtocol.textPacket(command, trackText)));
             }
         };
@@ -220,8 +224,54 @@ public final class MediaClusterSender {
         lastSourceKey = sourceKey;
     }
 
-    private static void sendMediaOff(AdapterGateway gateway) {
-        gateway.send(AdapterCommand.quiet("media off before source", AdapterProtocol.mediaOffStatus()));
+    private void sendMediaOff(AdapterGateway gateway) {
+        gateway.send(quiet("Сброс media source 0x7A", AdapterProtocol.mediaOffStatus()));
+    }
+
+    private AdapterCommand quiet(String label, byte[] frame) {
+        recordTx(label, frame);
+        return AdapterCommand.quiet(label, frame);
+    }
+
+    private AdapterCommand loud(String label, byte[] frame) {
+        recordTx(label, frame);
+        return AdapterCommand.loud(label, frame);
+    }
+
+    private void recordTx(String label, byte[] frame) {
+        StateStore.appendMediaTx(app, cleanDisplay(label) + " bytes=" + AdapterProtocol.hex(frame));
+    }
+
+    private static String textTxLabel(int command, String stage, String text) {
+        return "Текст " + commandLabel(command) + " " + stage + ": " + quote(shortText(text));
+    }
+
+    private static String commandLabel(int command) {
+        switch (command) {
+            case AdapterProtocol.CMD_RADIO_TEXT:
+                return "0x20 radio";
+            case AdapterProtocol.CMD_MEDIA_TEXT:
+                return "0x21 BT/media";
+            case AdapterProtocol.CMD_USB_TEXT:
+                return "0x22 USB";
+            case AdapterProtocol.CMD_ANDROID_AUTO_TEXT:
+                return "0x23 Android Auto";
+            case AdapterProtocol.CMD_MY_MUSIC_TEXT:
+                return "0x24 My Music";
+            case AdapterProtocol.CMD_CARPLAY_TEXT:
+                return "0x25 CarPlay";
+            default:
+                return "0x" + Integer.toHexString(command).toUpperCase();
+        }
+    }
+
+    private static String quote(String value) {
+        return "\"" + cleanDisplay(value) + "\"";
+    }
+
+    private static String shortText(String value) {
+        String clean = cleanDisplay(value);
+        return clean.length() <= 42 ? clean : clean.substring(0, 39) + "...";
     }
 
     private static int textCommand(MediaSourceKind kind, MediaState state) {

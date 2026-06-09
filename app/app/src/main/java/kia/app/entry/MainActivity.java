@@ -199,6 +199,11 @@ public final class MainActivity extends Activity {
     private FirmwareUpdateController firmwareUpdater;
     private long lastAmpRequestAt;
     private boolean specialPermissionWaiting;
+    private boolean launchUpdateCheckStarted;
+    private boolean appUpdatePromptShown;
+    private boolean navigatorUpdatePromptShown;
+    private boolean activityVisible;
+    private AlertDialog updatePromptDialog;
     private boolean askedWriteSettings;
     private boolean askedOverlay;
     private boolean askedBatteryOptimization;
@@ -280,7 +285,57 @@ public final class MainActivity extends Activity {
         AppService.start(this);
         requestRuntimePermissions();
         handler.postDelayed(this::maybeShowMediaProfileWizard, 900L);
+        handler.postDelayed(this::checkUpdatesOnLaunch, 1600L);
         refresh();
+    }
+
+    private void checkUpdatesOnLaunch() {
+        if (isFinishing() || isDestroyed() || launchUpdateCheckStarted) return;
+        launchUpdateCheckStarted = true;
+        AppLog.line(this, "Startup update check: Kia + Yandex");
+        appUpdater.checkAsync();
+        navigatorUpdater.checkAsync();
+        handler.postDelayed(this::maybeShowLaunchUpdatePrompt, 1300L);
+    }
+
+    private void maybeShowLaunchUpdatePrompt() {
+        if (!launchUpdateCheckStarted || !activityVisible || isFinishing() || isDestroyed()) return;
+        if (updatePromptDialog != null && updatePromptDialog.isShowing()) return;
+        UpdateState s = StateStore.updates();
+        if (!appUpdatePromptShown && !s.appChecking && !s.appDownloading && s.appAvailable) {
+            showLaunchUpdatePrompt(true, "Обновление Kia",
+                    displayStatus(s.appStatus) + "\n\nНажмите Обновить, чтобы скачать APK и открыть установщик.");
+            return;
+        }
+        if (!navigatorUpdatePromptShown
+                && !s.navigatorChecking
+                && !s.navigatorDownloading
+                && !s.navigatorInstalling
+                && s.navigatorAvailable) {
+            showLaunchUpdatePrompt(false, "Обновление Yandex Navigator",
+                    displayStatus(s.navigatorStatus) + "\n\nНажмите Обновить, чтобы скачать mod APK и открыть установщик.");
+        }
+    }
+
+    private void showLaunchUpdatePrompt(boolean appUpdate, String title, String message) {
+        if (appUpdate) appUpdatePromptShown = true;
+        else navigatorUpdatePromptShown = true;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("Обновить", (d, which) -> {
+                    if (appUpdate) appUpdater.downloadAndInstall(this);
+                    else navigatorUpdater.downloadAndInstall(this);
+                    refresh();
+                })
+                .setNegativeButton("Позже", null)
+                .create();
+        dialog.setOnDismissListener(d -> {
+            if (updatePromptDialog == dialog) updatePromptDialog = null;
+            handler.postDelayed(this::maybeShowLaunchUpdatePrompt, 500L);
+        });
+        updatePromptDialog = dialog;
+        dialog.show();
     }
 
     private void maybeShowMediaProfileWizard() {
@@ -435,6 +490,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        activityVisible = true;
         IntentFilter filter = new IntentFilter(AppIds.ACTION_STATE_CHANGED);
         filter.addAction(AppIds.ACTION_RCTA_DEMO);
         if (Build.VERSION.SDK_INT >= 33) {
@@ -457,6 +513,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        activityVisible = false;
         handler.removeCallbacks(refreshTick);
         handler.removeCallbacks(pendingStateRefresh);
         cancelRctaDemoSequence();
@@ -3037,6 +3094,7 @@ public final class MainActivity extends Activity {
         if (updatesStatus != null) {
             updatesStatus.setText(updatesText());
         }
+        maybeShowLaunchUpdatePrompt();
         if (firmwareStatus != null) {
             firmwareStatus.setText(firmwareStatusText());
         }

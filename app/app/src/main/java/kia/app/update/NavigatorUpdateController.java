@@ -73,12 +73,13 @@ public final class NavigatorUpdateController {
                 int currentCode = currentVersionCode(info.packageName);
                 boolean manifestReady = !info.files.isEmpty();
                 boolean installed = currentCode > 0;
-                boolean canInstall = manifestReady && (currentCode <= 0 || info.versionCode >= currentCode);
+                boolean canInstall = manifestReady && (!installed || info.versionCode > currentCode);
                 boolean downloaded = manifestReady && allDownloaded(info);
                 String status;
                 if (!manifestReady) status = "Navigator update: APK не найден";
                 else if (!installed) status = "Navigator update: можно установить " + info.version;
                 else if (canInstall) status = "Navigator update: доступен " + info.version;
+                else if (info.versionCode == currentCode) status = "Navigator update: актуально " + info.version;
                 else status = "Navigator update: установлена новее";
                 setNavigator(status, info.version, info.packageName, info.displayAsset(), 0,
                         info.totalSize(), canInstall, false, false, downloaded, false);
