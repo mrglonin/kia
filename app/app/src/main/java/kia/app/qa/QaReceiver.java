@@ -3,6 +3,8 @@ package kia.app.qa;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 
 import kia.app.core.AppIds;
 import kia.app.core.AppLog;
@@ -108,6 +110,24 @@ public final class QaReceiver extends BroadcastReceiver {
             feature.handle(qaNavLaneIntent(0));
             AppLog.line(context, "QA nav micro post-pass sample sent: hold="
                     + AppSettings.navMicroHoldSeconds(context));
+        } else if ("nav_micro_post_pass_refresh_sample".equals(scenario)) {
+            int seconds = intent.getIntExtra("seconds", AppSettings.navMicroHoldSeconds(context));
+            AppSettings.setNavMicroManeuvers(context, true);
+            AppSettings.setNavMicroHoldSeconds(context, seconds);
+            Context appContext = context.getApplicationContext();
+            NavigationFeature feature = NavigationFeature.get(appContext);
+            feature.setActive(false, "qa_nav_micro_post_pass_refresh_reset");
+            feature.setActive(true, "qa_nav_micro_post_pass_refresh");
+            feature.handle(qaNavMainIntent());
+            feature.handle(qaNavLaneIntent(20));
+            feature.handle(qaNavLaneIntent(0));
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                NavigationFeature.get(appContext).handle(qaNavLaneRefreshWithoutDistanceIntent());
+                AppLog.line(appContext, "QA nav micro post-pass refresh tick sent: hold="
+                        + AppSettings.navMicroHoldSeconds(appContext));
+            }, 1000L);
+            AppLog.line(appContext, "QA nav micro post-pass refresh sample sent: hold="
+                    + AppSettings.navMicroHoldSeconds(appContext));
         } else if ("nav_route_rerouting_sample".equals(scenario)) {
             NavigationFeature feature = NavigationFeature.get(context);
             feature.setActive(false, "qa_nav_route_rerouting_reset");
@@ -233,6 +253,21 @@ public final class QaReceiver extends BroadcastReceiver {
         intent.putExtra("lane_distance_meters", laneMeters);
         intent.putExtra("micro_distance", laneMeters + " m");
         intent.putExtra("micro_distance_meters", laneMeters);
+        intent.putExtra("route_road_options", "straight,left");
+        intent.putExtra("gray_road_options", "straight,left");
+        intent.putExtra("allowed_directions", "straight,left");
+        intent.putExtra("lane_topology", "straight,left highlight=STRAIGHT_AHEAD");
+        return intent;
+    }
+
+    private static Intent qaNavLaneRefreshWithoutDistanceIntent() {
+        Intent intent = qaNavMainIntent();
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_maneuver", "STRAIGHT_AHEAD");
+        intent.putExtra("highlighted_direction", "STRAIGHT_AHEAD");
+        intent.putExtra("highlighted_directions", "STRAIGHT_AHEAD");
+        intent.putExtra("lane_highlight", "STRAIGHT_AHEAD");
+        intent.putExtra("recommended_lanes", "STRAIGHT_AHEAD");
         intent.putExtra("route_road_options", "straight,left");
         intent.putExtra("gray_road_options", "straight,left");
         intent.putExtra("allowed_directions", "straight,left");
