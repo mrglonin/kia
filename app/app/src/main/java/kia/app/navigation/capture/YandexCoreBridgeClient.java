@@ -625,7 +625,7 @@ public final class YandexCoreBridgeClient {
         putString(intent, "upcoming_lane_signs", firstString(snapshot, "upcoming_lane_signs"));
         putString(intent, "upcoming_direction_signs", firstString(snapshot, "upcoming_direction_signs"));
         putString(intent, "upcoming_road_events", firstString(snapshot, "upcoming_road_events"));
-        putLaneDirectionFlags(intent, first(allowedDirections, rawLaneItems, laneItems));
+        putLaneDirectionFlags(intent, first(rawLaneItems, laneItems, allowedDirections));
         if (bool(snapshot, "lane_guidance", false)
                 || !TextUtils.isEmpty(laneDistance)
                 || !TextUtils.isEmpty(first(rawLaneItems, laneItems, allowedDirections, highlight))) {

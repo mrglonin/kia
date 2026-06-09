@@ -142,6 +142,12 @@ public final class QaReceiver extends BroadcastReceiver {
             feature.handle(qaNavLeftRerouteIntent());
             feature.handle(qaNavLeftRerouteLaneIntent());
             AppLog.line(context, "QA nav route rerouting left sample sent");
+        } else if ("nav_gray_uturn_right_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_gray_uturn_right_reset");
+            feature.setActive(true, "qa_nav_gray_uturn_right");
+            feature.handle(qaNavGrayUturnRightIntent());
+            AppLog.line(context, "QA nav gray uturn right sample sent");
         } else if ("tpms_sample".equals(scenario)) {
             TpmsController.get(context).handleAdapterFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS,
                     new byte[]{(byte) 148, (byte) 149, (byte) 150, (byte) 147,
@@ -393,6 +399,50 @@ public final class QaReceiver extends BroadcastReceiver {
         intent.putExtra("arrival_time", "11:44");
         intent.putExtra("current_street", "улица Махамбета Утемисова");
         intent.putExtra("street_after_maneuver", "улица Сырым Датова");
+        return intent;
+    }
+
+    private static Intent qaNavGrayUturnRightIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_MANEUVER);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_gray_uturn_right");
+        intent.putExtra("maneuver", "RIGHT");
+        intent.putExtra("direction", "RIGHT");
+        intent.putExtra("route_action", "RIGHT");
+        intent.putExtra("maneuver_text", "направо");
+        intent.putExtra("voice_hint", "направо");
+        intent.putExtra("distance", "47 м");
+        intent.putExtra("current_maneuver_distance", "47 м");
+        intent.putExtra("current_maneuver_distance_meters", 47);
+        intent.putExtra("distance_to_maneuver", "47 м");
+        intent.putExtra("distance_to_maneuver_meters", 47);
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_distance", "47 м");
+        intent.putExtra("lane_distance_meters", 47);
+        intent.putExtra("micro_distance", "47 м");
+        intent.putExtra("micro_distance_meters", 47);
+        intent.putExtra("highlighted_direction", "RIGHT90");
+        intent.putExtra("highlighted_directions", "RIGHT90");
+        intent.putExtra("lane_highlight", "RIGHT90");
+        intent.putExtra("recommended_lanes", "RIGHT90");
+        intent.putExtra("route_road_options", "straight,left,right");
+        intent.putExtra("gray_road_options", "straight,left,right");
+        intent.putExtra("allowed_directions", "straight,left,right");
+        intent.putExtra("raw_lane_items",
+                "0:PLAIN_LANE:LEFT180,STRAIGHT_AHEAD | 1:PLAIN_LANE:STRAIGHT_AHEAD,RIGHT90*RIGHT90");
+        intent.putExtra("ignored_raw_lane_items",
+                "0:PLAIN_LANE:LEFT180,STRAIGHT_AHEAD | 1:PLAIN_LANE:STRAIGHT_AHEAD,RIGHT90*RIGHT90");
+        intent.putExtra("lane_topology_json",
+                "{\"lanes\":[{\"index\":0,\"kind\":\"PLAIN_LANE\",\"directions\":[\"LEFT180\",\"STRAIGHT_AHEAD\"],\"highlight\":\"\"},{\"index\":1,\"kind\":\"PLAIN_LANE\",\"directions\":[\"STRAIGHT_AHEAD\",\"RIGHT90\"],\"highlight\":\"RIGHT90\"}]}");
+        intent.putExtra("lane_topology",
+                "straight,left,right,uturn_left highlight=RIGHT90 lanes=0:PLAIN_LANE:LEFT180,STRAIGHT_AHEAD | 1:PLAIN_LANE:STRAIGHT_AHEAD,RIGHT90*RIGHT90");
+        intent.putExtra("remaining_distance", "3.0 км");
+        intent.putExtra("route_time", "7 мин");
+        intent.putExtra("arrival_time", "12:10");
+        intent.putExtra("current_street", "QA current street");
+        intent.putExtra("street_after_maneuver", "QA next street");
         return intent;
     }
 

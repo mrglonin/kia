@@ -6010,13 +6010,16 @@ public final class NavigationFeature {
     }
 
     private static String visualLaneItemsText(Intent intent) {
-        return first(text(intent, "ignored_raw_lane_items"),
+        return first(text(intent, "raw_lane_items"),
+                text(intent, "ignored_raw_lane_items"),
+                text(intent, "lane_topology_json"),
+                text(intent, "direction_sign_items"),
+                text(intent, "raw_direction_sign_items"),
+                text(intent, "lane_items"),
                 text(intent, "ignored_lane_items"),
-                text(intent, "ignored_allowed_directions"),
                 text(intent, "ignored_recommended_lanes"),
                 text(intent, "ignored_lane_type"),
-                text(intent, "raw_lane_items"),
-                text(intent, "lane_items"));
+                text(intent, "ignored_allowed_directions"));
     }
 
     private static String providerLaneHighlightText(Intent intent) {
@@ -6053,14 +6056,12 @@ public final class NavigationFeature {
 
     private static boolean visualLaneHasLeft(String text) {
         String value = clean(text).toLowerCase(Locale.US);
-        return containsLaneToken(value, "left")
-                || containsAny(value, "left180", "turn_back_left", "uturn_left", "u_turn_left");
+        return containsLaneToken(value, "left");
     }
 
     private static boolean visualLaneHasRight(String text) {
         String value = clean(text).toLowerCase(Locale.US);
-        return containsLaneToken(value, "right")
-                || containsAny(value, "right180", "turn_back_right", "uturn_right", "u_turn_right");
+        return containsLaneToken(value, "right");
     }
 
     private static String grayRoadFromBasicDirections(boolean straight, boolean left, boolean right) {
@@ -6506,6 +6507,8 @@ public final class NavigationFeature {
     }
 
     private static String providerTrustedGrayRoadTopologyText(Intent intent) {
+        String rawLaneTopology = providerRawLaneTopologyText(intent);
+        if (!TextUtils.isEmpty(rawLaneTopology)) return rawLaneTopology;
         String rawRoadScheme = first(text(intent, "road_scheme_raw"),
                 text(intent, "raw_road_scheme"),
                 text(intent, "road_scheme_items"),
@@ -6521,6 +6524,20 @@ public final class NavigationFeature {
             return explicitGrayRoadTopologyText(intent);
         }
         return explicitGrayRoadTopologyText(intent);
+    }
+
+    private static String providerRawLaneTopologyText(Intent intent) {
+        return first(text(intent, "raw_lane_items"),
+                text(intent, "ignored_raw_lane_items"),
+                text(intent, "lane_topology_json"),
+                text(intent, "direction_sign_items"),
+                text(intent, "raw_direction_sign_items"),
+                text(intent, "road_scheme_raw"),
+                text(intent, "raw_road_scheme"),
+                text(intent, "road_scheme_items"),
+                text(intent, "raw_lane_direction"),
+                text(intent, "direction_sign"),
+                text(intent, "road_sign"));
     }
 
     private static String explicitGrayRoadTopologyText(Intent intent) {
