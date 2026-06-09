@@ -42,6 +42,7 @@ public final class NavigationFeature {
     private static final Pattern NUMBER = Pattern.compile("[-+]?\\d+(?:[\\.,]\\d+)?");
     private static final long ROUTE_WAIT_MAX_MS = 5000L;
     private static final long ROUTE_WAIT_MIN_MS = 3000L;
+    private static final long ROUTE_REROUTING_HOLD_MS = 4000L;
     private static final long ROUTE_STOP_CONFIRM_MS = 12000L;
     private static final long FINISH_HOLD_MS = 5000L;
     private static final long FINISH_STALE_AUTO_MS = 12000L;
@@ -98,6 +99,7 @@ public final class NavigationFeature {
     private int maneuverTextGeneration;
     private int pendingInactiveGeneration;
     private int routeLoadingFallbackGeneration;
+    private int routeReroutingGeneration;
     private int microRestoreGeneration;
     private int yandexWatchdogGeneration;
     private int lastSentSpeedLimit = -1;
@@ -154,6 +156,7 @@ public final class NavigationFeature {
     private long lastRouteGuidanceAt;
     private long lastRouteMetricsAt;
     private long routeLoadingMinUntil;
+    private long routeReroutingUntil;
     private long lastBackgroundResendAt;
     private long laneHintUntil;
     private long eventHintUntil;
@@ -356,6 +359,9 @@ public final class NavigationFeature {
             touchYandexWatchdog(source);
         }
         rememberNavigationRawDebug(intent, System.currentTimeMillis());
+        if (routeReroutingIntent(intent)) {
+            startRouteReroutingHold(source);
+        }
         if (ACTION_MANEUVER.equals(action) || KIA_ACTION_MANEUVER.equals(action)) {
             handleManeuver(intent);
         } else if (ACTION_ETA.equals(action) || KIA_ACTION_ETA.equals(action)) {
@@ -716,9 +722,11 @@ public final class NavigationFeature {
             }
             cancelFinishHold();
             routeLoadingFallbackGeneration++;
+            routeReroutingGeneration++;
             microRestoreGeneration++;
             waitingForRoute = false;
             routeStartedAt = 0L;
+            routeReroutingUntil = 0L;
             activeRouteTotalDistance = "";
             activeRouteId = "";
             routeLoadingMinUntil = 0L;
@@ -742,9 +750,11 @@ public final class NavigationFeature {
             cancelFinishHold();
             finishCompassSuppressUntil = 0L;
             routeLoadingFallbackGeneration++;
+            routeReroutingGeneration++;
             microRestoreGeneration++;
             waitingForRoute = true;
             routeStartedAt = now;
+            routeReroutingUntil = 0L;
             activeRouteTotalDistance = "";
             activeRouteId = "";
             routeLoadingMinUntil = now + ROUTE_WAIT_MIN_MS;
@@ -839,7 +849,8 @@ public final class NavigationFeature {
                 text(intent, "current_maneuver"),
                 text(intent, "maneuver_type"));
         String rawActiveManeuverDistance = explicitManeuverDistanceFromIntent(intent);
-        String activeManeuverDistance = mainManeuverDistanceFromIntent(intent, source);
+        boolean routeIdChanged = incomingRouteIdChangesActiveRoute(intent);
+        String activeManeuverDistance = mainManeuverDistanceFromIntent(intent, source, routeIdChanged);
         boolean clearCoreBridgeManeuver = YandexCoreBridgeContract.SOURCE.equals(clean(source))
                 && TextUtils.isEmpty(activeManeuver)
                 && TextUtils.isEmpty(rawActiveManeuverDistance)
@@ -863,7 +874,7 @@ public final class NavigationFeature {
 
         boolean finishPointChanged = rememberFinishPoint(intent, source);
         lastRouteMetricsAt = now;
-        syncActiveRouteId(intent, source);
+        routeIdChanged |= syncActiveRouteId(intent, source);
         String acceptedCurrent = etaStreetCandidate(currentStreet, state.currentStreet);
         String acceptedNext = streetCandidate(nextStreet, state.nextStreet,
                 state.currentStreet, "");
@@ -1085,6 +1096,8 @@ public final class NavigationFeature {
         cancelFinishHold();
         waitingForRoute = false;
         routeStartedAt = 0L;
+        routeReroutingGeneration++;
+        routeReroutingUntil = 0L;
         lastDirectManeuverAt = 0L;
         clearLaneHintHold();
         clearEventHintHold();
@@ -1189,6 +1202,7 @@ public final class NavigationFeature {
             return;
         }
         boolean finishPointChanged = rememberFinishPoint(intent, source);
+        boolean routeIdChanged = syncActiveRouteId(intent, source);
         String routeActionManeuver = routeActionManeuver(intent);
         String contradictedRouteActionManeuver = "";
         String laneHighlightManeuver = laneHighlightedManeuver(intent, sourceLower);
@@ -1499,6 +1513,14 @@ public final class NavigationFeature {
             String incomingMainDistance = nonZeroDistance(maneuverDistance);
             boolean incomingMainDistanceLooksMicro = laneMainDistanceLooksLikeMicro(
                     incomingMainDistance, explicitMicroDistance);
+            if (routeIdChanged && incomingMainDistanceLooksMicro
+                    && hasMainManeuverDistanceMeters(intent)) {
+                AppLog.line(app, "Navigation accepted new route main distance despite lane match: main="
+                        + clean(incomingMainDistance)
+                        + " lane=" + clean(explicitMicroDistance)
+                        + " source=" + clean(source));
+                incomingMainDistanceLooksMicro = false;
+            }
             if (incomingMainDistanceLooksMicro) {
                 AppLog.line(app, "Navigation kept main distance over lane micro distance: main="
                         + clean(currentMainTxDistance())
@@ -2320,9 +2342,10 @@ public final class NavigationFeature {
         String finishStreet = finishTextFromIntent(intent);
         String currentStreet = etaCurrentStreetFromIntent(intent);
         String source = first(text(intent, "source"), ACTION_ETA);
-        String maneuverDistance = mainManeuverDistanceFromIntent(intent, source);
+        boolean routeIdChanged = incomingRouteIdChangesActiveRoute(intent);
+        String maneuverDistance = mainManeuverDistanceFromIntent(intent, source, routeIdChanged);
         boolean finishPointChanged = rememberFinishPoint(intent, source);
-        syncActiveRouteId(intent, source);
+        routeIdChanged |= syncActiveRouteId(intent, source);
         mergeEta(routeDistance, routeTime, arrival, finishStreet, currentStreet, source,
                 maneuverDistance, finishPointChanged, packetClaimsActiveRoute(intent));
         if (!TextUtils.isEmpty(routeTotalDistance)) {
@@ -2350,14 +2373,32 @@ public final class NavigationFeature {
         state = state.withClusterTxText(withRouteTotalLine(state.clusterTx, total), now);
     }
 
-    private void syncActiveRouteId(Intent intent, String source) {
-        String routeId = first(text(intent, "route_id"), text(intent, "routeId"),
-                text(intent, "route_uuid"), text(intent, "routeUuid"));
-        if (TextUtils.isEmpty(routeId) || routeId.equals(activeRouteId)) return;
+    private boolean incomingRouteIdChangesActiveRoute(Intent intent) {
+        String routeId = routeIdFromIntent(intent);
+        return !TextUtils.isEmpty(routeId)
+                && !TextUtils.isEmpty(activeRouteId)
+                && !routeId.equals(activeRouteId);
+    }
+
+    private boolean syncActiveRouteId(Intent intent, String source) {
+        String routeId = routeIdFromIntent(intent);
+        if (TextUtils.isEmpty(routeId) || routeId.equals(activeRouteId)) return false;
+        boolean changed = !TextUtils.isEmpty(activeRouteId);
         activeRouteId = routeId;
         activeRouteTotalDistance = "";
+        if (changed) {
+            clearRouteChangeVisualHold("route id changed " + clean(source));
+            startRouteReroutingHold(clean(source) + "_route_id_changed");
+        }
         AppLog.line(app, "Navigation route id changed: " + routeId
                 + " source=" + clean(source));
+        return changed;
+    }
+
+    private static String routeIdFromIntent(Intent intent) {
+        String routeId = first(text(intent, "route_id"), text(intent, "routeId"),
+                text(intent, "route_uuid"), text(intent, "routeUuid"));
+        return clean(routeId);
     }
 
     private static String normalizeRouteTotalDistance(String routeTotalDistance, String remainingDistance) {
@@ -2386,12 +2427,22 @@ public final class NavigationFeature {
     }
 
     private String mainManeuverDistanceFromIntent(Intent intent, String source) {
+        return mainManeuverDistanceFromIntent(intent, source, false);
+    }
+
+    private String mainManeuverDistanceFromIntent(Intent intent, String source, boolean routeIdChanged) {
         String distance = explicitManeuverDistanceFromIntent(intent);
         if (TextUtils.isEmpty(nonZeroDistance(distance))) return distance;
         if (!laneGuidanceDistancePacket(intent, source)) return distance;
         String laneDistance = explicitLaneDistanceFromIntent(intent);
         if (!TextUtils.isEmpty(nonZeroDistance(laneDistance))
                 && sameMicroAndMainDistance(distanceMeters(distance), distanceMeters(laneDistance))) {
+            if (routeIdChanged && hasMainManeuverDistanceMeters(intent)) {
+                AppLog.line(app, "Navigation accepted new route main distance matching lane: distance="
+                        + clean(distance) + " lane=" + clean(laneDistance)
+                        + " source=" + clean(source));
+                return distance;
+            }
             AppLog.line(app, "Navigation ignored lane distance as main maneuver: distance="
                     + clean(distance) + " lane=" + clean(laneDistance)
                     + " source=" + clean(source));
@@ -3954,6 +4005,21 @@ public final class NavigationFeature {
         activeClusterVisual = "";
     }
 
+    private void clearRouteChangeVisualHold(String reason) {
+        clearLaneHintHold();
+        clearEventHintHold();
+        clearRoundaboutExitHold();
+        resetManeuverProgress();
+        resetNavigationSendCache();
+        state = new NavigationState(state.active, false, state.speedExceeded,
+                "", "", "",
+                state.routeDistance, state.routeTime, state.arrivalTime,
+                state.currentStreet, state.nextStreet, state.finishStreet,
+                state.speedLimit, state.currentSpeed, clean(reason), System.currentTimeMillis());
+        publishNavigationState();
+        AppLog.line(app, "Navigation route change visual cleared: " + clean(reason));
+    }
+
     private String currentClusterYellowManeuver() {
         String visual = first(activeClusterVisual, state.clusterVisual);
         String maneuver = clusterYellowManeuverFromFrame(visual);
@@ -4347,6 +4413,10 @@ public final class NavigationFeature {
         long now = System.currentTimeMillis();
         sendLaneTxPostPassIfActive(now, false);
         int mode = AppSettings.navTextMode(app);
+        if (routeReroutingActive(now)) {
+            sendRouteReroutingVisual();
+            return;
+        }
         if (finishDirectionShouldOverride()) {
             if (!sendDirectionToFinishIfNeeded(false)) sendFinishDirectionPlaceholder(false);
             return;
@@ -4532,6 +4602,52 @@ public final class NavigationFeature {
         state = state.withClusterVisualText(activeClusterVisual, System.currentTimeMillis());
         publishNavigationState();
         sendNavigationText("Загрузка маршрута");
+    }
+
+    private void startRouteReroutingHold(String source) {
+        if (!state.active || state.finishReached) return;
+        long now = System.currentTimeMillis();
+        routeReroutingUntil = Math.max(routeReroutingUntil, now + ROUTE_REROUTING_HOLD_MS);
+        int generation = ++routeReroutingGeneration;
+        resetNavigationTextCache();
+        AppLog.line(app, "Navigation route rerouting hold: " + clean(source));
+        sendRouteReroutingVisual();
+        handler.postDelayed(() -> {
+            synchronized (NavigationFeature.this) {
+                if (generation != routeReroutingGeneration) return;
+                if (System.currentTimeMillis() < routeReroutingUntil) return;
+                routeReroutingUntil = 0L;
+                if (!routeReroutingVisualActive()) return;
+                clearClusterVisualHold();
+                resetNavigationTextCache();
+                sendConfiguredText();
+                AppLog.line(app, "Navigation route rerouting hold finished");
+            }
+        }, ROUTE_REROUTING_HOLD_MS);
+    }
+
+    private boolean routeReroutingActive(long now) {
+        if (!state.active || state.finishReached || routeReroutingUntil <= 0L) {
+            routeReroutingUntil = 0L;
+            return false;
+        }
+        if (now > routeReroutingUntil) {
+            routeReroutingUntil = 0L;
+            return false;
+        }
+        return true;
+    }
+
+    private void sendRouteReroutingVisual() {
+        activeClusterVisual = "route_loading / rerouting_text";
+        state = state.withClusterVisualText(activeClusterVisual, System.currentTimeMillis());
+        publishNavigationState();
+        sendNavigationText("Перестроение маршрута");
+    }
+
+    private boolean routeReroutingVisualActive() {
+        String visual = clean(first(activeClusterVisual, state.clusterVisual)).toLowerCase(Locale.US);
+        return visual.contains("rerouting_text");
     }
 
     private void scheduleRouteLoadingFallback() {
@@ -4916,6 +5032,8 @@ public final class NavigationFeature {
         yandexFinishSuppressed = true;
         waitingForRoute = false;
         routeStartedAt = 0L;
+        routeReroutingGeneration++;
+        routeReroutingUntil = 0L;
         clearManeuverTextHint();
         resetFinishDirectionAnimation();
         int generation = ++finishGeneration;
@@ -4999,6 +5117,18 @@ public final class NavigationFeature {
         }
         return (ACTION_MANEUVER.equals(action) || KIA_ACTION_MANEUVER.equals(action))
                 && routeMetricsFresh(System.currentTimeMillis());
+    }
+
+    private static boolean routeReroutingIntent(Intent intent) {
+        String state = first(text(intent, "bridge_state"), text(intent, "state"),
+                text(intent, "route_state"), text(intent, "status"));
+        if (YandexCoreBridgeContract.STATE_REROUTING.equals(clean(state).toLowerCase(Locale.US))) {
+            return true;
+        }
+        String marker = first(text(intent, "last_callback"), text(intent, "callback"),
+                text(intent, "event_type"), text(intent, "bridge_reason"), text(intent, "reason"));
+        String lower = clean(marker).toLowerCase(Locale.US);
+        return lower.contains("rerout") || lower.contains("перестро");
     }
 
     private boolean hasConfirmedRouteMetrics() {

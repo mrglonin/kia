@@ -108,6 +108,13 @@ public final class QaReceiver extends BroadcastReceiver {
             feature.handle(qaNavLaneIntent(0));
             AppLog.line(context, "QA nav micro post-pass sample sent: hold="
                     + AppSettings.navMicroHoldSeconds(context));
+        } else if ("nav_route_rerouting_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_route_rerouting_reset");
+            feature.setActive(true, "qa_nav_route_rerouting");
+            feature.handle(qaNavOldRouteIntent());
+            feature.handle(qaNavRerouteIntent());
+            AppLog.line(context, "QA nav route rerouting sample sent");
         } else if ("tpms_sample".equals(scenario)) {
             TpmsController.get(context).handleAdapterFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS,
                     new byte[]{(byte) 148, (byte) 149, (byte) 150, (byte) 147,
@@ -223,6 +230,73 @@ public final class QaReceiver extends BroadcastReceiver {
         intent.putExtra("gray_road_options", "straight,left");
         intent.putExtra("allowed_directions", "straight,left");
         intent.putExtra("lane_topology", "straight,left highlight=STRAIGHT_AHEAD");
+        return intent;
+    }
+
+    private static Intent qaNavOldRouteIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_NAVI_ON);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("navi_on", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_route_old");
+        intent.putExtra("maneuver", "RIGHT");
+        intent.putExtra("direction", "RIGHT");
+        intent.putExtra("maneuver_text", "направо");
+        intent.putExtra("current_maneuver_distance", "530 м");
+        intent.putExtra("current_maneuver_distance_meters", 530);
+        intent.putExtra("distance_to_maneuver", "530 м");
+        intent.putExtra("distance_to_maneuver_meters", 530);
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_distance", "523 м");
+        intent.putExtra("lane_distance_meters", 523);
+        intent.putExtra("micro_distance", "523 м");
+        intent.putExtra("micro_distance_meters", 523);
+        intent.putExtra("highlighted_direction", "RIGHT90");
+        intent.putExtra("highlighted_directions", "RIGHT90");
+        intent.putExtra("route_road_options", "left,right");
+        intent.putExtra("gray_road_options", "left,right");
+        intent.putExtra("lane_topology", "left,right highlight=RIGHT90");
+        intent.putExtra("remaining_distance", "3.2 км");
+        intent.putExtra("remaining_distance_meters", 3154);
+        intent.putExtra("route_time", "9 мин");
+        intent.putExtra("arrival_time", "11:40");
+        intent.putExtra("route_total_len", "6.4 км");
+        intent.putExtra("current_street", "улица Махамбета Утемисова");
+        return intent;
+    }
+
+    private static Intent qaNavRerouteIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_NAVI_ON);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("navi_on", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_route_new");
+        intent.putExtra("maneuver", "RIGHT");
+        intent.putExtra("direction", "RIGHT");
+        intent.putExtra("maneuver_text", "направо");
+        intent.putExtra("current_maneuver_distance", "188 м");
+        intent.putExtra("current_maneuver_distance_meters", 188);
+        intent.putExtra("distance_to_maneuver", "188 м");
+        intent.putExtra("distance_to_maneuver_meters", 188);
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_distance", "189 м");
+        intent.putExtra("lane_distance_meters", 189);
+        intent.putExtra("micro_distance", "189 м");
+        intent.putExtra("micro_distance_meters", 189);
+        intent.putExtra("highlighted_direction", "RIGHT90");
+        intent.putExtra("highlighted_directions", "RIGHT90");
+        intent.putExtra("route_road_options", "straight,left,right");
+        intent.putExtra("gray_road_options", "straight,left,right");
+        intent.putExtra("lane_topology", "straight,left,right highlight=RIGHT90");
+        intent.putExtra("remaining_distance", "3.3 км");
+        intent.putExtra("remaining_distance_meters", 3314);
+        intent.putExtra("route_time", "9 мин");
+        intent.putExtra("arrival_time", "11:40");
+        intent.putExtra("route_total_len", "3.3 км");
+        intent.putExtra("current_street", "улица Махамбета Утемисова");
+        intent.putExtra("street_after_maneuver", "улица Гизата Алипова");
         return intent;
     }
 
