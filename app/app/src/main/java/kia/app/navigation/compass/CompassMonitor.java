@@ -19,6 +19,8 @@ import android.view.Surface;
 import android.view.WindowManager;
 
 import kia.app.core.AppLog;
+import kia.app.core.StateStore;
+import kia.app.core.model.NavigationState;
 import kia.app.core.settings.AppSettings;
 import kia.app.navigation.cluster.NavigationClusterSender;
 import kia.app.navigation.domain.NavigationFeature;
@@ -405,7 +407,8 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private void updateTargetStep(float heading) {
         int step = Math.round(normalize(heading) / 30f) * 3;
         if (step == 36) step = 0;
-        if (step == targetStep) return;
+        restoreDisplayedStepFromStore(step);
+        if (step == targetStep && displayedStep >= 0) return;
         targetStep = step;
         if (displayedStep < 0) {
             sendStep(step);
@@ -431,6 +434,50 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
 
     private float blendDegrees(float from, float to, float toWeight) {
         return normalize(from + signedDelta(to, from) * Math.max(0f, Math.min(1f, toWeight)));
+    }
+
+    private void restoreDisplayedStepFromStore(int target) {
+        if (displayedStep >= 0) return;
+        int stored = lastCompassStepFromStore();
+        if (stored < 0) return;
+        displayedStep = stored;
+        lastSentAt = System.currentTimeMillis();
+        AppLog.line(app, "Compass: restored step=" + displayedStep
+                + " target=" + normalizeStep(target));
+    }
+
+    private static int lastCompassStepFromStore() {
+        NavigationState navigation = StateStore.navigation();
+        if (navigation == null) return -1;
+        String line = lastLineStarting(navigation.clusterTx, "compass step=");
+        String value = tokenAfter(line, "compass step=");
+        if (value.isEmpty()) return -1;
+        try {
+            return normalizeStep(Integer.parseInt(value));
+        } catch (RuntimeException ignored) {
+            return -1;
+        }
+    }
+
+    private static String lastLineStarting(String value, String prefix) {
+        String text = value == null ? "" : value.trim();
+        if (text.isEmpty() || prefix == null || prefix.isEmpty()) return "";
+        String[] lines = text.split("\\n");
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String line = lines[i] == null ? "" : lines[i].trim();
+            if (line.startsWith(prefix)) return line;
+        }
+        return "";
+    }
+
+    private static String tokenAfter(String value, String marker) {
+        String text = value == null ? "" : value.trim();
+        String needle = marker == null ? "" : marker;
+        int start = text.indexOf(needle);
+        if (start < 0) return "";
+        String tail = text.substring(start + needle.length()).trim();
+        int space = tail.indexOf(' ');
+        return space >= 0 ? tail.substring(0, space).trim() : tail;
     }
 
     private void sendStep(int step) {
