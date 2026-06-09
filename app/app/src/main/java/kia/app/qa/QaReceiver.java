@@ -115,6 +115,13 @@ public final class QaReceiver extends BroadcastReceiver {
             feature.handle(qaNavOldRouteIntent());
             feature.handle(qaNavRerouteIntent());
             AppLog.line(context, "QA nav route rerouting sample sent");
+        } else if ("nav_route_rerouting_left_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_route_rerouting_left_reset");
+            feature.handle(qaNavOldRouteIntent());
+            feature.handle(qaNavLeftRerouteIntent());
+            feature.handle(qaNavLeftRerouteLaneIntent());
+            AppLog.line(context, "QA nav route rerouting left sample sent");
         } else if ("tpms_sample".equals(scenario)) {
             TpmsController.get(context).handleAdapterFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS,
                     new byte[]{(byte) 148, (byte) 149, (byte) 150, (byte) 147,
@@ -297,6 +304,60 @@ public final class QaReceiver extends BroadcastReceiver {
         intent.putExtra("route_total_len", "3.3 км");
         intent.putExtra("current_street", "улица Махамбета Утемисова");
         intent.putExtra("street_after_maneuver", "улица Гизата Алипова");
+        return intent;
+    }
+
+    private static Intent qaNavLeftRerouteIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_NAVI_ON);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("navi_on", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_route_left");
+        intent.putExtra("maneuver", "LEFT");
+        intent.putExtra("direction", "LEFT");
+        intent.putExtra("maneuver_text", "налево");
+        intent.putExtra("current_maneuver_distance", "160 м");
+        intent.putExtra("current_maneuver_distance_meters", 160);
+        intent.putExtra("distance_to_maneuver", "160 м");
+        intent.putExtra("distance_to_maneuver_meters", 160);
+        intent.putExtra("remaining_distance", "2.8 км");
+        intent.putExtra("remaining_distance_meters", 2800);
+        intent.putExtra("route_time", "8 мин");
+        intent.putExtra("arrival_time", "11:44");
+        intent.putExtra("route_total_len", "2.8 км");
+        intent.putExtra("current_street", "улица Махамбета Утемисова");
+        intent.putExtra("street_after_maneuver", "улица Сырым Датова");
+        return intent;
+    }
+
+    private static Intent qaNavLeftRerouteLaneIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_MANEUVER);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_route_left");
+        intent.putExtra("maneuver", "LEFT");
+        intent.putExtra("direction", "LEFT");
+        intent.putExtra("route_action", "LEFT");
+        intent.putExtra("distance", "160 м");
+        intent.putExtra("current_maneuver_distance", "160 м");
+        intent.putExtra("current_maneuver_distance_meters", 160);
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_distance", "160 м");
+        intent.putExtra("lane_distance_meters", 160);
+        intent.putExtra("micro_distance", "160 м");
+        intent.putExtra("micro_distance_meters", 160);
+        intent.putExtra("highlighted_direction", "LEFT90");
+        intent.putExtra("highlighted_directions", "LEFT90");
+        intent.putExtra("route_road_options", "left");
+        intent.putExtra("gray_road_options", "left");
+        intent.putExtra("lane_topology", "left highlight=LEFT90");
+        intent.putExtra("remaining_distance", "2.8 км");
+        intent.putExtra("route_time", "8 мин");
+        intent.putExtra("arrival_time", "11:44");
+        intent.putExtra("current_street", "улица Махамбета Утемисова");
+        intent.putExtra("street_after_maneuver", "улица Сырым Датова");
         return intent;
     }
 

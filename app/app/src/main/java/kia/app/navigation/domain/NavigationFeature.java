@@ -360,6 +360,9 @@ public final class NavigationFeature {
         }
         rememberNavigationRawDebug(intent, System.currentTimeMillis());
         if (routeReroutingIntent(intent)) {
+            if (state.active && !state.finishReached) {
+                clearRouteChangeVisualHold("route rerouting " + clean(source));
+            }
             startRouteReroutingHold(source);
         }
         if (ACTION_MANEUVER.equals(action) || KIA_ACTION_MANEUVER.equals(action)) {
@@ -791,6 +794,11 @@ public final class NavigationFeature {
 
     private void startRouteLoadingWithoutMetrics(String source) {
         String cleanSource = clean(source);
+        if (routeReroutingActive(System.currentTimeMillis())) {
+            sendRouteReroutingVisual();
+            AppLog.line(app, "Navigation loading suppressed by rerouting: " + cleanSource);
+            return;
+        }
         if (state.active && !state.loading()) {
             forceInactive(cleanSource + "_restart_loading");
         }
@@ -850,6 +858,9 @@ public final class NavigationFeature {
                 text(intent, "maneuver_type"));
         String rawActiveManeuverDistance = explicitManeuverDistanceFromIntent(intent);
         boolean routeIdChanged = incomingRouteIdChangesActiveRoute(intent);
+        if (routeIdChanged) {
+            startRouteReroutingHold(clean(source) + "_route_id_pending", true);
+        }
         String activeManeuverDistance = mainManeuverDistanceFromIntent(intent, source, routeIdChanged);
         boolean clearCoreBridgeManeuver = YandexCoreBridgeContract.SOURCE.equals(clean(source))
                 && TextUtils.isEmpty(activeManeuver)
@@ -2590,14 +2601,13 @@ public final class NavigationFeature {
         boolean routeChanged = wasActive && isRouteFinishSource(cleanSource)
                 && routeLikelyChanged(distanceText, timeText);
         if (routeChanged) {
-            clearLaneHintHold();
+            clearRouteChangeVisualHold("route metrics changed " + cleanSource);
             waitingForRoute = true;
             routeStartedAt = now;
             routeLoadingMinUntil = now + ROUTE_WAIT_MIN_MS;
             lastDirectManeuverAt = 0L;
-            resetManeuverProgress();
             resetNavigationTextCache();
-            resetNavigationSendCache();
+            startRouteReroutingHold(cleanSource + "_route_metrics_changed", true);
             scheduleRouteLoadingFallback();
             AppLog.line(app, "Navigation route changed: " + cleanSource);
         }
@@ -3460,6 +3470,7 @@ public final class NavigationFeature {
     private boolean shouldAllowLaneTxPostPass(long now) {
         return state.active
                 && !state.finishReached
+                && !routeReroutingActive(now)
                 && laneTxPostPassUntil > now
                 && !TextUtils.isEmpty(lastLaneTxManeuver)
                 && lastLaneTxAt > 0L
@@ -4411,12 +4422,12 @@ public final class NavigationFeature {
             return;
         }
         long now = System.currentTimeMillis();
-        sendLaneTxPostPassIfActive(now, false);
-        int mode = AppSettings.navTextMode(app);
         if (routeReroutingActive(now)) {
             sendRouteReroutingVisual();
             return;
         }
+        sendLaneTxPostPassIfActive(now, false);
+        int mode = AppSettings.navTextMode(app);
         if (finishDirectionShouldOverride()) {
             if (!sendDirectionToFinishIfNeeded(false)) sendFinishDirectionPlaceholder(false);
             return;
@@ -4493,6 +4504,7 @@ public final class NavigationFeature {
         String cleanImageId = clean(imageId);
         progressBucket = normalizeProgressBucket(progressBucket);
         if (!navigationTxAllowed(cleanImageId)) return;
+        if (maneuverTxBlockedByRerouting(cleanImageId)) return;
         if (finishDirectionShouldOverride() && !isFinishManeuver(cleanImageId)) {
             if (!sendDirectionToFinishIfNeeded(force)) sendFinishDirectionPlaceholder(force);
             return;
@@ -4516,6 +4528,7 @@ public final class NavigationFeature {
         String cleanImageId = clean(imageId);
         progressBucket = normalizeProgressBucket(progressBucket);
         if (!navigationTxAllowed(cleanImageId)) return;
+        if (maneuverTxBlockedByRerouting(cleanImageId)) return;
         if (finishDirectionShouldOverride() && !isFinishManeuver(cleanImageId)) {
             boolean sentFinishDirection = sendDirectionToFinishIfNeeded(force);
             AppLog.line(app, "Navigation gray fallback blocked by finish direction: maneuver="
@@ -4544,6 +4557,14 @@ public final class NavigationFeature {
             AppLog.line(app, "Navigation TX blocked after finish: " + cleanImageId);
             return false;
         }
+        return true;
+    }
+
+    private boolean maneuverTxBlockedByRerouting(String imageId) {
+        if (isFinishManeuver(imageId)) return false;
+        if (!routeReroutingActive(System.currentTimeMillis())) return false;
+        sendRouteReroutingVisual();
+        AppLog.line(app, "Navigation maneuver TX blocked by rerouting: " + clean(imageId));
         return true;
     }
 
@@ -4598,6 +4619,11 @@ public final class NavigationFeature {
     }
 
     private void sendRouteLoadingVisual() {
+        if (routeReroutingActive(System.currentTimeMillis())) {
+            sendRouteReroutingVisual();
+            AppLog.line(app, "Navigation loading visual suppressed by rerouting");
+            return;
+        }
         activeClusterVisual = "route_loading / text";
         state = state.withClusterVisualText(activeClusterVisual, System.currentTimeMillis());
         publishNavigationState();
@@ -4605,13 +4631,18 @@ public final class NavigationFeature {
     }
 
     private void startRouteReroutingHold(String source) {
-        if (!state.active || state.finishReached) return;
+        startRouteReroutingHold(source, false);
+    }
+
+    private void startRouteReroutingHold(String source, boolean allowInactive) {
+        if (state.finishReached) return;
+        if (!state.active && !allowInactive) return;
         long now = System.currentTimeMillis();
         routeReroutingUntil = Math.max(routeReroutingUntil, now + ROUTE_REROUTING_HOLD_MS);
         int generation = ++routeReroutingGeneration;
         resetNavigationTextCache();
         AppLog.line(app, "Navigation route rerouting hold: " + clean(source));
-        sendRouteReroutingVisual();
+        if (state.active) sendRouteReroutingVisual();
         handler.postDelayed(() -> {
             synchronized (NavigationFeature.this) {
                 if (generation != routeReroutingGeneration) return;
@@ -4620,6 +4651,7 @@ public final class NavigationFeature {
                 if (!routeReroutingVisualActive()) return;
                 clearClusterVisualHold();
                 resetNavigationTextCache();
+                resendCurrentVisual();
                 sendConfiguredText();
                 AppLog.line(app, "Navigation route rerouting hold finished");
             }
