@@ -42,6 +42,7 @@ public final class NavigationFeature {
     private static final Pattern NUMBER = Pattern.compile("[-+]?\\d+(?:[\\.,]\\d+)?");
     private static final long ROUTE_WAIT_MAX_MS = 5000L;
     private static final long ROUTE_WAIT_MIN_MS = 3000L;
+    private static final long ROUTE_REROUTING_MIN_HOLD_MS = 1000L;
     private static final long ROUTE_REROUTING_HOLD_MS = 4000L;
     private static final long ROUTE_STOP_CONFIRM_MS = 12000L;
     private static final long FINISH_HOLD_MS = 5000L;
@@ -64,6 +65,9 @@ public final class NavigationFeature {
     private static final float AUTO_FINISH_ROUTE_METERS = 35f;
     private static final float AUTO_FINISH_GPS_METERS = 10f;
     private static final float DASHBOARD_FINISH_METERS = 10f;
+    private static final float FINAL_SEGMENT_FINISH_DIRECTION_METERS = 250f;
+    private static final float FINAL_SEGMENT_MANEUVER_DONE_METERS = 1f;
+    private static final float FINAL_SEGMENT_NEW_MANEUVER_METERS = 20f;
     private static final float NEW_ROUTE_AFTER_FINISH_METERS = 50f;
     private static final float FINISH_CONFLICT_MANEUVER_METERS = 30f;
     private static final float SUSPICIOUS_FINISH_POINT_ROUTE_METERS = 80f;
@@ -93,6 +97,7 @@ public final class NavigationFeature {
     private long overspeedTextUntil;
     private long speedLimitTextUntil;
     private long finishHoldUntil;
+    private long finishRecoverySuppressUntil;
     private long laneGuidanceUntil;
     private int overspeedGeneration;
     private int finishGeneration;
@@ -135,6 +140,7 @@ public final class NavigationFeature {
     private boolean activeMicroTxAllowed = true;
     private long activeMicroPostPassUntil;
     private String activeLaneDistance = "";
+    private long routeReroutingMinUntil;
     private String lastLaneTxManeuver = "";
     private String lastLaneTxGrayRoad = "";
     private String lastLaneTxDistance = "";
@@ -187,6 +193,8 @@ public final class NavigationFeature {
     private long lastCurrentGeocodeAt;
     private int currentGeocodeGeneration;
     private boolean waitingForRoute;
+    private boolean finalSegmentFinishDirectionActive;
+    private String finalSegmentManeuver = "";
     private int displayedFinishDirectionStep = -1;
     private int targetFinishDirectionStep = -1;
     private float activeFinishDirectionDistance;
@@ -231,7 +239,7 @@ public final class NavigationFeature {
     }
 
     public synchronized int finishDirectionOverlayStep() {
-        if (!NavigationModeSettings.isFinishDirection(app) || !state.active || state.finishReached) {
+        if (!finishDirectionShouldOverride()) {
             return Integer.MIN_VALUE;
         }
         float heading = finishReferenceHeading();
@@ -243,7 +251,7 @@ public final class NavigationFeature {
 
     public synchronized boolean finishDirectionHeadingNeeded() {
         return state.active && !state.finishReached && finishPointKnown() && gpsPointKnown()
-                && (NavigationModeSettings.isFinishDirection(app) || state.loading() || waitingForRoute);
+                && (finishDirectionShouldOverride() || state.loading() || waitingForRoute);
     }
 
     public synchronized void updateGpsSpeed(float metersPerSecond) {
@@ -727,9 +735,11 @@ public final class NavigationFeature {
             routeLoadingFallbackGeneration++;
             routeReroutingGeneration++;
             microRestoreGeneration++;
+            clearFinalSegmentFinishDirection("off " + cleanSource);
             waitingForRoute = false;
             routeStartedAt = 0L;
             routeReroutingUntil = 0L;
+            routeReroutingMinUntil = 0L;
             activeRouteTotalDistance = "";
             activeRouteId = "";
             routeLoadingMinUntil = 0L;
@@ -755,9 +765,11 @@ public final class NavigationFeature {
             routeLoadingFallbackGeneration++;
             routeReroutingGeneration++;
             microRestoreGeneration++;
+            clearFinalSegmentFinishDirection("active " + clean(source));
             waitingForRoute = true;
             routeStartedAt = now;
             routeReroutingUntil = 0L;
+            routeReroutingMinUntil = 0L;
             activeRouteTotalDistance = "";
             activeRouteId = "";
             routeLoadingMinUntil = now + ROUTE_WAIT_MIN_MS;
@@ -813,6 +825,11 @@ public final class NavigationFeature {
                 || bool(intent, "is_active", false);
         String source = first(text(intent, "source"), ACTION_NAVI_ON);
         if (!active) {
+            if (confirmedCoreBridgeFinish(intent, source)) {
+                AppLog.line(app, "Navigation confirmed Core Bridge finish: " + clean(source));
+                markFinishReached("core_bridge_finish_" + clean(source));
+                return;
+            }
             if (unconfirmedCoreBridgeFinish(intent, source)) {
                 return;
             }
@@ -856,6 +873,8 @@ public final class NavigationFeature {
                 text(intent, "direction"), text(intent, "maneuver"), text(intent, "maneuver_action"),
                 text(intent, "current_maneuver"),
                 text(intent, "maneuver_type"));
+        String normalizedActiveManeuver = normalizeManeuver(clean(activeManeuver),
+                intent.getIntExtra("direction_lr", 0));
         String rawActiveManeuverDistance = explicitManeuverDistanceFromIntent(intent);
         boolean routeIdChanged = incomingRouteIdChangesActiveRoute(intent);
         if (routeIdChanged) {
@@ -901,9 +920,19 @@ public final class NavigationFeature {
         String retainedManeuverDistance = clearCoreBridgeManeuver
                 ? ""
                 : first(activeManeuverDistance, state.maneuverDistance);
+        String previousManeuver = state.maneuver;
+        String previousManeuverDistance = state.maneuverDistance;
+        String retainedManeuver = clearCoreBridgeManeuver
+                ? ""
+                : first(state.maneuver,
+                isUsableManeuver(normalizedActiveManeuver) ? normalizedActiveManeuver : "");
+        String retainedManeuverText = clearCoreBridgeManeuver
+                ? ""
+                : first(state.maneuverText,
+                isUsableManeuver(retainedManeuver) ? maneuverLabel(retainedManeuver) : "");
         state = new NavigationState(true, state.finishReached, state.speedExceeded,
-                clearCoreBridgeManeuver ? "" : state.maneuver,
-                clearCoreBridgeManeuver ? "" : state.maneuverText,
+                retainedManeuver,
+                retainedManeuverText,
                 retainedManeuverDistance,
                 first(normalizeDistanceText(routeDistance), state.routeDistance),
                 first(clean(routeTime), state.routeTime),
@@ -919,6 +948,14 @@ public final class NavigationFeature {
                     + " source=" + clean(source));
         }
         rememberRouteTotalDistance(routeTotalDistance, now);
+        if (maybeStartFinalSegmentFinishDirection(routeDistance,
+                previousManeuver, previousManeuverDistance,
+                state.maneuver, state.maneuverDistance, source, now)) {
+            if (!sendDirectionToFinishIfNeeded(true)) sendFinishDirectionPlaceholder(true);
+            sendConfiguredText();
+            AppLog.line(app, "Navigation active final segment: " + state.summary());
+            return;
+        }
         publishNavigationState();
         sendConfiguredText();
         AppLog.line(app, "Navigation active street: " + state.summary());
@@ -939,15 +976,27 @@ public final class NavigationFeature {
         return true;
     }
 
+    private boolean confirmedCoreBridgeFinish(Intent intent, String source) {
+        return YandexCoreBridgeContract.SOURCE.equals(clean(source))
+                && coreBridgeFinishRequested(intent, source)
+                && coreBridgeFinishConfirmed(intent);
+    }
+
     private boolean coreBridgeFinishConfirmed(Intent intent) {
-        if (!state.active || state.finishReached || waitingForRoute || state.loading()) return false;
+        if (!state.active || state.finishReached) return false;
         long now = System.currentTimeMillis();
+        if (confirmedCoreBridgeFinishedState(intent)) {
+            return routeGuidanceFresh() || routeMetricsFresh(now) || routeDataReady();
+        }
         if (routeStartedAt > 0L && now - routeStartedAt < ROUTE_WAIT_MIN_MS) return false;
         if (!routeGuidanceFresh() && !routeMetricsFresh(now)) return false;
+        if (waitingForRoute || state.loading()) return false;
         String routeDistance = routeDistanceFromIntent(intent);
         String maneuverDistance = explicitManeuverDistanceFromIntent(intent);
         return finishAllowedByDistance(routeDistance, maneuverDistance,
                 state.routeDistance, state.maneuverDistance)
+                && finishPositionAllowsHold("core_bridge_finish", first(routeDistance, maneuverDistance,
+                state.routeDistance, state.maneuverDistance))
                 && !finishContradictedByGuidance(routeDistance,
                 first(maneuverDistance, state.maneuverDistance),
                 first(routeTimeFromIntent(intent), state.routeTime));
@@ -964,6 +1013,14 @@ public final class NavigationFeature {
         return sourceLower.contains("finish")
                 || sourceLower.contains("arrived")
                 || sourceLower.contains("destination");
+    }
+
+    private static boolean confirmedCoreBridgeFinishedState(Intent intent) {
+        String state = first(text(intent, "bridge_state"), text(intent, "state"),
+                text(intent, "route_state"), text(intent, "status"));
+        return YandexCoreBridgeContract.STATE_FINISHED.equals(clean(state).toLowerCase(Locale.US))
+                && bool(intent, "finish_reached", false)
+                && bool(intent, "route_finished", false);
     }
 
     private static boolean confirmedRouteStop(Intent intent, String source) {
@@ -1109,6 +1166,7 @@ public final class NavigationFeature {
         routeStartedAt = 0L;
         routeReroutingGeneration++;
         routeReroutingUntil = 0L;
+        routeReroutingMinUntil = 0L;
         lastDirectManeuverAt = 0L;
         clearLaneHintHold();
         clearEventHintHold();
@@ -1119,6 +1177,7 @@ public final class NavigationFeature {
         resetManeuverProgress();
         resetNavigationTextCache();
         resetNavigationSendCache();
+        clearFinalSegmentFinishDirection("force inactive " + clean(source));
         state = new NavigationState(false, false, state.speedExceeded,
                 "", "", "", "", "", "",
                 state.currentStreet, "", "", state.speedLimit, state.currentSpeed,
@@ -1195,6 +1254,7 @@ public final class NavigationFeature {
                 text(intent, "next_turn_street"), text(intent, "nextTurnStreet"),
                 text(intent, "street"), text(intent, "raw_street"), text(intent, "road"));
         String finishStreet = finishTextFromIntent(intent);
+        String routeDistanceForFinalSegment = routeDistanceForFinalSegment(intent);
         if (finishSuppressesYandex(source, maneuverDistance, "", finishStreet)) return;
         String signEvent = yandexSignEventText(intent, sourceLower);
         long signEventNow = System.currentTimeMillis();
@@ -1335,6 +1395,26 @@ public final class NavigationFeature {
                 explicitGrayRoad = trustedGrayRoad;
             }
         }
+        if (!TextUtils.isEmpty(explicitGrayRoad)
+                && providerLaneSchemeBeyondMain(intent, sourceLower, first(cleanManeuver, state.maneuver),
+                laneHighlightManeuver, explicitGrayRoad, first(nonZeroDistance(maneuverDistance),
+                        nonZeroDistance(state.maneuverDistance), currentMainTxDistance()),
+                explicitLaneDistance)) {
+            AppLog.line(app, "Navigation ignored future provider lane road scheme: main="
+                    + clean(first(cleanManeuver, state.maneuver))
+                    + " mainDistance=" + clean(first(nonZeroDistance(maneuverDistance),
+                    nonZeroDistance(state.maneuverDistance), currentMainTxDistance()))
+                    + " highlight=" + first(laneHighlightManeuver, "-")
+                    + " laneDistance=" + clean(explicitLaneDistance)
+                    + " gray=" + clean(explicitGrayRoad)
+                    + " source=" + source);
+            explicitGrayRoad = "";
+            laneHighlightManeuver = "";
+            highlightedMicroManeuver = "";
+            clearGrayRoadHold();
+            clearLearnedRoadOptions();
+            clearLaneTxPostPassHold();
+        }
         long now = System.currentTimeMillis();
         if (!state.active && packetClaimsActiveRoute(intent)
                 && canResumeFromManeuverPacket(routeRoadOnly, cleanManeuver,
@@ -1423,7 +1503,8 @@ public final class NavigationFeature {
         boolean finishRequested = isFinishManeuver(cleanManeuver) || bool(intent, "finish_reached", false)
                 || bool(intent, "arrived", false);
         boolean finish = finishRequested && finishAllowedByDistance(rawManeuverDistance,
-                maneuverDistance, state.routeDistance, state.maneuverDistance);
+                maneuverDistance, state.routeDistance, state.maneuverDistance)
+                && finishPositionAllowsHold(source, first(maneuverDistance, state.routeDistance));
         if (finishRequested && !finish) {
             AppLog.line(app, "Navigation ignored early finish: distance="
                     + first(maneuverDistance, state.routeDistance, "-")
@@ -2207,6 +2288,8 @@ public final class NavigationFeature {
         }
         String debugGrayRoad = standaloneFrame ? "" : explicitGrayRoad;
         String debugGrayScheme = grayRoadLabel(debugGrayRoad);
+        String previousManeuver = state.maneuver;
+        String previousManeuverDistance = state.maneuverDistance;
         state = new NavigationState(true, finish, state.speedExceeded,
                 displayManeuver, maneuverLabel(displayManeuver, roundaboutExit), displayDistance,
                 state.routeDistance, state.routeTime, state.arrivalTime,
@@ -2219,6 +2302,14 @@ public final class NavigationFeature {
                         highlightedMicroForOverlay ? highlightedMicroDebugDistance : "",
                         highlightedMicroForOverlay ? highlightedMicroStatus : "",
                         debugGrayRoad, debugGrayScheme, now);
+        if (maybeStartFinalSegmentFinishDirection(routeDistanceForFinalSegment,
+                previousManeuver, previousManeuverDistance,
+                displayManeuver, displayDistance, source, now)) {
+            if (!sendDirectionToFinishIfNeeded(true)) sendFinishDirectionPlaceholder(true);
+            sendConfiguredText();
+            AppLog.line(app, "Navigation maneuver final segment: " + state.summary());
+            return;
+        }
         String fallbackGrayRoad = "";
         if (!laneGuidance && !standaloneFrame) {
             String roadOptionKey = roadOptionKey(state.currentStreet, state.nextStreet);
@@ -2393,9 +2484,10 @@ public final class NavigationFeature {
                 text(intent, "route_total_distance"), text(intent, "full_route_distance"),
                 text(intent, "routeTotalDistance"), text(intent, "totalRouteDistance"));
         String routeTime = first(text(intent, "route_time"), text(intent, "time_left"),
+                text(intent, "etime"),
                 text(intent, "duration"), text(intent, "remaining_time"), textByKeyPart(intent, "time_left"));
         String arrival = first(text(intent, "arrival_time"), text(intent, "arrival"),
-                text(intent, "eta"));
+                text(intent, "atime"), text(intent, "eta"));
         String finishStreet = finishTextFromIntent(intent);
         String currentStreet = etaCurrentStreetFromIntent(intent);
         String source = first(text(intent, "source"), ACTION_ETA);
@@ -2444,6 +2536,7 @@ public final class NavigationFeature {
         activeRouteId = routeId;
         activeRouteTotalDistance = "";
         if (changed) {
+            clearFinalSegmentFinishDirection("route id changed " + clean(source));
             clearRouteChangeVisualHold("route id changed " + clean(source));
             startRouteReroutingHold(clean(source) + "_route_id_changed");
         }
@@ -2557,7 +2650,9 @@ public final class NavigationFeature {
                 && !TextUtils.isEmpty(first(text(intent, "route_time"),
                 text(intent, "time_left"),
                 text(intent, "remaining_time"),
+                text(intent, "etime"),
                 text(intent, "arrival_time"),
+                text(intent, "atime"),
                 text(intent, "arrival")));
     }
 
@@ -2635,7 +2730,8 @@ public final class NavigationFeature {
         boolean finishDistance = finishAllowedByDistance(rawDistanceText, distanceText);
         boolean finishConflict = finishContradictedByGuidance(distanceText,
                 acceptedManeuverDistance, timeText);
-        boolean finish = finishDistance && !finishConflict;
+        boolean finish = finishDistance && !finishConflict
+                && finishPositionAllowsHold(cleanSource, first(distanceText, rawDistanceText));
         if (finishDistance && finishConflict) {
             AppLog.line(app, "Navigation ignored ETA finish by contradictory guidance: route="
                     + first(distanceText, rawDistanceText)
@@ -2648,6 +2744,7 @@ public final class NavigationFeature {
                 && routeLikelyChanged(distanceText, timeText);
         if (routeChanged) {
             clearRouteChangeVisualHold("route metrics changed " + cleanSource);
+            clearFinalSegmentFinishDirection("route metrics changed " + cleanSource);
             waitingForRoute = true;
             routeStartedAt = now;
             routeLoadingMinUntil = now + ROUTE_WAIT_MIN_MS;
@@ -2661,6 +2758,7 @@ public final class NavigationFeature {
                 && routeChanged && !TextUtils.isEmpty(carryFinish)) {
             AppLog.line(app, "Navigation finish kept for new route without text: " + cleanSource);
         }
+        String previousManeuver = state.maneuver;
         String previousManeuverDistance = state.maneuverDistance;
         state = new NavigationState(true, finish, state.speedExceeded,
                 routeChanged ? "" : state.maneuver,
@@ -2677,6 +2775,9 @@ public final class NavigationFeature {
                     + first(distanceText, rawDistanceText));
             return;
         }
+        maybeStartFinalSegmentFinishDirection(state.routeDistance,
+                previousManeuver, previousManeuverDistance,
+                state.maneuver, state.maneuverDistance, cleanSource, now);
         if (!routeChanged && !TextUtils.isEmpty(acceptedManeuverDistance)
                 && !acceptedManeuverDistance.equals(previousManeuverDistance)
                 && !TextUtils.isEmpty(state.maneuver) && !finishDirectionShouldOverride()) {
@@ -2689,8 +2790,9 @@ public final class NavigationFeature {
         } else {
             publishNavigationState();
         }
+        finishRouteReroutingIfReady(System.currentTimeMillis(), cleanSource + "_eta_ready");
         if (!wasActive) sender.sendActive(true);
-        sendEtaTimeIfChanged(state.arrivalTime);
+        sendEtaTimeIfChanged();
         if (finishDirectionShouldOverride()) {
             if (!sendDirectionToFinishIfNeeded(false)) sendFinishDirectionPlaceholder(false);
         }
@@ -4077,6 +4179,7 @@ public final class NavigationFeature {
         clearLaneHintHold();
         clearEventHintHold();
         clearRoundaboutExitHold();
+        clearFinalSegmentFinishDirection("route change visual " + clean(reason));
         resetManeuverProgress();
         resetNavigationSendCache();
         state = new NavigationState(state.active, false, state.speedExceeded,
@@ -4213,6 +4316,7 @@ public final class NavigationFeature {
         clearLaneHintHold();
         lastDirectManeuverAt = 0L;
         clearRoundaboutExitHold();
+        clearFinalSegmentFinishDirection("stale route visual " + clean(reason));
         clearClusterVisualHold();
         resetManeuverProgress();
         resetNavigationSendCache();
@@ -4227,6 +4331,7 @@ public final class NavigationFeature {
 
     private void clearStaleManeuverVisual(String reason) {
         clearRoundaboutExitHold();
+        clearFinalSegmentFinishDirection("stale maneuver visual " + clean(reason));
         clearClusterVisualHold();
         resetManeuverProgress();
         resetNavigationSendCache();
@@ -4600,6 +4705,14 @@ public final class NavigationFeature {
             sendManeuverIfChanged(cleanImageId, distance, km, progressBucket, force);
             return;
         }
+        if (grayRoadIncompatibleWithManeuver(cleanImageId, cleanGrayRoad)) {
+            AppLog.line(app, "Navigation dropped incompatible gray road TX: maneuver="
+                    + cleanImageId + " gray=" + cleanGrayRoad);
+            clearGrayRoadHold();
+            clearLearnedRoadOptions();
+            sendManeuverIfChanged(cleanImageId, distance, km, progressBucket, force);
+            return;
+        }
         clusterTx.sendManeuverWithGrayRoad(imageId, grayRoadId, distance, km, progressBucket, force);
     }
 
@@ -4653,22 +4766,24 @@ public final class NavigationFeature {
         sender.sendEta(sendDistance, km);
     }
 
-    private void sendEtaTimeIfChanged(String arrivalTime) {
-        int[] hourMinute = arrivalHourMinute(arrivalTime);
+    private void sendEtaTimeIfChanged() {
+        boolean remainingMode = AppSettings.navEtaTimeMode(app) == AppSettings.NAV_ETA_TIME_REMAINING;
+        int[] hourMinute = remainingMode ? durationHourMinute(state.routeTime) : null;
+        if (hourMinute == null) hourMinute = arrivalHourMinute(state.arrivalTime);
         if (hourMinute == null) return;
-        String key = hourMinute[0] + ":" + hourMinute[1];
+        String key = (remainingMode ? "remaining|" : "arrival|") + hourMinute[0] + ":" + hourMinute[1];
         if (key.equals(lastSentEtaTimeKey)) return;
         lastSentEtaTimeKey = key;
         sender.sendEtaTime(hourMinute[0], hourMinute[1]);
     }
 
-    private void resendKnownRouteData() {
+    public synchronized void resendKnownRouteData() {
         if (!state.active) return;
         if (!TextUtils.isEmpty(state.routeDistance)) {
             sendEtaIfChanged(distanceValue(state.routeDistance), isKm(state.routeDistance));
         }
-        if (!TextUtils.isEmpty(state.arrivalTime)) {
-            sendEtaTimeIfChanged(state.arrivalTime);
+        if (!TextUtils.isEmpty(state.arrivalTime) || !TextUtils.isEmpty(state.routeTime)) {
+            sendEtaTimeIfChanged();
         }
         if (!TextUtils.isEmpty(state.speedLimit)) {
             sendSpeed(state.speedLimit);
@@ -4695,6 +4810,7 @@ public final class NavigationFeature {
         if (state.finishReached) return;
         if (!state.active && !allowInactive) return;
         long now = System.currentTimeMillis();
+        routeReroutingMinUntil = Math.max(routeReroutingMinUntil, now + ROUTE_REROUTING_MIN_HOLD_MS);
         routeReroutingUntil = Math.max(routeReroutingUntil, now + ROUTE_REROUTING_HOLD_MS);
         int generation = ++routeReroutingGeneration;
         resetNavigationTextCache();
@@ -4703,8 +4819,15 @@ public final class NavigationFeature {
         handler.postDelayed(() -> {
             synchronized (NavigationFeature.this) {
                 if (generation != routeReroutingGeneration) return;
+                finishRouteReroutingIfReady(System.currentTimeMillis(), clean(source) + "_min_ready");
+            }
+        }, ROUTE_REROUTING_MIN_HOLD_MS);
+        handler.postDelayed(() -> {
+            synchronized (NavigationFeature.this) {
+                if (generation != routeReroutingGeneration) return;
                 if (System.currentTimeMillis() < routeReroutingUntil) return;
                 routeReroutingUntil = 0L;
+                routeReroutingMinUntil = 0L;
                 if (!routeReroutingVisualActive()) return;
                 clearClusterVisualHold();
                 resetNavigationTextCache();
@@ -4718,12 +4841,31 @@ public final class NavigationFeature {
     private boolean routeReroutingActive(long now) {
         if (!state.active || state.finishReached || routeReroutingUntil <= 0L) {
             routeReroutingUntil = 0L;
+            routeReroutingMinUntil = 0L;
             return false;
         }
+        if (finishRouteReroutingIfReady(now, "route_data_ready")) return false;
         if (now > routeReroutingUntil) {
             routeReroutingUntil = 0L;
+            routeReroutingMinUntil = 0L;
             return false;
         }
+        return true;
+    }
+
+    private boolean finishRouteReroutingIfReady(long now, String source) {
+        if (routeReroutingUntil <= 0L || now < routeReroutingMinUntil) return false;
+        if (!state.active || state.finishReached || state.loading() || !routeDataReady()) return false;
+        routeReroutingGeneration++;
+        routeReroutingUntil = 0L;
+        routeReroutingMinUntil = 0L;
+        if (routeReroutingVisualActive()) {
+            clearClusterVisualHold();
+            resetNavigationTextCache();
+            resendCurrentVisual();
+            sendConfiguredText();
+        }
+        AppLog.line(app, "Navigation route rerouting ready: " + clean(source));
         return true;
     }
 
@@ -4773,7 +4915,7 @@ public final class NavigationFeature {
     private boolean sendDirectionToFinishIfNeeded(boolean force) {
         if (!finishDirectionShouldOverride()) return false;
         return sendDirectionToFinishFrame(force,
-                "finish_direction_mode");
+                finishDirectionReason());
     }
 
     private boolean sendDirectionToFinishForLoading(boolean force) {
@@ -4850,7 +4992,7 @@ public final class NavigationFeature {
     private boolean finishDirectionAnimationAllowed() {
         return state.active && !state.finishReached
                 && targetFinishDirectionStep >= 0
-                && NavigationModeSettings.isFinishDirection(app);
+                && finishDirectionShouldOverride();
     }
 
     private void resetFinishDirectionAnimation() {
@@ -4866,7 +5008,15 @@ public final class NavigationFeature {
     }
 
     private boolean finishDirectionShouldOverride() {
-        return NavigationModeSettings.isFinishDirection(app) && state.active && !state.finishReached;
+        return state.active && !state.finishReached
+                && (NavigationModeSettings.isFinishDirection(app) || finalSegmentFinishDirectionActive);
+    }
+
+    private String finishDirectionReason() {
+        if (finalSegmentFinishDirectionActive && !NavigationModeSettings.isFinishDirection(app)) {
+            return "final_segment_finish_direction";
+        }
+        return "finish_direction_mode";
     }
 
     private boolean finishDirectionWithinLead() {
@@ -4878,6 +5028,99 @@ public final class NavigationFeature {
         if (directMeters > 0f) return directMeters <= leadMeters;
         float maneuverMeters = distanceMeters(state.maneuverDistance);
         return maneuverMeters > 0f && maneuverMeters <= leadMeters;
+    }
+
+    private boolean maybeStartFinalSegmentFinishDirection(String routeDistance,
+                                                          String previousManeuver,
+                                                          String previousManeuverDistance,
+                                                          String incomingManeuver,
+                                                          String incomingManeuverDistance,
+                                                          String source,
+                                                          long now) {
+        if (!state.active || state.finishReached || NavigationModeSettings.isFinishDirection(app)) {
+            return false;
+        }
+        String routeText = first(normalizeDistanceText(routeDistance), state.routeDistance);
+        float routeMeters = distanceMeters(routeText);
+        if (routeMeters > FINAL_SEGMENT_FINISH_DIRECTION_METERS) {
+            clearFinalSegmentFinishDirection("route beyond final segment " + clean(source));
+            return false;
+        }
+        if (routeMeters <= AUTO_FINISH_ROUTE_METERS || routeMeters <= 0f) {
+            return finalSegmentFinishDirectionActive;
+        }
+        String maneuver = first(clean(incomingManeuver), clean(previousManeuver));
+        String incomingDistance = normalizeDistanceText(incomingManeuverDistance);
+        if (finalSegmentFinishDirectionActive) {
+            if (finalSegmentNewManeuverArrived(maneuver, incomingDistance)) {
+                clearFinalSegmentFinishDirection("new maneuver before finish " + clean(source));
+                return false;
+            }
+            return true;
+        }
+        if (!isUsableManeuver(maneuver) || isFinishManeuver(maneuver)) return false;
+        String completionReason = finalSegmentManeuverCompletionReason(incomingDistance, routeMeters);
+        if (TextUtils.isEmpty(completionReason)) return false;
+        if (!"maneuver_beyond_route".equals(completionReason)
+                && !isUsableManeuver(previousManeuver)
+                && TextUtils.isEmpty(nonZeroDistance(previousManeuverDistance))) {
+            return false;
+        }
+        startFinalSegmentFinishDirection(maneuver, routeText, source, completionReason, now);
+        return true;
+    }
+
+    private String finalSegmentManeuverCompletionReason(String incomingDistance, float routeMeters) {
+        if (TextUtils.isEmpty(clean(incomingDistance))) return "";
+        float maneuverMeters = distanceMeters(incomingDistance);
+        if (maneuverMeters <= FINAL_SEGMENT_MANEUVER_DONE_METERS) return "maneuver_zero";
+        if (routeMeters > AUTO_FINISH_ROUTE_METERS
+                && routeMeters <= FINAL_SEGMENT_FINISH_DIRECTION_METERS
+                && maneuverMeters >= routeMeters) {
+            return "maneuver_beyond_route";
+        }
+        return "";
+    }
+
+    private boolean finalSegmentNewManeuverArrived(String maneuver, String distanceText) {
+        if (!finalSegmentFinishDirectionActive) return false;
+        if (!isUsableManeuver(maneuver) || isFinishManeuver(maneuver)) return false;
+        String distance = nonZeroDistance(distanceText);
+        if (TextUtils.isEmpty(distance)) return false;
+        float meters = distanceMeters(distance);
+        if (!sameManeuverFamily(finalSegmentManeuver, maneuver)) return true;
+        return meters > FINAL_SEGMENT_NEW_MANEUVER_METERS;
+    }
+
+    private void startFinalSegmentFinishDirection(String maneuver, String routeDistance,
+                                                  String source, String reason, long now) {
+        finalSegmentFinishDirectionActive = true;
+        finalSegmentManeuver = clean(maneuver);
+        clearLaneHintHold();
+        clearRoundaboutExitHold();
+        clearClusterVisualHold();
+        resetManeuverProgress();
+        resetFinishDirectionAnimation();
+        state = new NavigationState(true, false, state.speedExceeded,
+                "", "", "",
+                first(routeDistance, state.routeDistance), state.routeTime, state.arrivalTime,
+                state.currentStreet, state.nextStreet, state.finishStreet,
+                state.speedLimit, state.currentSpeed, clean(source), now)
+                .withEventHint(activeEventHint, activeEventSource, now);
+        publishNavigationState();
+        AppLog.line(app, "Navigation final segment finish direction: route="
+                + first(routeDistance, "-")
+                + " after=" + first(finalSegmentManeuver, "-")
+                + " reason=" + clean(reason)
+                + " source=" + clean(source));
+    }
+
+    private void clearFinalSegmentFinishDirection(String reason) {
+        if (!finalSegmentFinishDirectionActive && TextUtils.isEmpty(finalSegmentManeuver)) return;
+        finalSegmentFinishDirectionActive = false;
+        finalSegmentManeuver = "";
+        resetFinishDirectionAnimation();
+        AppLog.line(app, "Navigation final segment finish direction cleared: " + clean(reason));
     }
 
     private float distanceToFinishMeters() {
@@ -4925,11 +5168,16 @@ public final class NavigationFeature {
         float routeMeters = distanceMeters(state.routeDistance);
         float directMeters = distanceToFinishMeters();
         boolean routeKnown = routeMeters > 0f;
-        boolean gpsKnown = directMeters > 0f;
+        boolean gpsKnown = directMeters >= 0f;
         if (!routeKnown && !gpsKnown) return;
+        long now = System.currentTimeMillis();
+        if (now <= finishRecoverySuppressUntil) return;
         boolean routeAway = routeKnown && routeMeters > AUTO_FINISH_ROUTE_METERS + FINISH_STALE_RECOVERY_MARGIN_METERS;
         boolean gpsAway = gpsKnown && directMeters > AUTO_FINISH_GPS_METERS + FINISH_STALE_RECOVERY_MARGIN_METERS;
-        if (!routeAway && !gpsAway) return;
+        boolean shouldRecover = routeKnown && gpsKnown
+                ? routeAway && gpsAway
+                : routeAway || gpsAway;
+        if (!shouldRecover) return;
         cancelFinishHold();
         clearManeuverTextHint();
         clearStaleManeuverVisual("recover stale finish state");
@@ -4937,9 +5185,24 @@ public final class NavigationFeature {
                 + " gps=" + directMeters);
     }
 
+    private boolean finishPositionAllowsHold(String source, String distanceText) {
+        if (!finishPointKnown() || !gpsPointKnown()) return true;
+        float directMeters = distanceToFinishMeters();
+        if (directMeters <= 0f) return true;
+        boolean allowed = directMeters <= AUTO_FINISH_GPS_METERS + FINISH_STALE_RECOVERY_MARGIN_METERS;
+        if (!allowed) {
+            AppLog.line(app, "Navigation ignored finish by GPS distance: route="
+                    + clean(distanceText) + " gps=" + directMeters
+                    + " source=" + clean(source));
+        }
+        return allowed;
+    }
+
     private void markFinishReached(String source) {
         long now = System.currentTimeMillis();
         yandexFinishSuppressed = true;
+        clearFinalSegmentFinishDirection("finish reached " + clean(source));
+        finishRecoverySuppressUntil = confirmedFinishHoldSource(source) ? now + FINISH_HOLD_MS : 0L;
         state = new NavigationState(true, true, state.speedExceeded,
                 "context_ra_finish", maneuverLabel("context_ra_finish"), "",
                 state.routeDistance, state.routeTime, state.arrivalTime,
@@ -5137,6 +5400,7 @@ public final class NavigationFeature {
         routeStartedAt = 0L;
         routeReroutingGeneration++;
         routeReroutingUntil = 0L;
+        routeReroutingMinUntil = 0L;
         clearManeuverTextHint();
         resetFinishDirectionAnimation();
         int generation = ++finishGeneration;
@@ -5158,6 +5422,12 @@ public final class NavigationFeature {
     private void cancelFinishHold() {
         finishGeneration++;
         finishHoldUntil = 0L;
+        finishRecoverySuppressUntil = 0L;
+    }
+
+    private static boolean confirmedFinishHoldSource(String source) {
+        String value = clean(source).toLowerCase(Locale.US);
+        return value.contains("core_bridge_finish") || value.contains("route_stop_finish");
     }
 
     private void startOverspeedTextWindow() {
@@ -5254,15 +5524,24 @@ public final class NavigationFeature {
                 textByKeyPart(intent, "distance"));
     }
 
+    private static String routeDistanceForFinalSegment(Intent intent) {
+        return first(metersDistanceText(first(text(intent, "remaining_meters"),
+                        text(intent, "remaining_distance_meters"), text(intent, "distance_left_meters"))),
+                text(intent, "edistance"), text(intent, "route_distance"),
+                text(intent, "remaining_distance"), text(intent, "distance_left"),
+                text(intent, "total_distance"));
+    }
+
     private static String routeTimeFromIntent(Intent intent) {
         return first(text(intent, "route_time"), text(intent, "time_left"),
+                text(intent, "etime"),
                 text(intent, "duration"), text(intent, "remaining_time"),
                 textByKeyPart(intent, "time_left"));
     }
 
     private static String arrivalFromIntent(Intent intent) {
         return first(text(intent, "arrival_time"), text(intent, "arrival"),
-                text(intent, "eta"));
+                text(intent, "atime"), text(intent, "eta"));
     }
 
     private String stableSourceForSpeed(String incoming) {
@@ -6080,6 +6359,27 @@ public final class NavigationFeature {
                 text(intent, "allowed_directions"),
                 text(intent, "allowedDirections"));
         if (TextUtils.isEmpty(topology)) return false;
+        String mainFamily = maneuverFamily(mainManeuver);
+        String highlightFamily = maneuverFamily(highlightManeuver);
+        return ("left".equals(mainFamily) && "right".equals(highlightFamily))
+                || ("right".equals(mainFamily) && "left".equals(highlightFamily));
+    }
+
+    private static boolean providerLaneSchemeBeyondMain(Intent intent, String sourceLower,
+                                                        String mainManeuver, String highlightManeuver,
+                                                        String grayRoad, String mainDistance,
+                                                        String laneDistance) {
+        if (!providerVisualLaneSource(sourceLower)) return false;
+        if (!hasLaneData(intent)) return false;
+        if (!isUsableManeuver(mainManeuver)) return false;
+        float mainMeters = distanceMeters(nonZeroDistance(mainDistance));
+        float laneMeters = distanceMeters(nonZeroDistance(laneDistance));
+        if (mainMeters <= 0f || laneMeters <= 0f) return false;
+        float tolerance = Math.max(20f, mainMeters * 0.12f);
+        if (laneMeters <= mainMeters + tolerance) return false;
+        if (grayRoadIncompatibleWithManeuver(mainManeuver, grayRoad)) return true;
+        if (!isUsableManeuver(highlightManeuver)) return false;
+        if (sameManeuverFamily(mainManeuver, highlightManeuver)) return false;
         String mainFamily = maneuverFamily(mainManeuver);
         String highlightFamily = maneuverFamily(highlightManeuver);
         return ("left".equals(mainFamily) && "right".equals(highlightFamily))
@@ -7361,6 +7661,12 @@ public final class NavigationFeature {
         return 0;
     }
 
+    private static boolean grayRoadIncompatibleWithManeuver(String maneuver, String grayRoad) {
+        int maneuverMask = maneuverRoadMask(maneuver);
+        int grayMask = grayRoadMask(grayRoad);
+        return maneuverMask != 0 && grayMask != 0 && (grayMask & maneuverMask) == 0;
+    }
+
     private static String grayRoadFromMask(int mask) {
         if ((mask & 7) == 7) return "context_ra_gray_straight_left_right";
         if ((mask & 6) == 6) return "context_ra_gray_left_right";
@@ -7540,6 +7846,47 @@ public final class NavigationFeature {
             return new int[]{hour, minute};
         } catch (NumberFormatException ignored) {
             return null;
+        }
+    }
+
+    private static int[] durationHourMinute(String value) {
+        if (TextUtils.isEmpty(value)) return null;
+        String text = value.toLowerCase(Locale.US).replace(',', '.').trim();
+        Matcher clock = Pattern.compile("(\\d{1,3})\\s*[:.]\\s*(\\d{1,2})").matcher(text);
+        if (clock.find()) {
+            return normalizedHourMinute(parseInt(clock.group(1), 0), parseInt(clock.group(2), 0));
+        }
+        int hours = numberBeforeUnit(text, "(?:ч|час|часа|часов|h|hr|hrs|hour|hours)");
+        int minutes = numberBeforeUnit(text, "(?:мин|минута|минуты|минут|min|mins|minute|minutes|m)");
+        if (hours <= 0 && minutes <= 0) {
+            Matcher number = NUMBER.matcher(text);
+            if (number.find()) minutes = Math.round(parseFloat(number.group()));
+        }
+        if (hours <= 0 && minutes <= 0) return null;
+        return normalizedHourMinute(hours, minutes);
+    }
+
+    private static int[] normalizedHourMinute(int hours, int minutes) {
+        if (minutes >= 60) {
+            hours += minutes / 60;
+            minutes = minutes % 60;
+        }
+        if (hours < 0) hours = 0;
+        if (minutes < 0) minutes = 0;
+        return new int[]{Math.min(hours, 23), Math.min(minutes, 59)};
+    }
+
+    private static int numberBeforeUnit(String text, String unitPattern) {
+        Matcher matcher = Pattern.compile("(\\d+)\\s*" + unitPattern).matcher(text);
+        if (!matcher.find()) return 0;
+        return parseInt(matcher.group(1), 0);
+    }
+
+    private static int parseInt(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            return fallback;
         }
     }
 

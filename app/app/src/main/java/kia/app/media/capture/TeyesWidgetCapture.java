@@ -12,6 +12,7 @@ import android.text.TextUtils;
 import java.util.Locale;
 
 import kia.app.media.domain.MediaFeature;
+import kia.app.media.domain.RadioStationStore;
 
 final class TeyesWidgetCapture {
     private static final String PACKAGE = "com.teyes.music.widget";
@@ -213,8 +214,10 @@ final class TeyesWidgetCapture {
             return true;
         }
         String teyesStation = teyesRadio.stationName(radio.source(), frequency);
+        String station = RadioStationStore.resolve(app, radio.source(), frequency,
+                radio.stationName(teyesStation));
         MediaFeature.get(app).report(radio.source(), SpdRadioServiceClient.PACKAGE,
-                frequency, radio.stationName(teyesStation), -1L, radio.isPlaying());
+                frequency, station, -1L, radio.isPlaying());
         return true;
     }
 
@@ -228,7 +231,8 @@ final class TeyesWidgetCapture {
         }
         String frequency = radio.frequencyText();
         if (!stableAmFrequency("AM", frequency)) return true;
-        MediaFeature.get(app).report("AM", SpdRadioServiceClient.PACKAGE, frequency, "", -1L,
+        String station = RadioStationStore.resolve(app, "AM", frequency, "");
+        MediaFeature.get(app).report("AM", SpdRadioServiceClient.PACKAGE, frequency, station, -1L,
                 radio.isPlaying());
         return true;
     }

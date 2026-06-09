@@ -3,6 +3,7 @@ package kia.app.qa;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.location.Location;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -15,10 +16,13 @@ import kia.app.core.model.TpmsState;
 import kia.app.media.capture.MediaCaptureManager;
 import kia.app.media.cluster.MediaClusterSender;
 import kia.app.media.domain.CallFeature;
+import kia.app.media.overlay.MediaOverlayController;
 import kia.app.core.settings.AppSettings;
+import kia.app.entry.AppService;
 import kia.app.navigation.capture.DgisNotificationParser;
 import kia.app.navigation.domain.NavigationFeature;
 import kia.app.navigation.domain.NavigationOutputMode;
+import kia.app.navigation.overlay.NavigationOverlayController;
 import kia.app.protocol.adapter.AdapterCommand;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
@@ -34,6 +38,34 @@ public final class QaReceiver extends BroadcastReceiver {
         String scenario = intent.getStringExtra("scenario");
         if ("media_scan".equals(scenario)) {
             MediaCaptureManager.scanOnce(context);
+        } else if ("media_profile_teyes".equals(scenario)) {
+            setMediaProfile(context, AppSettings.MEDIA_PROFILE_TEYES);
+        } else if ("media_profile_universal".equals(scenario)) {
+            setMediaProfile(context, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID);
+        } else if ("media_profile_uart_real".equals(scenario)) {
+            setMediaProfile(context, AppSettings.MEDIA_PROFILE_UART_REAL);
+        } else if ("media_profile_off".equals(scenario)) {
+            setMediaProfile(context, AppSettings.MEDIA_PROFILE_OFF);
+        } else if ("nav_overlay_on".equals(scenario)) {
+            AppSettings.setNavDebugVisible(context, true);
+            AppSettings.setNavOverlayEnabled(context, true);
+            AppService.start(context);
+            NavigationOverlayController.get(context).apply();
+            AppLog.line(context, "QA nav overlay: on");
+        } else if ("nav_overlay_off".equals(scenario)) {
+            AppSettings.setNavDebugVisible(context, false);
+            AppSettings.setNavOverlayEnabled(context, false);
+            NavigationOverlayController.get(context).apply();
+            AppLog.line(context, "QA nav overlay: off");
+        } else if ("media_overlay_on".equals(scenario)) {
+            AppSettings.setMediaOverlayEnabled(context, true);
+            AppService.start(context);
+            MediaOverlayController.get(context).apply();
+            AppLog.line(context, "QA media overlay: on");
+        } else if ("media_overlay_off".equals(scenario)) {
+            AppSettings.setMediaOverlayEnabled(context, false);
+            MediaOverlayController.get(context).apply();
+            AppLog.line(context, "QA media overlay: off");
         } else if ("nav_turn".equals(scenario)) {
             NavigationFeature.get(context).sendManeuver("context_ra_turn_right", "120", "м", "ул. Абая");
         } else if ("nav_2gis".equals(scenario)) {
@@ -155,6 +187,48 @@ public final class QaReceiver extends BroadcastReceiver {
             feature.handle(qaNavGrayStraightRightIntent(12));
             feature.handle(qaNavStaleRightLaneLeftMainIntent());
             AppLog.line(context, "QA nav stale lane conflict sample sent");
+        } else if ("nav_future_lane_gray_conflict_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_future_lane_gray_conflict_reset");
+            feature.setActive(true, "qa_nav_future_lane_gray_conflict");
+            feature.handle(qaNavFutureLaneGrayConflictIntent());
+            AppLog.line(context, "QA nav future lane gray conflict sample sent");
+        } else if ("nav_final_segment_finish_direction_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_final_segment_reset");
+            feature.setActive(true, "qa_nav_final_segment");
+            feature.updateGpsLocation(qaNavFinalSegmentLocation());
+            feature.updateDeviceHeading(0f, 5f, "qa_nav_final_segment");
+            feature.handle(qaNavFinalSegmentBeforeIntent());
+            feature.handle(qaNavFinalSegmentAfterIntent());
+            AppLog.line(context, "QA nav final segment finish direction sample sent");
+        } else if ("nav_final_segment_stale_distance_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_final_segment_stale_reset");
+            feature.setActive(true, "qa_nav_final_segment_stale");
+            feature.updateGpsLocation(qaNavFinalSegmentLocation());
+            feature.updateDeviceHeading(0f, 5f, "qa_nav_final_segment_stale");
+            feature.handle(qaNavFinalSegmentStaleBeforeIntent());
+            feature.handle(qaNavFinalSegmentStaleAfterIntent());
+            AppLog.line(context, "QA nav final segment stale distance sample sent");
+        } else if ("nav_final_segment_active_stale_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_final_segment_active_stale_reset");
+            feature.setActive(true, "qa_nav_final_segment_active_stale");
+            feature.updateGpsLocation(qaNavFinalSegmentLocation());
+            feature.updateDeviceHeading(0f, 5f, "qa_nav_final_segment_active_stale");
+            feature.handle(qaNavFinalSegmentActiveStaleIntent());
+            AppLog.line(context, "QA nav final segment active stale sample sent");
+        } else if ("nav_finish_hold_stale_route_gps_near_sample".equals(scenario)) {
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_finish_hold_stale_route_gps_near_reset");
+            feature.setActive(true, "qa_nav_finish_hold_stale_route_gps_near");
+            feature.updateGpsLocation(qaNavFinishHoldGpsNearLocation());
+            feature.updateDeviceHeading(0f, 5f, "qa_nav_finish_hold_stale_route_gps_near");
+            feature.handle(qaNavFinishHoldActiveIntent());
+            feature.handle(qaNavFinishHoldFinishedIntent());
+            feature.updateGpsLocation(qaNavFinishHoldGpsNearLocation());
+            AppLog.line(context, "QA nav finish hold stale route gps near sample sent");
         } else if ("tpms_sample".equals(scenario)) {
             TpmsController.get(context).handleAdapterFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS,
                     new byte[]{(byte) 148, (byte) 149, (byte) 150, (byte) 147,
@@ -235,6 +309,13 @@ public final class QaReceiver extends BroadcastReceiver {
         new MediaClusterSender(context).send(state);
         AppLog.line(context, "QA media text: " + source + " / " + packageName
                 + " / " + artist + " / " + title);
+    }
+
+    private static void setMediaProfile(Context context, int profile) {
+        AppSettings.setMediaProfile(context, profile);
+        AppService.start(context);
+        AppLog.line(context, "QA media profile: " + AppSettings.mediaProfileLabel(context));
+        MediaCaptureManager.scanOnce(context);
     }
 
     private static Intent qaNavMainIntent() {
@@ -513,6 +594,176 @@ public final class QaReceiver extends BroadcastReceiver {
                 "straight,right highlight=RIGHT90 lanes=0:PLAIN_LANE:STRAIGHT_AHEAD | 1:PLAIN_LANE:STRAIGHT_AHEAD,RIGHT90*RIGHT90");
         intent.putExtra("current_street", "QA second street");
         intent.putExtra("street_after_maneuver", "QA third street");
+        return intent;
+    }
+
+    private static Intent qaNavFutureLaneGrayConflictIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_MANEUVER);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_future_lane_gray_conflict");
+        intent.putExtra("maneuver", "LEFT");
+        intent.putExtra("direction", "LEFT");
+        intent.putExtra("route_action", "LEFT");
+        intent.putExtra("maneuver_text", "налево");
+        intent.putExtra("voice_hint", "налево");
+        intent.putExtra("distance", "102 м");
+        intent.putExtra("current_maneuver_distance", "102 м");
+        intent.putExtra("current_maneuver_distance_meters", 102);
+        intent.putExtra("distance_to_maneuver", "102 м");
+        intent.putExtra("distance_to_maneuver_meters", 102);
+        intent.putExtra("remaining_distance", "590 м");
+        intent.putExtra("remaining_distance_meters", 590);
+        intent.putExtra("route_time", "2 мин");
+        intent.putExtra("arrival_time", "13:10");
+        intent.putExtra("route_total_len", "590 м");
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_distance", "168 м");
+        intent.putExtra("lane_distance_meters", 168);
+        intent.putExtra("micro_distance", "168 м");
+        intent.putExtra("micro_distance_meters", 168);
+        intent.putExtra("highlighted_direction", "RIGHT90");
+        intent.putExtra("highlighted_directions", "RIGHT90");
+        intent.putExtra("lane_highlight", "RIGHT90");
+        intent.putExtra("recommended_lanes", "RIGHT90");
+        intent.putExtra("route_road_options", "straight,right");
+        intent.putExtra("gray_road_options", "straight,right");
+        intent.putExtra("allowed_directions", "straight,right");
+        intent.putExtra("raw_lane_items",
+                "0:PLAIN_LANE:STRAIGHT_AHEAD | 1:PLAIN_LANE:STRAIGHT_AHEAD,RIGHT90*RIGHT90");
+        intent.putExtra("lane_topology_json",
+                "{\"lanes\":[{\"index\":0,\"kind\":\"PLAIN_LANE\",\"directions\":[\"STRAIGHT_AHEAD\"],\"highlight\":\"\"},{\"index\":1,\"kind\":\"PLAIN_LANE\",\"directions\":[\"STRAIGHT_AHEAD\",\"RIGHT90\"],\"highlight\":\"RIGHT90\"}]}");
+        intent.putExtra("lane_topology",
+                "straight,right highlight=RIGHT90 lanes=0:PLAIN_LANE:STRAIGHT_AHEAD | 1:PLAIN_LANE:STRAIGHT_AHEAD,RIGHT90*RIGHT90");
+        intent.putExtra("current_street", "улица Бимаганова");
+        intent.putExtra("street_after_maneuver", "проспект Мухтара Ауэзова");
+        return intent;
+    }
+
+    private static Location qaNavFinalSegmentLocation() {
+        Location location = new Location("qa_nav_final_segment");
+        location.setLatitude(47.000000);
+        location.setLongitude(51.000000);
+        location.setBearing(0f);
+        location.setSpeed(8f);
+        location.setTime(System.currentTimeMillis());
+        return location;
+    }
+
+    private static Intent qaNavFinalSegmentBeforeIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_MANEUVER);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_final_segment");
+        intent.putExtra("maneuver", "RIGHT");
+        intent.putExtra("direction", "RIGHT");
+        intent.putExtra("maneuver_text", "направо");
+        intent.putExtra("distance", "40 м");
+        intent.putExtra("current_maneuver_distance", "40 м");
+        intent.putExtra("current_maneuver_distance_meters", 40);
+        intent.putExtra("distance_to_maneuver", "40 м");
+        intent.putExtra("distance_to_maneuver_meters", 40);
+        intent.putExtra("remaining_distance", "190 м");
+        intent.putExtra("remaining_distance_meters", 190);
+        intent.putExtra("route_time", "1 мин");
+        intent.putExtra("arrival_time", "12:30");
+        intent.putExtra("route_total_len", "2.4 км");
+        intent.putExtra("current_street", "QA final current");
+        intent.putExtra("street_after_maneuver", "QA final tail");
+        intent.putExtra("finish_point", "47.001350,51.000000");
+        return intent;
+    }
+
+    private static Intent qaNavFinalSegmentAfterIntent() {
+        Intent intent = qaNavFinalSegmentBeforeIntent();
+        intent.putExtra("distance", "0 м");
+        intent.putExtra("current_maneuver_distance", "0 м");
+        intent.putExtra("current_maneuver_distance_meters", 0);
+        intent.putExtra("distance_to_maneuver", "0 м");
+        intent.putExtra("distance_to_maneuver_meters", 0);
+        intent.putExtra("remaining_distance", "150 м");
+        intent.putExtra("remaining_distance_meters", 150);
+        return intent;
+    }
+
+    private static Intent qaNavFinalSegmentStaleBeforeIntent() {
+        Intent intent = qaNavFinalSegmentBeforeIntent();
+        intent.putExtra("distance", "120 м");
+        intent.putExtra("current_maneuver_distance", "120 м");
+        intent.putExtra("current_maneuver_distance_meters", 120);
+        intent.putExtra("distance_to_maneuver", "120 м");
+        intent.putExtra("distance_to_maneuver_meters", 120);
+        intent.putExtra("remaining_distance", "180 м");
+        intent.putExtra("remaining_distance_meters", 180);
+        return intent;
+    }
+
+    private static Intent qaNavFinalSegmentStaleAfterIntent() {
+        Intent intent = qaNavFinalSegmentBeforeIntent();
+        intent.putExtra("distance", "118 м");
+        intent.putExtra("current_maneuver_distance", "118 м");
+        intent.putExtra("current_maneuver_distance_meters", 118);
+        intent.putExtra("distance_to_maneuver", "118 м");
+        intent.putExtra("distance_to_maneuver_meters", 118);
+        intent.putExtra("remaining_distance", "116 м");
+        intent.putExtra("remaining_distance_meters", 116);
+        return intent;
+    }
+
+    private static Intent qaNavFinalSegmentActiveStaleIntent() {
+        Intent intent = qaNavFinalSegmentStaleAfterIntent();
+        intent.setAction(NavigationFeature.KIA_ACTION_NAVI_ON);
+        intent.putExtra("navi_on", true);
+        intent.putExtra("route_distance", "116 м");
+        intent.putExtra("edistance", "116 м");
+        return intent;
+    }
+
+    private static Location qaNavFinishHoldGpsNearLocation() {
+        Location location = new Location("qa_nav_finish_hold");
+        location.setLatitude(47.001350);
+        location.setLongitude(51.000000);
+        location.setBearing(0f);
+        location.setSpeed(1f);
+        location.setTime(System.currentTimeMillis());
+        return location;
+    }
+
+    private static Intent qaNavFinishHoldActiveIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_NAVI_ON);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("navi_on", true);
+        intent.putExtra("bridge_state", "active");
+        intent.putExtra("route_id", "qa_finish_hold_stale_route_gps_near");
+        intent.putExtra("route_distance", "40 м");
+        intent.putExtra("edistance", "40 м");
+        intent.putExtra("remaining_distance", "40 м");
+        intent.putExtra("remaining_distance_meters", 40);
+        intent.putExtra("route_time", "1 мин");
+        intent.putExtra("arrival_time", "12:40");
+        intent.putExtra("maneuver", "FINISH");
+        intent.putExtra("direction", "FINISH");
+        intent.putExtra("current_maneuver_distance", "40 м");
+        intent.putExtra("current_maneuver_distance_meters", 40);
+        intent.putExtra("distance_to_maneuver", "40 м");
+        intent.putExtra("distance_to_maneuver_meters", 40);
+        intent.putExtra("current_street", "QA finish street");
+        intent.putExtra("finish_point", "47.001350,51.000000");
+        return intent;
+    }
+
+    private static Intent qaNavFinishHoldFinishedIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_NAVI_ON);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", false);
+        intent.putExtra("navi_on", false);
+        intent.putExtra("bridge_state", "finished");
+        intent.putExtra("route_id", "qa_finish_hold_stale_route_gps_near");
+        intent.putExtra("finish_reached", true);
+        intent.putExtra("route_finished", true);
         return intent;
     }
 

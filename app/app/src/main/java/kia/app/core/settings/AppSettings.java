@@ -13,6 +13,8 @@ public final class AppSettings {
     private static final String KEY_SCHEMA = "schema";
     private static final String KEY_AUTO_START = "auto_start";
     private static final String KEY_MEDIA = "media_enabled";
+    private static final String KEY_MEDIA_PROFILE = "media_profile";
+    private static final String KEY_MEDIA_PROFILE_CONFIGURED = "media_profile_configured";
     private static final String KEY_CALL = "call_enabled";
     private static final String KEY_MEDIA_OVERLAY = "media_overlay";
     private static final String KEY_NAVIGATION = "navigation_enabled";
@@ -25,6 +27,7 @@ public final class AppSettings {
     private static final String KEY_NAV_TEXT_MODE = "nav_text_mode";
     private static final String KEY_NAV_MANEUVER_TEXT_SECONDS = "nav_maneuver_text_seconds";
     private static final String KEY_NAV_SOURCE_MODE = "nav_source_mode";
+    private static final String KEY_NAV_ETA_TIME_MODE = "nav_eta_time_mode";
     private static final String KEY_NAV_OVERSPEED_TEXT = "nav_overspeed_text";
     private static final String KEY_NAV_OVERLAY = "nav_overlay";
     private static final String KEY_NAV_MICRO_MANEUVERS = "nav_micro_maneuvers";
@@ -64,6 +67,10 @@ public final class AppSettings {
     public static final int OTHER_SOURCE_BLUETOOTH = 2;
     public static final int OTHER_SOURCE_MY_MUSIC = 3;
     public static final int OTHER_SOURCE_CARPLAY = 4;
+    public static final int MEDIA_PROFILE_TEYES = 0;
+    public static final int MEDIA_PROFILE_UNIVERSAL_ANDROID = 1;
+    public static final int MEDIA_PROFILE_UART_REAL = 2;
+    public static final int MEDIA_PROFILE_OFF = 3;
     public static final int MEDIA_TEXT_ARTIST_THEN_TRACK = 0;
     public static final int MEDIA_TEXT_TRACK_ONLY = 1;
     public static final int CALL_SOURCE_ANDROID_AUTO = 0;
@@ -77,6 +84,8 @@ public final class AppSettings {
     public static final int NAV_SOURCE_AUTO = 0;
     public static final int NAV_SOURCE_YANDEX = 1;
     public static final int NAV_SOURCE_2GIS = 2;
+    public static final int NAV_ETA_TIME_ARRIVAL = 0;
+    public static final int NAV_ETA_TIME_REMAINING = 1;
     public static final int FIRMWARE_SOURCE_LATEST = 0;
     public static final int FIRMWARE_SOURCE_BUNDLED_03 = 1;
     public static final int FIRMWARE_SOURCE_BUNDLED_02 = 2;
@@ -93,7 +102,7 @@ public final class AppSettings {
     public static final int RCTA_BACKGROUND_ALPHA_MIN = 0;
     public static final int RCTA_BACKGROUND_ALPHA_MAX = 180;
     public static final int RCTA_BACKGROUND_ALPHA_DEFAULT = 75;
-    private static final int SCHEMA = 36;
+    private static final int SCHEMA = 44;
     private static final int DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS = 0;
     private static final int DEFAULT_NAV_MANEUVER_TEXT_SECONDS = 0;
     private static final int DEFAULT_NAV_MICRO_HOLD_SECONDS = 5;
@@ -118,6 +127,8 @@ public final class AppSettings {
         if (schema == 0) {
             edit.putBoolean(KEY_AUTO_START, true)
                     .putBoolean(KEY_MEDIA, true)
+                    .putInt(KEY_MEDIA_PROFILE, MEDIA_PROFILE_TEYES)
+                    .putBoolean(KEY_MEDIA_PROFILE_CONFIGURED, false)
                     .putBoolean(KEY_CALL, true)
                     .putBoolean(KEY_MEDIA_OVERLAY, false)
                     .putBoolean(KEY_NAVIGATION, true)
@@ -130,6 +141,7 @@ public final class AppSettings {
                     .putInt(KEY_NAV_TEXT_MODE, 0)
                     .putInt(KEY_NAV_MANEUVER_TEXT_SECONDS, DEFAULT_NAV_MANEUVER_TEXT_SECONDS)
                     .putInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_AUTO)
+                    .putInt(KEY_NAV_ETA_TIME_MODE, NAV_ETA_TIME_ARRIVAL)
                     .putBoolean(KEY_NAV_OVERSPEED_TEXT, true)
                     .putBoolean(KEY_NAV_OVERLAY, false)
                     .putBoolean(KEY_NAV_MICRO_MANEUVERS, true)
@@ -174,6 +186,9 @@ public final class AppSettings {
             if (schema < 6 || !prefs.contains(KEY_NAV_SOURCE_MODE)) {
                 edit.putInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_AUTO);
             }
+            if (schema < 40 || !prefs.contains(KEY_NAV_ETA_TIME_MODE)) {
+                edit.putInt(KEY_NAV_ETA_TIME_MODE, NAV_ETA_TIME_ARRIVAL);
+            }
             if (schema < 7 || !prefs.contains(KEY_NAV_OVERSPEED_TEXT)) {
                 edit.putBoolean(KEY_NAV_OVERSPEED_TEXT, true);
             }
@@ -200,6 +215,16 @@ public final class AppSettings {
             }
             if (schema < 12 || !prefs.contains(KEY_MEDIA_TEXT_MODE)) {
                 edit.putInt(KEY_MEDIA_TEXT_MODE, MEDIA_TEXT_ARTIST_THEN_TRACK);
+            }
+            if (schema < 37 || !prefs.contains(KEY_MEDIA_PROFILE)) {
+                edit.putInt(KEY_MEDIA_PROFILE,
+                        prefs.getBoolean(KEY_MEDIA, true) ? MEDIA_PROFILE_TEYES : MEDIA_PROFILE_OFF);
+            }
+            if (schema < 37 || !prefs.contains(KEY_MEDIA_PROFILE_CONFIGURED)) {
+                edit.putBoolean(KEY_MEDIA_PROFILE_CONFIGURED, true);
+            }
+            if (schema < 44) {
+                edit.putBoolean(KEY_MEDIA_PROFILE_CONFIGURED, false);
             }
             if (schema < 13) {
                 edit.putBoolean(KEY_COMPASS, true)
@@ -318,11 +343,54 @@ public final class AppSettings {
     }
 
     public static boolean mediaEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_MEDIA, true);
+        return mediaProfile(context) != MEDIA_PROFILE_OFF;
     }
 
     public static void setMediaEnabled(Context context, boolean value) {
-        prefs(context).edit().putBoolean(KEY_MEDIA, value).apply();
+        if (value) {
+            int current = mediaProfile(context);
+            setMediaProfile(context, current == MEDIA_PROFILE_OFF ? MEDIA_PROFILE_TEYES : current);
+        } else {
+            setMediaProfile(context, MEDIA_PROFILE_OFF);
+        }
+    }
+
+    public static int mediaProfile(Context context) {
+        SharedPreferences p = prefs(context);
+        if (!p.contains(KEY_MEDIA_PROFILE)) {
+            return p.getBoolean(KEY_MEDIA, true) ? MEDIA_PROFILE_TEYES : MEDIA_PROFILE_OFF;
+        }
+        return normalizeMediaProfile(p.getInt(KEY_MEDIA_PROFILE, MEDIA_PROFILE_TEYES));
+    }
+
+    public static void setMediaProfile(Context context, int value) {
+        int normalized = normalizeMediaProfile(value);
+        prefs(context).edit()
+                .putInt(KEY_MEDIA_PROFILE, normalized)
+                .putBoolean(KEY_MEDIA, normalized != MEDIA_PROFILE_OFF)
+                .putBoolean(KEY_MEDIA_PROFILE_CONFIGURED, true)
+                .apply();
+    }
+
+    public static boolean teyesMediaProfile(Context context) {
+        return mediaProfile(context) == MEDIA_PROFILE_TEYES;
+    }
+
+    public static boolean universalMediaProfile(Context context) {
+        int profile = mediaProfile(context);
+        return profile == MEDIA_PROFILE_UNIVERSAL_ANDROID || profile == MEDIA_PROFILE_UART_REAL;
+    }
+
+    public static boolean uartRealMediaProfile(Context context) {
+        return mediaProfile(context) == MEDIA_PROFILE_UART_REAL;
+    }
+
+    public static boolean mediaProfileConfigured(Context context) {
+        return prefs(context).getBoolean(KEY_MEDIA_PROFILE_CONFIGURED, true);
+    }
+
+    public static void setMediaProfileConfigured(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_MEDIA_PROFILE_CONFIGURED, value).apply();
     }
 
     public static boolean callEnabled(Context context) {
@@ -469,6 +537,22 @@ public final class AppSettings {
             default:
                 return "Auto";
         }
+    }
+
+    public static int navEtaTimeMode(Context context) {
+        return clamp(prefs(context).getInt(KEY_NAV_ETA_TIME_MODE, NAV_ETA_TIME_ARRIVAL),
+                NAV_ETA_TIME_ARRIVAL, NAV_ETA_TIME_REMAINING);
+    }
+
+    public static void setNavEtaTimeMode(Context context, int value) {
+        prefs(context).edit().putInt(KEY_NAV_ETA_TIME_MODE,
+                value == NAV_ETA_TIME_REMAINING
+                        ? NAV_ETA_TIME_REMAINING : NAV_ETA_TIME_ARRIVAL).apply();
+    }
+
+    public static String navEtaTimeModeLabel(Context context) {
+        return navEtaTimeMode(context) == NAV_ETA_TIME_REMAINING
+                ? "Осталось" : "Прибытие";
     }
 
     public static boolean navOverlayEnabled(Context context) {
@@ -727,6 +811,24 @@ public final class AppSettings {
         return mediaTextMode(context) == MEDIA_TEXT_TRACK_ONLY ? "Только трек" : "Автор + трек";
     }
 
+    public static String mediaProfileLabel(Context context) {
+        return mediaProfileLabel(mediaProfile(context));
+    }
+
+    public static String mediaProfileLabel(int profile) {
+        switch (normalizeMediaProfile(profile)) {
+            case MEDIA_PROFILE_OFF:
+                return "Выкл";
+            case MEDIA_PROFILE_UNIVERSAL_ANDROID:
+                return "Universal Android";
+            case MEDIA_PROFILE_UART_REAL:
+                return "UART real + Android";
+            case MEDIA_PROFILE_TEYES:
+            default:
+                return "TEYES / CC4 Pro";
+        }
+    }
+
     public static int callSourceMode(Context context) {
         return normalizeCallSource(prefs(context).getInt(KEY_CALL_SOURCE_MODE, CALL_SOURCE_CARPLAY));
     }
@@ -863,6 +965,15 @@ public final class AppSettings {
             return value;
         }
         return CALL_SOURCE_BLUETOOTH;
+    }
+
+    private static int normalizeMediaProfile(int value) {
+        if (value == MEDIA_PROFILE_UNIVERSAL_ANDROID
+                || value == MEDIA_PROFILE_UART_REAL
+                || value == MEDIA_PROFILE_OFF) {
+            return value;
+        }
+        return MEDIA_PROFILE_TEYES;
     }
 
     private static int normalizeRctaStyle(int value) {

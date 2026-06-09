@@ -35,6 +35,7 @@ public final class MediaOverlayController {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final WindowManager windowManager;
     private LinearLayout overlay;
+    private TextView closeButton;
     private TextView statusText;
     private BroadcastReceiver receiver;
     private boolean receiverRegistered;
@@ -96,7 +97,9 @@ public final class MediaOverlayController {
             overlay = createOverlay();
             try {
                 windowManager.addView(overlay, layoutParams());
+                showCloseButton();
             } catch (Exception e) {
+                hideCloseButton();
                 overlay = null;
                 AppLog.line(app, "Media overlay: add failed " + e.getClass().getSimpleName());
                 return;
@@ -106,6 +109,7 @@ public final class MediaOverlayController {
         } else {
             try {
                 windowManager.updateViewLayout(overlay, layoutParams());
+                showCloseButton();
             } catch (Exception ignored) {
             }
         }
@@ -115,6 +119,7 @@ public final class MediaOverlayController {
     private void hide() {
         handler.removeCallbacks(refreshTick);
         if (overlay == null || windowManager == null) {
+            hideCloseButton();
             overlay = null;
             statusText = null;
             return;
@@ -123,8 +128,62 @@ public final class MediaOverlayController {
             windowManager.removeView(overlay);
         } catch (Exception ignored) {
         }
+        hideCloseButton();
         overlay = null;
         statusText = null;
+    }
+
+    private void showCloseButton() {
+        if (windowManager == null) return;
+        if (closeButton == null) {
+            closeButton = closeButton("Отключить", Color.argb(220, 18, 23, 31));
+            try {
+                windowManager.addView(closeButton, closeButtonLayoutParams());
+            } catch (Exception e) {
+                closeButton = null;
+                AppLog.line(app, "Media overlay close: add failed " + e.getClass().getSimpleName());
+            }
+            return;
+        }
+        try {
+            windowManager.updateViewLayout(closeButton, closeButtonLayoutParams());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void hideCloseButton() {
+        if (closeButton == null || windowManager == null) {
+            closeButton = null;
+            return;
+        }
+        try {
+            windowManager.removeView(closeButton);
+        } catch (Exception ignored) {
+        }
+        closeButton = null;
+    }
+
+    private TextView closeButton(String text, int color) {
+        TextView button = new TextView(windowContext);
+        button.setText(text);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(12f);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setIncludeFontPadding(false);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(dp(10), dp(7), dp(10), dp(7));
+        button.setBackground(closeButtonBackground(color));
+        button.setClickable(true);
+        button.setFocusable(false);
+        button.setOnClickListener(v -> disableOverlayFromButton());
+        return button;
+    }
+
+    private void disableOverlayFromButton() {
+        AppSettings.setMediaOverlayEnabled(app, false);
+        AppLog.line(app, "Media overlay: disabled from overlay button");
+        app.sendBroadcast(new Intent(AppIds.ACTION_STATE_CHANGED).setPackage(AppIds.PACKAGE));
+        hide();
     }
 
     private LinearLayout createOverlay() {
@@ -170,6 +229,21 @@ public final class MediaOverlayController {
         params.gravity = Gravity.TOP | Gravity.END;
         params.x = 0;
         params.y = 0;
+        return params;
+    }
+
+    private WindowManager.LayoutParams closeButtonLayoutParams() {
+        int flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(34),
+                overlayWindowType(),
+                flags,
+                PixelFormat.TRANSLUCENT);
+        params.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        params.x = 0;
+        params.y = dp(12);
         return params;
     }
 
@@ -244,6 +318,14 @@ public final class MediaOverlayController {
     private GradientDrawable background() {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(Color.argb(190, 13, 15, 19));
+        return drawable;
+    }
+
+    private GradientDrawable closeButtonBackground(int color) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setStroke(dp(1), Color.argb(150, 255, 255, 255));
+        drawable.setCornerRadius(dp(10));
         return drawable;
     }
 

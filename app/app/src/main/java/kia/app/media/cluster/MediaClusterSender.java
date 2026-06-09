@@ -53,6 +53,14 @@ public final class MediaClusterSender {
         boolean sameMedia = TextUtils.equals(mediaKey, lastMediaKey);
         boolean sendSource = !sameMedia || !TextUtils.equals(sourceKey, lastSourceKey);
 
+        if (AppSettings.uartRealMediaProfile(app)) {
+            if (!sameMedia) {
+                sendTextSequence(gateway, textCommand(kind, state), mediaKey, firstText, trackText);
+            }
+            rememberSource(sourceKey);
+            return;
+        }
+
         if (radioLike) {
             if (sendSource) {
                 if (!TextUtils.equals(sourceKey, lastSourceKey)) {
@@ -90,6 +98,15 @@ public final class MediaClusterSender {
         lastMediaKey = mediaKey;
         cancelPendingTrackText();
         AdapterGateway gateway = AdapterGateway.get(app);
+        if (AppSettings.uartRealMediaProfile(app)) {
+            String line = firstNonEmpty(cleanDisplay(state.title), cleanDisplay(state.artist), source);
+            if (!TextUtils.isEmpty(line)) {
+                gateway.send(AdapterCommand.quiet("media source text real",
+                        AdapterProtocol.textPacket(textCommand(kind, state), line)));
+            }
+            rememberSource(sourceKey);
+            return;
+        }
         sendMediaOff(gateway);
         if (textOnlySource(kind)) {
             gateway.send(AdapterCommand.quiet("media source text only",
@@ -344,6 +361,9 @@ public final class MediaClusterSender {
     }
 
     private MediaSourceKind effectiveKind(MediaState state) {
+        if (AppSettings.universalMediaProfile(app) && isYandexMusic(state)) {
+            return MediaSourceKind.MY_MUSIC;
+        }
         MediaSourceKind kind = isTeyesOnline(state)
                 ? MediaSourceKind.MY_MUSIC
                 : MediaSourceKind.from(state.source, state.packageName);
@@ -357,6 +377,13 @@ public final class MediaClusterSender {
             default:
                 return kind;
         }
+    }
+
+    private static boolean isYandexMusic(MediaState state) {
+        if (state == null) return false;
+        String text = ((state.source == null ? "" : state.source) + " "
+                + (state.packageName == null ? "" : state.packageName)).toLowerCase();
+        return text.contains("yandex") || text.contains("яндекс");
     }
 
     private static String cleanDisplay(String value) {

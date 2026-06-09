@@ -36,6 +36,10 @@ final class AndroidMediaSessionClient {
         return readSnapshot(null, true, false);
     }
 
+    Snapshot readUniversalSnapshot() {
+        return readSnapshot(null, false, false);
+    }
+
     Snapshot readPackageSnapshot(String packageName) {
         return readSnapshot(packageName, false, true);
     }
@@ -75,7 +79,10 @@ final class AndroidMediaSessionClient {
     }
 
     private Snapshot snapshot(MediaController controller, boolean applyIgnore, boolean allowStopped) {
-        if (controller == null || (applyIgnore && ignore(controller.getPackageName()))) return null;
+        if (controller == null || TextUtils.equals(app.getPackageName(), controller.getPackageName())
+                || (applyIgnore && ignore(controller.getPackageName()))) {
+            return null;
+        }
         PlaybackState state = controller.getPlaybackState();
         MediaMetadata metadata = controller.getMetadata();
         if (state == null || metadata == null) return null;
@@ -102,8 +109,7 @@ final class AndroidMediaSessionClient {
 
     private boolean ignore(String pkg) {
         if (TextUtils.isEmpty(pkg)) return true;
-        return pkg.equals(app.getPackageName())
-                || pkg.startsWith("com.android.")
+        return pkg.startsWith("com.android.")
                 || pkg.startsWith("android")
                 || pkg.startsWith("com.spd.")
                 || pkg.startsWith("com.teyes.")

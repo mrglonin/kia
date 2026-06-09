@@ -19,6 +19,7 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
 import android.net.Uri;
@@ -34,8 +35,10 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.CompoundButton;
 import android.widget.EditText;
@@ -44,12 +47,14 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
+import android.widget.Space;
 import android.widget.Switch;
 import android.widget.TextView;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 import kia.app.R;
@@ -70,6 +75,7 @@ import kia.app.diagnostics.GsUsbCanLogger;
 import kia.app.media.capture.MediaNotificationListener;
 import kia.app.media.domain.CallFeature;
 import kia.app.media.domain.MediaFeature;
+import kia.app.media.domain.RadioStationStore;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.navigation.domain.NavigationFeature;
 import kia.app.navigation.domain.NavigationModeSettings;
@@ -142,6 +148,7 @@ public final class MainActivity extends Activity {
     private CompoundButton mediaTabToggle;
     private CompoundButton callEnabledToggle;
     private CompoundButton mediaDebugToggle;
+    private TextView mediaDebugStatus;
     private TextView navigationStatus;
     private TextView navigationDebugStatus;
     private CompoundButton navigationDebugToggle;
@@ -272,7 +279,157 @@ public final class MainActivity extends Activity {
         applyImmersiveMode();
         AppService.start(this);
         requestRuntimePermissions();
+        handler.postDelayed(this::maybeShowMediaProfileWizard, 900L);
         refresh();
+    }
+
+    private void maybeShowMediaProfileWizard() {
+        if (isFinishing() || isDestroyed() || AppSettings.mediaProfileConfigured(this)) return;
+        AlertDialog dialog = new AlertDialog.Builder(this).create();
+        dialog.setView(mediaProfileWizardView(dialog), 0, 0, 0, 0);
+        dialog.setOnCancelListener(d -> AppSettings.setMediaProfileConfigured(this, true));
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setDimAmount(0.68f);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
+            lp.copyFrom(window.getAttributes());
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            lp.width = Math.min(screenWidth - dp(28), dp(mediaProfileWizardWideLayout() ? 640 : 720));
+            lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            window.setAttributes(lp);
+        }
+    }
+
+    private View mediaProfileWizardView(AlertDialog dialog) {
+        boolean wide = mediaProfileWizardWideLayout();
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(wide ? 18 : 22), dp(wide ? 16 : 20),
+                dp(wide ? 18 : 22), dp(wide ? 24 : 26));
+        panel.setBackground(gradient(Color.rgb(18, 23, 31), Color.rgb(11, 14, 20),
+                softColor(COLOR_ACCENT_BLUE, 120), dp(1), dp(22)));
+
+        LinearLayout head = row();
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titleBox = new LinearLayout(this);
+        titleBox.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text("KIA Media", wide ? 21 : (isCompact() ? 23 : 28), Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView subtitle = text("Выберите профиль магнитолы", wide ? 12 : (isCompact() ? 13 : 15),
+                COLOR_MUTED);
+        titleBox.addView(title);
+        titleBox.addView(subtitle);
+        head.addView(titleBox, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        panel.addView(head);
+
+        TextView hint = text("Поменять можно позже в Media. TEYES отделен, универсальные режимы не смешиваются со старым рабочим.",
+                wide ? 11 : (isCompact() ? 12 : 14), COLOR_MUTED);
+        hint.setMaxLines(wide ? 2 : 3);
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hintLp.setMargins(0, dp(wide ? 6 : 12), 0, dp(wide ? 4 : 10));
+        panel.addView(hint, hintLp);
+
+        if (wide) {
+            panel.addView(mediaProfileWizardChoiceRow(dialog,
+                    mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_TEYES,
+                            "TEYES / CC4 Pro", "виджеты TEYES, SPD media, radio, BT",
+                            COLOR_ACCENT_BLUE),
+                    mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID,
+                            "Universal Android", "MediaSession + база радиостанций Kia",
+                            COLOR_ACCENT)));
+            panel.addView(mediaProfileWizardChoiceRow(dialog,
+                    mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UART_REAL,
+                            "UART real + Android", "0x7A не трогаем, шлем только текст",
+                            COLOR_WARNING),
+                    mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_OFF,
+                            "Media выключено", "музыку ведет штатный UART",
+                            COLOR_MUTED)));
+        } else {
+            panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_TEYES,
+                    "TEYES / CC4 Pro", "старый стабильный режим: widget, SPD media, radio, Bluetooth",
+                    COLOR_ACCENT_BLUE));
+            panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID,
+                    "Universal Android", "музыка через MediaSession, радио по частоте и базе Kia",
+                    COLOR_ACCENT));
+            panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UART_REAL,
+                    "UART real + Android", "не меняет source 0x7A, отправляет только текст 0x20-0x25",
+                    COLOR_WARNING));
+            panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_OFF,
+                    "Media выключено", "Kia не отправляет музыку, штатный UART работает сам",
+                    COLOR_MUTED));
+        }
+        Space bottomGuard = new Space(this);
+        panel.addView(bottomGuard, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(wide ? 2 : 4)));
+
+        return panel;
+    }
+
+    private LinearLayout mediaProfileWizardChoiceRow(AlertDialog dialog, View left, View right) {
+        LinearLayout line = row();
+        LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        leftLp.setMargins(0, dp(6), dp(5), 0);
+        LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        rightLp.setMargins(dp(5), dp(6), 0, 0);
+        line.addView(left, leftLp);
+        line.addView(right, rightLp);
+        return line;
+    }
+
+    private View mediaProfileWizardChoice(AlertDialog dialog, int profile, String title,
+                                          String hint, int color) {
+        boolean wide = mediaProfileWizardWideLayout();
+        boolean selected = AppSettings.mediaProfile(this) == profile;
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(wide ? 12 : 16), dp(wide ? 9 : 12),
+                dp(wide ? 12 : 16), dp(wide ? 9 : 12));
+        item.setMinimumHeight(dp(wide ? 72 : 80));
+        item.setClickable(true);
+        item.setFocusable(true);
+        item.setBackground(gradient(softColor(color, selected ? 92 : 42),
+                softColor(COLOR_SETTINGS_PANEL_ALT, 220),
+                softColor(selected ? color : Color.WHITE, selected ? 120 : 32), dp(1), dp(12)));
+
+        LinearLayout header = row();
+        TextView name = text(title, wide ? 13 : (isCompact() ? 15 : 17), Color.WHITE);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setSingleLine(false);
+        name.setMaxLines(1);
+        LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        header.addView(name, nameLp);
+        TextView check = text("выбрано", wide ? 10 : 11, COLOR_MUTED);
+        check.setGravity(Gravity.CENTER);
+        check.setTypeface(Typeface.DEFAULT_BOLD);
+        check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
+        header.addView(check);
+
+        TextView sub = text(hint, wide ? 10 : (isCompact() ? 11 : 13), COLOR_MUTED);
+        sub.setMaxLines(2);
+        item.addView(header);
+        item.addView(sub);
+
+        item.setOnClickListener(v -> {
+            setMediaProfile(profile);
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(8), 0, 0);
+        item.setLayoutParams(lp);
+        return item;
+    }
+
+    private boolean mediaProfileWizardWideLayout() {
+        return isLandscapeWindow() || screenWidthDp() >= 620;
     }
 
     @Override
@@ -600,6 +757,32 @@ public final class MainActivity extends Activity {
         return panel;
     }
 
+    private LinearLayout mediaRadioStationPanel() {
+        LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
+        addSettingsPanelHeader(panel, "Радиостанции",
+                "Kia хранит названия по частоте и заполняет новые частоты автоматически",
+                COLOR_ACCENT_BLUE);
+        TextView summary = text(RadioStationStore.summary(this, 5), isCompact() ? 13 : 15,
+                Color.rgb(235, 241, 246));
+        LinearLayout.LayoutParams summaryLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        summaryLp.setMargins(0, dp(12), 0, 0);
+        panel.addView(summary, summaryLp);
+
+        MediaState media = StateStore.media();
+        String frequency = RadioStationStore.currentFrequency(media);
+        String band = RadioStationStore.currentBand(media);
+        String currentHint = frequency.isEmpty()
+                ? "включите радио, чтобы появилась частота"
+                : band + " " + frequency + " -> " + emptyDash(media.title);
+        addActionGrid(panel,
+                action("Текущая", currentHint, frequency.isEmpty() ? COLOR_MUTED : COLOR_ACCENT_BLUE,
+                        this::showCurrentRadioStationDialog),
+                action("Список", "все сохранённые частоты", COLOR_ACCENT_BLUE,
+                        this::showRadioStationListDialog));
+        return panel;
+    }
+
     private View mainGearButton() {
         LinearLayout row = row();
         row.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
@@ -714,6 +897,7 @@ public final class MainActivity extends Activity {
         mediaTabToggle = null;
         callEnabledToggle = null;
         mediaDebugToggle = null;
+        mediaDebugStatus = null;
         navigationStatus = null;
         navigationDebugStatus = null;
         navigationDebugToggle = null;
@@ -2246,22 +2430,49 @@ public final class MainActivity extends Activity {
 
     private void renderMediaTab(LinearLayout root) {
         root.addView(mediaMusicPanel());
-        root.addView(mediaCallPanel());
+        if (AppSettings.universalMediaProfile(this)) {
+            root.addView(mediaRadioStationPanel());
+        }
+        if (AppSettings.teyesMediaProfile(this)) {
+            root.addView(mediaCallPanel());
+        }
         root.addView(mediaDebugPanel());
     }
 
     private LinearLayout mediaMusicPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
         mediaEnabledToggle = addSettingsPanelSwitchHeader(panel, "Музыка и текст",
-                "источники, трек, артист и USB-отправка в машину",
+                "профиль магнитолы, трек, артист и отправка в машину",
                 AppSettings.mediaEnabled(this), this::toggleMediaEnabled);
+
+        panel.addView(settingsDivider());
+        addSettingsSubHeader(panel, "Профиль магнитолы", "старый TEYES не смешивается с универсальными режимами");
+        addActionGridColumns(panel, 2,
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_TEYES, "TEYES / CC4", "текущий стабильный режим"),
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID, "Android", "MediaSession + радио"),
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_UART_REAL, "UART real", "только текст поверх UART"),
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_OFF, "Выкл", "не трогать медиа"));
 
         if (!AppSettings.mediaEnabled(this)) {
             return panel;
         }
+        int profile = AppSettings.mediaProfile(this);
         panel.addView(settingsDivider());
-        addSettingsSubHeader(panel, "Уведомление other",
-                "какой штатный режим имитировать для Yandex Music, Spotify и Android-плееров");
+        addSettingsSubHeader(panel, mediaProfileSettingsTitle(profile), mediaProfileSettingsHint(profile));
+        if (profile == AppSettings.MEDIA_PROFILE_TEYES) {
+            addActionGrid(panel,
+                    action("TEYES widget", "SPD media/radio/bt", COLOR_ACCENT_BLUE, true, this::noopAction));
+        } else if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID) {
+            addActionGrid(panel,
+                    action("MediaSession", "трек, артист, длительность", COLOR_ACCENT_BLUE, true, this::noopAction),
+                    action("Радио", "частота + база Kia", COLOR_ACCENT_BLUE, true, this::noopAction));
+        } else if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) {
+            addActionGrid(panel,
+                    action("Text only", "без отправки source 0x7A", COLOR_ACCENT_BLUE, true, this::noopAction),
+                    action("UART real", "режим и частота штатно", COLOR_ACCENT_BLUE, true, this::noopAction));
+        }
+        panel.addView(settingsDivider());
+        addSettingsSubHeader(panel, otherMediaSourceTitle(profile), otherMediaSourceHint(profile));
         addActionGrid(panel,
                 action("Android", "универсальный режим", otherModeColor(AppSettings.OTHER_SOURCE_ANDROID),
                         () -> setOtherMediaSourceMode(AppSettings.OTHER_SOURCE_ANDROID)),
@@ -2279,6 +2490,115 @@ public final class MainActivity extends Activity {
                         () -> setMediaTextMode(AppSettings.MEDIA_TEXT_TRACK_ONLY)));
 
         return panel;
+    }
+
+    private void noopAction() {
+    }
+
+    private String mediaProfileSettingsTitle(int profile) {
+        if (profile == AppSettings.MEDIA_PROFILE_TEYES) return "TEYES источники";
+        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) return "UART real";
+        return "Universal Android";
+    }
+
+    private String mediaProfileSettingsHint(int profile) {
+        if (profile == AppSettings.MEDIA_PROFILE_TEYES) {
+            return "старый прямой захват CC4 Pro без универсальных сканов";
+        }
+        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) {
+            return "музыка из MediaSession, радио по частоте, source 0x7A не отправляем";
+        }
+        return "музыка из MediaSession, радио по частоте и внутренней базе";
+    }
+
+    private String otherMediaSourceTitle(int profile) {
+        return profile == AppSettings.MEDIA_PROFILE_TEYES ? "Уведомление other" : "ID текстового кадра";
+    }
+
+    private String otherMediaSourceHint(int profile) {
+        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) {
+            return "куда отправлять обычные Android-плееры без смены source 0x7A";
+        }
+        if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID) {
+            return "куда отправлять обычные Android-плееры";
+        }
+        return "какой штатный режим имитировать для Yandex Music, Spotify и Android-плееров";
+    }
+
+    private void showCurrentRadioStationDialog() {
+        MediaState media = StateStore.media();
+        String frequency = RadioStationStore.currentFrequency(media);
+        if (frequency.isEmpty()) {
+            AppLog.line(this, "Radio stations: no current frequency");
+            refresh();
+            return;
+        }
+        showRadioStationEditDialog(RadioStationStore.currentBand(media), frequency, media.title);
+    }
+
+    private void showRadioStationListDialog() {
+        List<RadioStationStore.Entry> entries = RadioStationStore.entries(this);
+        if (entries.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Радиостанции")
+                    .setMessage("Станции появятся автоматически после включения радио.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
+        String[] labels = new String[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            RadioStationStore.Entry entry = entries.get(i);
+            labels[i] = entry.band + " " + entry.frequency + " -> " + entry.name;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Радиостанции")
+                .setItems(labels, (dialog, which) -> {
+                    RadioStationStore.Entry entry = entries.get(which);
+                    showRadioStationEditDialog(entry.band, entry.frequency, entry.name);
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
+    }
+
+    private void showRadioStationEditDialog(String band, String frequency, String currentName) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setText(currentName == null ? "" : currentName);
+        input.setSelectAllOnFocus(true);
+        int pad = dp(18);
+        input.setPadding(pad, dp(8), pad, dp(8));
+        new AlertDialog.Builder(this)
+                .setTitle(band + " " + frequency)
+                .setView(input)
+                .setPositiveButton("Сохранить", (dialog, which) -> {
+                    RadioStationStore.setStationName(this, band, frequency, input.getText().toString());
+                    AppLog.line(this, "Radio station saved: " + band + " " + frequency);
+                    resendRadioStationName(band, frequency, "radio station saved");
+                    renderTab();
+                    refresh();
+                })
+                .setNeutralButton("Сбросить", (dialog, which) -> {
+                    RadioStationStore.clearStationName(this, band, frequency);
+                    AppLog.line(this, "Radio station reset: " + band + " " + frequency);
+                    resendRadioStationName(band, frequency, "radio station reset");
+                    renderTab();
+                    refresh();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void resendRadioStationName(String band, String frequency, String reason) {
+        MediaState media = StateStore.media();
+        if (frequency.equals(RadioStationStore.currentFrequency(media))) {
+            String station = RadioStationStore.resolve(this, band, frequency, "");
+            MediaFeature.get(this).report(media.source, media.packageName, media.artist, station,
+                    media.durationMs, media.playing);
+        } else {
+            MediaFeature.get(this).resendCurrent(reason);
+        }
     }
 
     private LinearLayout mediaCallPanel() {
@@ -2301,8 +2621,19 @@ public final class MainActivity extends Activity {
     private LinearLayout mediaDebugPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
         mediaDebugToggle = addSettingsPanelSwitchHeader(panel, "Отладка overlay",
-                "показывает текущую музыку и BT звонок поверх экрана",
+                "показывает media-состояние для скриншота и разбора",
                 AppSettings.mediaOverlayEnabled(this), this::toggleMediaDebug);
+        if (AppSettings.mediaOverlayEnabled(this)) {
+            panel.addView(settingsDivider());
+            mediaDebugStatus = text(mediaDebugText(), isCompact() ? 12 : 14,
+                    Color.rgb(235, 241, 246));
+            mediaDebugStatus.setTypeface(Typeface.MONOSPACE);
+            mediaDebugStatus.setLineSpacing(0f, 1.08f);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, dp(10), 0, 0);
+            panel.addView(mediaDebugStatus, lp);
+        }
         return panel;
     }
 
@@ -2357,6 +2688,7 @@ public final class MainActivity extends Activity {
                 navSettingsAction(navAddressAction(0, "Улица сейчас", "текущая улица"), normalMode),
                 navSettingsAction(navAddressAction(1, "После манёвра", "улица после поворота"), normalMode),
                 navSettingsAction(navAddressAction(2, "Улица финиша", "адрес или место назначения"), normalMode),
+                navSettingsAction(navEtaTimeModeAction(), normalMode),
                 navSettingsAction(action(AppSettings.navOverspeedTextEnabled(this) ? "Превышение: вкл" : "Превышение: выкл",
                         "предупреждение на панели", choiceColor(AppSettings.navOverspeedTextEnabled(this)),
                         AppSettings.navOverspeedTextEnabled(this), () -> {
@@ -2690,6 +3022,9 @@ public final class MainActivity extends Activity {
         if (navigationDebugStatus != null) {
             navigationDebugStatus.setText(navigationDebugText());
         }
+        if (mediaDebugStatus != null) {
+            mediaDebugStatus.setText(mediaDebugText());
+        }
         if (diagnosticsStatus != null) {
             diagnosticsStatus.setText(canbusStatusText());
         }
@@ -2928,7 +3263,16 @@ public final class MainActivity extends Activity {
     private void toggleMediaEnabled(CompoundButton button, boolean enabled) {
         AppSettings.setMediaEnabled(this, enabled);
         AppService.start(this);
-        AppLog.line(this, "Media feature: " + enabled);
+        AppLog.line(this, "Media feature: " + AppSettings.mediaProfileLabel(this));
+        renderTab();
+        refresh();
+    }
+
+    private void setMediaProfile(int profile) {
+        AppSettings.setMediaProfile(this, profile);
+        AppService.start(this);
+        AppLog.line(this, "Media profile: " + AppSettings.mediaProfileLabel(this));
+        MediaFeature.get(this).resendCurrent("media profile " + AppSettings.mediaProfileLabel(this));
         renderTab();
         refresh();
     }
@@ -2978,6 +3322,11 @@ public final class MainActivity extends Activity {
         refresh();
     }
 
+    private View mediaProfileAction(int profile, String title, String hint) {
+        boolean selected = AppSettings.mediaProfile(this) == profile;
+        return action(title, hint, choiceColor(selected), selected, () -> setMediaProfile(profile));
+    }
+
     private void setCallSourceMode(int mode) {
         AppSettings.setCallSourceMode(this, mode);
         AppLog.line(this, "Call source mode: " + AppSettings.callSourceLabel(this));
@@ -3015,9 +3364,62 @@ public final class MainActivity extends Activity {
             out.append(media.playing ? "Играет" : "Пауза");
             if (media.durationMs >= 0L) out.append(" | ").append(formatMediaDuration(media.durationMs));
         }
-        out.append("\nРежим панели: ").append(AppSettings.otherMediaSourceLabel(this));
+        out.append("\nПрофиль: ").append(AppSettings.mediaProfileLabel(this));
+        out.append("\nРежим other: ").append(AppSettings.otherMediaSourceLabel(this));
         out.append("\nТекст панели: ").append(AppSettings.mediaTextModeLabel(this));
         return out.toString();
+    }
+
+    private String mediaDebugText() {
+        MediaState media = StateStore.media();
+        String frequency = RadioStationStore.currentFrequency(media);
+        StringBuilder out = new StringBuilder();
+        out.append("profile=").append(AppSettings.mediaProfileLabel(this));
+        out.append("\ncapture=").append(mediaCaptureModeText());
+        out.append("\ntextId=").append(mediaTextCommandDebug(media));
+        out.append(" other=").append(AppSettings.otherMediaSourceLabel(this));
+        out.append("\nsource=").append(emptyDash(media.source));
+        out.append("\npackage=").append(emptyDash(media.packageName));
+        out.append("\nartist=").append(emptyDash(media.artist));
+        out.append("\ntitle=").append(emptyDash(media.title));
+        out.append("\nplaying=").append(media.playing);
+        out.append(" duration=").append(media.durationMs);
+        out.append("\nradio=").append(frequency.isEmpty()
+                ? "-"
+                : RadioStationStore.currentBand(media) + " " + frequency);
+        out.append(" stations=").append(RadioStationStore.entries(this).size());
+        out.append("\nnotify=").append(yesNo(notificationPermissionGranted()));
+        out.append(" listener=").append(yesNo(notificationListenerEnabled()));
+        out.append(" audio=").append(yesNo(mediaAudioPermissionGranted()));
+        out.append("\nusb=").append(StateStore.adapter().usbText);
+        out.append(" rx=").append(timeText(StateStore.adapter().lastFrameAt));
+        return out.toString();
+    }
+
+    private String mediaCaptureModeText() {
+        int profile = AppSettings.mediaProfile(this);
+        if (profile == AppSettings.MEDIA_PROFILE_TEYES) return "teyes_widget+spd";
+        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) return "media_session+uart_real_text_only";
+        if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID) return "media_session+radio_db";
+        return "off";
+    }
+
+    private String mediaTextCommandDebug(MediaState media) {
+        String text = ((media == null ? "" : media.source) + " "
+                + (media == null ? "" : media.packageName)).toLowerCase(Locale.US);
+        if (text.contains("fm") || text.contains("am") || text.contains("radio")
+                || text.contains("радио")) return "0x20 radio";
+        if (text.contains("usb") || text.contains("spd.media")) return "0x22 usb";
+        if (text.contains("yandex") || text.contains("яндекс")
+                || text.contains("my music") || text.contains("teyes")) return "0x24 my_music";
+        if (text.contains("carplay") || text.contains("car play")) return "0x25 carplay";
+        if (text.contains("bluetooth") || text.contains("btmusic")
+                || text.contains("a2dp") || text.contains("avrcp")) return "0x21 bt";
+        return AppSettings.otherMediaSourceMode(this) == AppSettings.OTHER_SOURCE_MY_MUSIC
+                ? "0x24 my_music"
+                : AppSettings.otherMediaSourceMode(this) == AppSettings.OTHER_SOURCE_CARPLAY
+                ? "0x25 carplay"
+                : "0x23 android_auto";
     }
 
     private String callStatusText() {
@@ -3491,6 +3893,17 @@ public final class MainActivity extends Activity {
                 seconds > 0, () -> setNavManeuverTextSeconds(nextValue(seconds, 0, 5, 10, 15)));
     }
 
+    private View navEtaTimeModeAction() {
+        int mode = AppSettings.navEtaTimeMode(this);
+        boolean remaining = mode == AppSettings.NAV_ETA_TIME_REMAINING;
+        return action("Время: " + AppSettings.navEtaTimeModeLabel(this).toLowerCase(Locale.ROOT),
+                remaining ? "показывать сколько осталось ехать" : "показывать час прибытия",
+                remaining ? COLOR_ACCENT : COLOR_ACCENT_BLUE, true,
+                () -> setNavEtaTimeMode(remaining
+                        ? AppSettings.NAV_ETA_TIME_ARRIVAL
+                        : AppSettings.NAV_ETA_TIME_REMAINING));
+    }
+
     private View navFinishLeadCycleAction() {
         int meters = AppSettings.navFinishDirectionLeadMeters(this);
         return action("Старт: " + navFinishLeadText(meters), "сменить порог",
@@ -3526,6 +3939,14 @@ public final class MainActivity extends Activity {
         AppSettings.setNavManeuverTextSeconds(this, seconds);
         AppLog.line(this, "Navigation maneuver text seconds: "
                 + AppSettings.navManeuverTextSeconds(this));
+        renderTab();
+        refresh();
+    }
+
+    private void setNavEtaTimeMode(int mode) {
+        AppSettings.setNavEtaTimeMode(this, mode);
+        AppLog.line(this, "Navigation ETA time mode: " + AppSettings.navEtaTimeModeLabel(this));
+        NavigationFeature.get(this).resendKnownRouteData();
         renderTab();
         refresh();
     }

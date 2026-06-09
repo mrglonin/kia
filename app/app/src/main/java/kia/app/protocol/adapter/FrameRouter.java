@@ -10,6 +10,7 @@ import kia.app.core.StateStore;
 import kia.app.core.model.AdapterState;
 import kia.app.core.model.VehicleState;
 import kia.app.diagnostics.CanLogger;
+import kia.app.media.domain.MediaFeature;
 import kia.app.rcta.RctaController;
 import kia.app.tpms.TpmsController;
 import kia.app.update.FirmwareUpdateController;
@@ -43,6 +44,9 @@ public final class FrameRouter {
                 break;
             case AdapterProtocol.CMD_SETTINGS:
                 AppLog.line(app, "Settings ack: " + AdapterProtocol.hex(frame));
+                break;
+            case AdapterProtocol.CMD_SOURCE_STATUS:
+                MediaFeature.get(app).handleRealMediaStatus(frame);
                 break;
             case AdapterProtocol.CMD_RCTA:
                 RctaController.get(app).handleFrame(frame);

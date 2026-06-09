@@ -522,8 +522,9 @@ public final class YandexCoreBridgeClient {
         }
         if (TextUtils.isEmpty(eta)) {
             eta = firstString(snapshot, "route_time", "remaining_time", "time_left",
-                    "eta_time_left");
+                    "eta_time_left", "etime");
         }
+        String arrival = firstString(snapshot, "arrival_time", "arrival", "eta", "atime");
         putString(intent, "route_distance", remaining);
         putString(intent, "remaining_distance", remaining);
         putString(intent, "edistance", remaining);
@@ -534,7 +535,9 @@ public final class YandexCoreBridgeClient {
                 "route_total_distance_meters");
         putString(intent, "route_time", eta);
         putString(intent, "time_left", eta);
-        putString(intent, "arrival_time", firstString(snapshot, "arrival_time", "arrival", "eta"));
+        putString(intent, "etime", eta);
+        putString(intent, "arrival_time", arrival);
+        putString(intent, "atime", arrival);
         putString(intent, "finish_point", firstString(snapshot, "finish_point", "finishPoint"));
         putString(intent, "finish_street", firstString(snapshot,
                 "finish_street", "finishStreet", "finish_address", "destination_name"));
@@ -851,8 +854,8 @@ public final class YandexCoreBridgeClient {
                 firstString(snapshot, "remaining_distance", "route_distance",
                         "edistance", "distance_left", "eta_distance_left"));
         String time = firstString(snapshot, "route_time", "remaining_time", "time_left",
-                "eta_time_left");
-        String arrival = firstString(snapshot, "arrival_time", "arrival", "eta");
+                "eta_time_left", "etime");
+        String arrival = firstString(snapshot, "arrival_time", "arrival", "eta", "atime");
         return !TextUtils.isEmpty(distance) && (!TextUtils.isEmpty(time) || !TextUtils.isEmpty(arrival));
     }
 

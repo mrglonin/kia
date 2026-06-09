@@ -36,6 +36,9 @@ public final class MediaFeature {
         String cleanSource = firstNonEmpty(source, labelFromPackage(packageName));
         String cleanArtist = clean(artist);
         String cleanTitle = clean(title);
+        if (isRadioSource(cleanSource, packageName) && !TextUtils.isEmpty(cleanArtist)) {
+            cleanTitle = RadioStationStore.resolve(app, cleanSource, cleanArtist, cleanTitle);
+        }
         if (TextUtils.isEmpty(cleanSource) && TextUtils.isEmpty(cleanArtist) && TextUtils.isEmpty(cleanTitle)) return;
 
         long stableDurationMs = stableDuration(cleanSource, packageName, cleanArtist, cleanTitle, durationMs, playing);
@@ -128,6 +131,13 @@ public final class MediaFeature {
         AppLog.line(app, "Media resend: " + current.summary() + " | " + clean(reason));
     }
 
+    public synchronized void handleRealMediaStatus(byte[] frame) {
+        if (!AppSettings.uartRealMediaProfile(app)) return;
+        RealMediaStatus status = parseRealMediaStatus(frame);
+        if (status == null || TextUtils.isEmpty(status.frequency)) return;
+        report(status.source, "uart.real", status.frequency, "", -1L, true);
+    }
+
     private String labelFromPackage(String packageName) {
         if (TextUtils.isEmpty(packageName)) return "Music";
         String p = packageName.toLowerCase();
@@ -136,6 +146,12 @@ public final class MediaFeature {
         if (p.contains("radio")) return "FM радио";
         if (p.contains("spd.media")) return "USB";
         return packageName;
+    }
+
+    private static boolean isRadioSource(String source, String packageName) {
+        String text = clean(source + " " + packageName).toLowerCase();
+        return text.contains("fm") || text.contains("am") || text.contains("radio")
+                || text.contains("радио") || text.contains("com.spd.radio");
     }
 
     private static String firstNonEmpty(String first, String fallback) {
@@ -159,5 +175,46 @@ public final class MediaFeature {
         if (value == null) return "";
         String out = value.replace('\n', ' ').replace('\r', ' ').trim();
         return out.replaceAll("\\s+", " ");
+    }
+
+    private static RealMediaStatus parseRealMediaStatus(byte[] frame) {
+        if (frame == null || frame.length < 8) return null;
+        int source;
+        int first;
+        int second;
+        if (u8(frame, 5) == 0xFD && frame.length >= 13) {
+            source = u8(frame, 8);
+            first = u8(frame, 10);
+            second = u8(frame, 11);
+        } else {
+            source = u8(frame, 5);
+            first = u8(frame, 6);
+            second = u8(frame, 7);
+        }
+        if (source == 0x02) {
+            if (first <= 0) return null;
+            int decimal = Math.max(0, Math.min(9, second / 10));
+            return new RealMediaStatus("FM", first + "." + decimal);
+        }
+        if (source == 0x09) {
+            int khz = (first << 8) | second;
+            if (khz <= 0) return null;
+            return new RealMediaStatus("AM", String.valueOf(khz));
+        }
+        return null;
+    }
+
+    private static int u8(byte[] frame, int index) {
+        return index >= 0 && index < frame.length ? frame[index] & 0xff : 0;
+    }
+
+    private static final class RealMediaStatus {
+        final String source;
+        final String frequency;
+
+        RealMediaStatus(String source, String frequency) {
+            this.source = source;
+            this.frequency = frequency;
+        }
     }
 }
