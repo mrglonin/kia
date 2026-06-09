@@ -1250,6 +1250,16 @@ public final class NavigationFeature {
         String highlightedMicroManeuver = routeRoadOnly
                 ? first(laneHighlightManeuver, directionSignManeuver)
                 : first(directionSignManeuver, laneHighlightManeuver);
+        boolean staleProviderLaneTopology = staleProviderLaneTopologyConflict(intent, sourceLower,
+                cleanManeuver, laneHighlightManeuver, explicitLaneDistance);
+        if (staleProviderLaneTopology) {
+            AppLog.line(app, "Navigation ignored stale provider lane topology: main="
+                    + clean(cleanManeuver)
+                    + " highlight=" + first(laneHighlightManeuver, "-")
+                    + " raw=" + shortRaw(source, rawExtras(intent)));
+            laneHighlightManeuver = "";
+            highlightedMicroManeuver = "";
+        }
         if (routeRoadOnly
                 && !isUsableManeuver(cleanManeuver)
                 && isUsableManeuver(state.maneuver)
@@ -1305,6 +1315,11 @@ public final class NavigationFeature {
             }
         }
         String explicitGrayRoad = grayRoadManeuver(intent, sourceLower);
+        if (staleProviderLaneTopology) {
+            explicitGrayRoad = "";
+            clearGrayRoadHold();
+            clearLearnedRoadOptions();
+        }
         if (routeRoadOnly) {
             explicitGrayRoad = adjustRouteRoadGrayForCurrentManeuver(intent, explicitGrayRoad,
                     first(state.maneuver, cleanManeuver));
@@ -1355,7 +1370,7 @@ public final class NavigationFeature {
                     + " raw=" + shortRaw(source, rawExtras(intent)));
             return;
         }
-        boolean laneData = hasLaneData(intent);
+        boolean laneData = !staleProviderLaneTopology && hasLaneData(intent);
         boolean laneOnlySource = routeRoadOnly
                 || laneMicroSource(sourceLower)
                 || sourceLower.contains("route_options");
@@ -1378,7 +1393,8 @@ public final class NavigationFeature {
                 && ((!routeRoadOnly && laneMicroSource(sourceLower))
                 || routeRoadHighlightedMicro
                 || (!routeRoadOnly && !TextUtils.isEmpty(explicitMicroDistance)));
-        boolean laneGuidance = !directSource && (bool(intent, "lane_guidance", false)
+        boolean laneGuidance = !staleProviderLaneTopology && !directSource
+                && (bool(intent, "lane_guidance", false)
                 || laneOnlySource || laneData);
         boolean direct = directSource;
         boolean microEnabled = AppSettings.navMicroManeuvers(app);
@@ -4953,9 +4969,7 @@ public final class NavigationFeature {
             return;
         }
         long now = System.currentTimeMillis();
-        String grayRoad = grayRoadUntil > now && canMergeGrayRoad(maneuver)
-                ? clean(activeGrayRoadId)
-                : "";
+        String grayRoad = activeFallbackGrayRoadForManeuver(maneuver, now);
         if (!TextUtils.isEmpty(grayRoad)) {
             sendManeuverWithGrayRoadIfChanged(maneuver, grayRoad, distanceValue(distanceText),
                     isKm(distanceText), progressBucket, force);
@@ -4969,7 +4983,7 @@ public final class NavigationFeature {
         if (!state.active || state.finishReached || state.loading()) return;
         String maneuver = clean(state.maneuver);
         if (TextUtils.isEmpty(maneuver) || !canMergeGrayRoad(maneuver)) return;
-        String fallback = grayRoadUntil > now ? clean(activeGrayRoadId) : "";
+        String fallback = activeFallbackGrayRoadForManeuver(maneuver, now);
         if (TextUtils.isEmpty(fallback)) return;
         String currentGray = clean(state.grayRoadId);
         if (!fallback.equals(currentGray)) {
@@ -4986,6 +5000,22 @@ public final class NavigationFeature {
                 maneuverProgressBucket(maneuver, first(state.nextStreet, state.currentStreet), distance), true);
         AppLog.line(app, "Navigation held gray road refreshed: maneuver=" + maneuver
                 + " gray=" + fallback + " distance=" + distance);
+    }
+
+    private String activeFallbackGrayRoadForManeuver(String maneuver, long now) {
+        if (grayRoadUntil <= now || !canMergeGrayRoad(maneuver)) return "";
+        String grayRoad = clean(activeGrayRoadId);
+        if (TextUtils.isEmpty(grayRoad)) return "";
+        int maneuverMask = maneuverRoadMask(maneuver);
+        int grayMask = grayRoadMask(grayRoad);
+        if (maneuverMask != 0 && grayMask != 0 && (grayMask & maneuverMask) == 0) {
+            AppLog.line(app, "Navigation dropped stale fallback gray road: maneuver="
+                    + clean(maneuver) + " gray=" + grayRoad);
+            clearGrayRoadHold();
+            clearLearnedRoadOptions();
+            return "";
+        }
+        return grayRoad;
     }
 
     private static boolean isLegacyFallbackGrayRoad(String maneuver, String grayRoad) {
@@ -6035,6 +6065,25 @@ public final class NavigationFeature {
     private static boolean providerVisualLaneSource(String sourceLower) {
         String value = clean(sourceLower).toLowerCase(Locale.US);
         return value.contains(YandexCoreBridgeContract.SOURCE);
+    }
+
+    private static boolean staleProviderLaneTopologyConflict(Intent intent, String sourceLower,
+                                                             String mainManeuver,
+                                                             String highlightManeuver,
+                                                             String laneDistance) {
+        if (!providerVisualLaneSource(sourceLower)) return false;
+        if (!TextUtils.isEmpty(nonZeroDistance(laneDistance))) return false;
+        if (!isUsableManeuver(mainManeuver) || !isUsableManeuver(highlightManeuver)) return false;
+        if (sameManeuverFamily(mainManeuver, highlightManeuver)) return false;
+        String topology = first(providerRawLaneTopologyText(intent),
+                explicitGrayRoadTopologyText(intent),
+                text(intent, "allowed_directions"),
+                text(intent, "allowedDirections"));
+        if (TextUtils.isEmpty(topology)) return false;
+        String mainFamily = maneuverFamily(mainManeuver);
+        String highlightFamily = maneuverFamily(highlightManeuver);
+        return ("left".equals(mainFamily) && "right".equals(highlightFamily))
+                || ("right".equals(mainFamily) && "left".equals(highlightFamily));
     }
 
     private static boolean hasVisualLaneItems(Intent intent) {

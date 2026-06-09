@@ -585,16 +585,30 @@ public final class YandexCoreBridgeClient {
                 "lane_topology", "lane_topology_json");
         String routeDirections = firstString(snapshot, "route_road_options", "road_options",
                 "gray_road_options", "available_directions");
-        String allowedDirections = first(routeDirections, firstString(snapshot,
-                "ignored_allowed_directions", "allowed_directions"));
+        String grayDirections = firstString(snapshot, "gray_road_options", "route_road_options",
+                "road_options");
         String highlight = firstString(snapshot, "ignored_recommended_lanes",
                 "ignored_lane_maneuver", "recommended_lanes", "lane_highlight",
                 "lane_highlighted_direction");
-        if (laneGuidanceConflicts(routeDirections, first(rawLaneItems, laneItems, highlight))) {
+        boolean staleMainConflict = staleLaneGuidanceConflictsWithMain(snapshot, highlight,
+                laneDistance, laneMeters);
+        if (laneGuidanceConflicts(routeDirections, first(rawLaneItems, laneItems, highlight))
+                || staleMainConflict) {
+            if (staleMainConflict) {
+                AppLog.line(app, "Yandex Core Bridge: ignored stale lane topology main="
+                        + firstString(snapshot, "direction", "maneuver", "imageId", "route_action")
+                        + " highlight=" + lower(highlight)
+                        + " route=" + lower(routeDirections));
+            }
             laneItems = "";
             rawLaneItems = "";
+            routeDirections = "";
+            grayDirections = "";
             highlight = "";
+            clearLaneExtras(intent);
         }
+        String allowedDirections = first(routeDirections, firstString(snapshot,
+                "ignored_allowed_directions", "allowed_directions"));
         putString(intent, "ignored_lane_items", laneItems);
         putString(intent, "ignored_raw_lane_items", rawLaneItems);
         putString(intent, "ignored_allowed_directions", allowedDirections);
@@ -618,10 +632,8 @@ public final class YandexCoreBridgeClient {
                 "road_scheme_raw", "direction_sign_items", "raw_direction_sign_items"));
         putString(intent, "direction_sign_items", firstString(snapshot,
                 "direction_sign_items", "raw_direction_sign_items"));
-        putString(intent, "route_road_options", firstString(snapshot,
-                "route_road_options", "gray_road_options", "road_options", "available_directions"));
-        putString(intent, "gray_road_options", firstString(snapshot,
-                "gray_road_options", "route_road_options", "road_options"));
+        putString(intent, "route_road_options", routeDirections);
+        putString(intent, "gray_road_options", grayDirections);
         putString(intent, "upcoming_lane_signs", firstString(snapshot, "upcoming_lane_signs"));
         putString(intent, "upcoming_direction_signs", firstString(snapshot, "upcoming_direction_signs"));
         putString(intent, "upcoming_road_events", firstString(snapshot, "upcoming_road_events"));
@@ -984,6 +996,38 @@ public final class YandexCoreBridgeClient {
         boolean laneRight = directionRight(laneText);
         if (routeLeft && laneRight && !laneLeft) return true;
         return routeRight && laneLeft && !laneRight;
+    }
+
+    private static boolean staleLaneGuidanceConflictsWithMain(Bundle snapshot, String highlight,
+                                                              String laneDistance,
+                                                              long laneMeters) {
+        if (!TextUtils.isEmpty(metersText(laneMeters)) || !TextUtils.isEmpty(laneDistance)) {
+            return false;
+        }
+        String main = firstString(snapshot, "direction", "maneuver", "imageId", "route_action",
+                "maneuver_text", "voice_hint");
+        if (TextUtils.isEmpty(main) || TextUtils.isEmpty(highlight)) return false;
+        boolean mainLeft = directionLeft(main);
+        boolean mainRight = directionRight(main);
+        boolean highlightLeft = directionLeft(highlight);
+        boolean highlightRight = directionRight(highlight);
+        if (mainLeft && highlightRight && !highlightLeft) return true;
+        return mainRight && highlightLeft && !highlightRight;
+    }
+
+    private static void clearLaneExtras(Intent intent) {
+        if (intent == null) return;
+        String[] keys = {
+                "ignored_lane_items", "ignored_raw_lane_items", "ignored_allowed_directions",
+                "lane_items", "raw_lane_items", "allowed_directions",
+                "ignored_recommended_lanes", "ignored_lane_maneuver", "recommended_lanes",
+                "lane_highlight", "highlighted_direction", "highlighted_directions",
+                "lane_maneuver", "lane_topology", "lane_topology_json", "road_scheme_raw",
+                "direction_sign_items", "route_road_options", "gray_road_options"
+        };
+        for (String key : keys) {
+            intent.removeExtra(key);
+        }
     }
 
     private static boolean directionLeft(String value) {
