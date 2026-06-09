@@ -96,6 +96,18 @@ public final class QaReceiver extends BroadcastReceiver {
             boolean enabled = intent.getBooleanExtra("enabled", false);
             AppSettings.setNavMicroManeuvers(context, enabled);
             AppLog.line(context, "QA nav micro maneuvers: " + enabled);
+        } else if ("nav_micro_post_pass_sample".equals(scenario)) {
+            int seconds = intent.getIntExtra("seconds", AppSettings.navMicroHoldSeconds(context));
+            AppSettings.setNavMicroManeuvers(context, true);
+            AppSettings.setNavMicroHoldSeconds(context, seconds);
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_micro_post_pass_reset");
+            feature.setActive(true, "qa_nav_micro_post_pass");
+            feature.handle(qaNavMainIntent());
+            feature.handle(qaNavLaneIntent(20));
+            feature.handle(qaNavLaneIntent(0));
+            AppLog.line(context, "QA nav micro post-pass sample sent: hold="
+                    + AppSettings.navMicroHoldSeconds(context));
         } else if ("tpms_sample".equals(scenario)) {
             TpmsController.get(context).handleAdapterFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS,
                     new byte[]{(byte) 148, (byte) 149, (byte) 150, (byte) 147,
@@ -176,6 +188,42 @@ public final class QaReceiver extends BroadcastReceiver {
         new MediaClusterSender(context).send(state);
         AppLog.line(context, "QA media text: " + source + " / " + packageName
                 + " / " + artist + " / " + title);
+    }
+
+    private static Intent qaNavMainIntent() {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_MANEUVER);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("route_id", "qa_micro_post_pass");
+        intent.putExtra("maneuver", "RIGHT");
+        intent.putExtra("direction", "RIGHT");
+        intent.putExtra("maneuver_text", "right");
+        intent.putExtra("distance", "2700 m");
+        intent.putExtra("current_maneuver_distance", "2700 m");
+        intent.putExtra("current_maneuver_distance_meters", 2700);
+        intent.putExtra("remaining_distance", "5.3 km");
+        intent.putExtra("route_time", "13 min");
+        intent.putExtra("arrival_time", "11:30");
+        return intent;
+    }
+
+    private static Intent qaNavLaneIntent(int laneMeters) {
+        Intent intent = qaNavMainIntent();
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_maneuver", "STRAIGHT_AHEAD");
+        intent.putExtra("highlighted_direction", "STRAIGHT_AHEAD");
+        intent.putExtra("highlighted_directions", "STRAIGHT_AHEAD");
+        intent.putExtra("lane_highlight", "STRAIGHT_AHEAD");
+        intent.putExtra("recommended_lanes", "STRAIGHT_AHEAD");
+        intent.putExtra("lane_distance", laneMeters + " m");
+        intent.putExtra("lane_distance_meters", laneMeters);
+        intent.putExtra("micro_distance", laneMeters + " m");
+        intent.putExtra("micro_distance_meters", laneMeters);
+        intent.putExtra("route_road_options", "straight,left");
+        intent.putExtra("gray_road_options", "straight,left");
+        intent.putExtra("allowed_directions", "straight,left");
+        intent.putExtra("lane_topology", "straight,left highlight=STRAIGHT_AHEAD");
+        return intent;
     }
 
     private static NavigationState navigationWithSpeed(String speed) {

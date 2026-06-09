@@ -131,6 +131,7 @@ public final class NavigationFeature {
     private String activeMicroStatus = "";
     private String activeMicroSource = "";
     private boolean activeMicroTxAllowed = true;
+    private long activeMicroPostPassUntil;
     private String activeLaneDistance = "";
     private String lastLaneTxManeuver = "";
     private String lastLaneTxGrayRoad = "";
@@ -1683,6 +1684,18 @@ public final class NavigationFeature {
                 laneDistanceText = "";
                 laneDebugDistance = "";
             }
+            boolean postPassMicroHolding = lanePassed
+                    && activeMicroPostPassActive(now)
+                    && !lanePostPassBlockedByNearMain
+                    && (TextUtils.isEmpty(microManeuver)
+                    || sameManeuverFamily(microManeuver, activeMicroManeuver));
+            if (postPassMicroHolding) {
+                microManeuver = activeMicroManeuver;
+                microSource = true;
+                routeRoadDisplayMicro = false;
+                laneDistanceText = "";
+                laneDebugDistance = "";
+            }
             String microDistance = TextUtils.isEmpty(microManeuver) ? "" : laneDistanceText;
             String microDebugDistance = TextUtils.isEmpty(microManeuver) ? "" : laneDebugDistance;
             boolean microDebugSource = microSource || routeRoadDisplayMicro;
@@ -1706,10 +1719,14 @@ public final class NavigationFeature {
                 laneHint = grayRoadHintText(explicitGrayRoad, intent, sourceLower, hintDistance);
             }
             String microHintSource = microDistanceSource + (inferredForwardMicro ? ":inferred_forward" : "");
-            String microStatus = microDecisionStatus(microManeuver, microDistance,
+            String microStatus = postPassMicroHolding
+                    ? activeMicroStatusToPublish(now)
+                    : microDecisionStatus(microManeuver, microDistance,
                     microDebugSource, microHintSource);
-            rememberMicroHint(microManeuver, microDistance, microDebugDistance, microStatus,
-                    microHintSource, now, false, microHoldTxAllowed);
+            if (!postPassMicroHolding) {
+                rememberMicroHint(microManeuver, microDistance, microDebugDistance, microStatus,
+                        microHintSource, now, false, microHoldTxAllowed);
+            }
             rememberLaneHint(laneHint, source, now);
             state = state.withLaneHint(activeLaneHint, activeLaneSource, now)
                     .withNavigationDebug(imageManeuver, visibleRouteActionManeuver, microManeuver, microDebugDistance,
@@ -1751,11 +1768,12 @@ public final class NavigationFeature {
                 publishNavigationState();
                 lastRouteGuidanceAt = now;
                 cancelPendingInactive("lane " + source);
-                boolean microAllowed = !lanePriorityActive && (!microTxSource
+                boolean microAllowed = !postPassMicroHolding
+                        && !lanePriorityActive && (!microTxSource
                         || (!TextUtils.isEmpty(microDistance)
                         && microDistanceAllowedForTx(microManeuver, microDistance,
                         inferredForwardMicro, microDistanceSource)));
-                boolean sendingMicro = microTxSource && microAllowed;
+                boolean sendingMicro = !postPassMicroHolding && microTxSource && microAllowed;
                 boolean providerIconOnlyMicro = sendingMicro && providerLaneMicro;
                 boolean microReplacesDistanceProgress = sendingMicro && !providerIconOnlyMicro;
                 boolean routeActionIsMain = shouldPromoteRouteRoadActionAsMain(routeRoadOnly,
@@ -1785,7 +1803,7 @@ public final class NavigationFeature {
                             + visibleRouteActionManeuver + " distance=" + clean(mainDistance)
                             + " source=" + source);
                 }
-                if (microTxSource && !microAllowed) {
+                if (microTxSource && !microAllowed && !postPassMicroHolding) {
                     if (lanePriorityActive) {
                         AppLog.line(app, "Navigation micro held by priority: "
                                 + clean(microManeuver) + " priority=" + priorityLaneManeuver
@@ -1798,7 +1816,9 @@ public final class NavigationFeature {
                     }
                 }
                 if (microDebugSource) {
-                    microStatus = lanePriorityActive
+                    microStatus = postPassMicroHolding
+                            ? activeMicroStatusToPublish(now)
+                            : lanePriorityActive
                             ? microMainHoldStatus(isRoundaboutManeuver(priorityLaneManeuver),
                             priorityLaneManeuver)
                             : sendingMicro
@@ -1809,7 +1829,7 @@ public final class NavigationFeature {
                     if (!TextUtils.isEmpty(microManeuver)) {
                         if (lanePriorityActive) {
                             clearMicroHintHold();
-                        } else {
+                        } else if (!postPassMicroHolding) {
                             rememberMicroHint(microManeuver, microDistance, microDebugDistance, microStatus,
                                     microHintSource, now, false, microHoldTxAllowed);
                         }
@@ -1818,6 +1838,21 @@ public final class NavigationFeature {
                             microManeuver, microDebugDistance, microStatus,
                             stateGrayRoad, stateGrayScheme, now);
                     publishNavigationState();
+                }
+                if (postPassMicroHolding) {
+                    if (sendLaneTxPostPassIfActive(now, true)) {
+                        AppLog.line(app, "Navigation lane post-pass held micro TX: "
+                                + clean(activeMicroManeuver)
+                                + " status=" + activeMicroStatusToPublish(now)
+                                + " main=" + clean(state.maneuver)
+                                + " mainDistance=" + clean(currentMainTxDistance())
+                                + " source=" + source);
+                        return;
+                    }
+                    AppLog.line(app, "Navigation lane post-pass debug only, no previous TX: "
+                            + clean(activeMicroManeuver)
+                            + " status=" + activeMicroStatusToPublish(now)
+                            + " source=" + source);
                 }
                 String laneMainManeuver = firstMergeableManeuver(state.maneuver,
                         visibleRouteActionManeuver, cleanManeuver);
@@ -2995,9 +3030,10 @@ public final class NavigationFeature {
             if (TextUtils.isEmpty(debugDistance)) {
                 debugDistance = activeMicroDistanceToPublish();
             }
-            if (!TextUtils.isEmpty(debugDistance) || !TextUtils.isEmpty(activeMicroStatus)) {
+            String debugStatus = activeMicroStatusToPublish(now);
+            if (!TextUtils.isEmpty(debugDistance) || !TextUtils.isEmpty(debugStatus)) {
                 state = state.withNavigationDebug(state.mainManeuverId, state.routeActionId,
-                        activeMicroManeuver, debugDistance, activeMicroStatus,
+                        activeMicroManeuver, debugDistance, debugStatus,
                         state.grayRoadId, state.grayRoadScheme, state.updatedAt);
             }
         }
@@ -3100,6 +3136,7 @@ public final class NavigationFeature {
     }
 
     private boolean shouldApplyActiveMicroForPublish() {
+        if (activeMicroPostPassActive(System.currentTimeMillis())) return true;
         if (TextUtils.isEmpty(state.microManeuverId)) return true;
         if (!sameManeuverFamily(activeMicroManeuver, state.maneuver)) return true;
         if (activeMicroManeuver.equals(state.microManeuverId)) return true;
@@ -3113,6 +3150,19 @@ public final class NavigationFeature {
 
     private String activeMicroDebugDistanceToPublish() {
         return clean(activeMicroDebugDistance);
+    }
+
+    private String activeMicroStatusToPublish(long now) {
+        if (activeMicroPostPassUntil > now) {
+            long remainingMs = activeMicroPostPassUntil - now;
+            int seconds = Math.max(1, (int) Math.ceil(remainingMs / 1000d));
+            return "проехали, удержание " + seconds + " сек";
+        }
+        return clean(activeMicroStatus);
+    }
+
+    private boolean activeMicroPostPassActive(long now) {
+        return activeMicroPostPassUntil > now && !TextUtils.isEmpty(activeMicroManeuver);
     }
 
     private boolean activeMicroFromTrustedLaneDirection(long now) {
@@ -3214,10 +3264,13 @@ public final class NavigationFeature {
                 activeMicroDistance = "";
                 activeMicroDebugDistance = "";
                 activeMicroTxAllowed = false;
-                activeMicroStatus = "проехали, удержание "
-                        + AppSettings.navMicroHoldSeconds(app) + " сек";
-                microHintUntil = Math.max(microHintUntil, now
-                        + NavigationManeuverPolicy.microPostPassHoldMs(app));
+                activeMicroPostPassUntil = now + NavigationManeuverPolicy.microPostPassHoldMs(app);
+                activeMicroStatus = activeMicroStatusToPublish(now);
+                microHintUntil = Math.max(microHintUntil, activeMicroPostPassUntil);
+                AppLog.line(app, "Navigation lane micro post-pass started: "
+                        + clean(activeMicroManeuver)
+                        + " status=" + activeMicroStatus
+                        + " source=" + clean(source));
             }
         }
         if (closeMain) {
@@ -3658,7 +3711,13 @@ public final class NavigationFeature {
                     + " source=" + clean(source));
             clearMicroHintHold();
         }
-        boolean trustedActiveMicro = !visualMicroFound && activeMicroFromTrustedLaneDirection(now);
+        boolean postPassMicroHolding = activeMicroPostPassActive(now)
+                && !nextMainManeuverCloseForMicroPostPass();
+        boolean visualRepeatsPostPass = visualMicroFound
+                && postPassMicroHolding
+                && sameManeuverFamily(visualMicro, activeMicroManeuver);
+        boolean trustedActiveMicro = !visualMicroFound
+                && (activeMicroFromTrustedLaneDirection(now) || postPassMicroHolding);
         if (!TextUtils.isEmpty(visualGrayRoad)) {
             String completeLaneGray = activeCompleteLaneGrayRoad(now);
             if (completeLaneGraySource(sourceLower) && visualMicroFound) {
@@ -3677,7 +3736,10 @@ public final class NavigationFeature {
             }
             rememberVisualGrayRoad(heldGrayRoad, now);
         }
-        String microManeuver = trustedActiveMicro
+        String microManeuver = postPassMicroHolding
+                && (visualRepeatsPostPass || !visualMicroFound)
+                ? activeMicroManeuver
+                : trustedActiveMicro
                 ? activeMicroManeuver
                 : visualMicroFound
                 ? visualMicro
@@ -3685,7 +3747,13 @@ public final class NavigationFeature {
         String microDistance = shownDistance;
         String microStatus = TextUtils.isEmpty(shownDistance)
                 ? "нет lane дистанции" : "только дистанция lane";
-        if (visualMicroFound) {
+        boolean holdingPostPassManeuver = postPassMicroHolding
+                && !TextUtils.isEmpty(microManeuver)
+                && sameManeuverFamily(microManeuver, activeMicroManeuver);
+        if (holdingPostPassManeuver) {
+            microDistance = "";
+            microStatus = activeMicroStatusToPublish(now);
+        } else if (visualMicroFound) {
             String rememberedStatus = microDecisionStatus(microManeuver, shownDistance, true, source);
             rememberMicroHint(microManeuver, shownDistance, shownDistance,
                     rememberedStatus,
@@ -3715,6 +3783,13 @@ public final class NavigationFeature {
                         microManeuver, microDistance, microStatus,
                         heldGrayRoad, grayRoadSchemeText(heldGrayRoad, intent, sourceLower), now);
         publishNavigationState();
+        if (holdingPostPassManeuver && sendLaneTxPostPassIfActive(now, true)) {
+            AppLog.line(app, "Navigation lane distance post-pass held micro TX: "
+                    + clean(activeMicroManeuver)
+                    + " status=" + activeMicroStatusToPublish(now)
+                    + " source=" + source);
+            return;
+        }
         if (!TextUtils.isEmpty(microManeuver) && shouldTransmitActiveMicroToCluster()) {
             resendActiveMicroToCluster();
         }
@@ -3835,6 +3910,7 @@ public final class NavigationFeature {
         activeMicroStatus = clean(status);
         activeMicroSource = clean(source);
         activeMicroTxAllowed = txAllowed && !TextUtils.isEmpty(cleanDistance);
+        activeMicroPostPassUntil = 0L;
         microHintUntil = now + laneHoldMs();
     }
 
@@ -3845,6 +3921,7 @@ public final class NavigationFeature {
         activeMicroStatus = "";
         activeMicroSource = "";
         activeMicroTxAllowed = true;
+        activeMicroPostPassUntil = 0L;
         microHintUntil = 0L;
     }
 
@@ -4267,6 +4344,8 @@ public final class NavigationFeature {
             sendNavigationText("Финиш");
             return;
         }
+        long now = System.currentTimeMillis();
+        sendLaneTxPostPassIfActive(now, false);
         int mode = AppSettings.navTextMode(app);
         if (finishDirectionShouldOverride()) {
             if (!sendDirectionToFinishIfNeeded(false)) sendFinishDirectionPlaceholder(false);
