@@ -72,6 +72,7 @@ public final class NavigationFeature {
     private static final float MANEUVER_PROGRESS_MIN_BASE_METERS = 500f;
     private static final float MANEUVER_PROGRESS_ZERO_METERS = 50f;
     private static final float MAIN_MANEUVER_MICRO_SEPARATION_METERS = 250f;
+    private static final float MICRO_POST_PASS_NEAR_MAIN_CLEAR_METERS = 150f;
     private static final float INFERRED_FORWARD_MICRO_MAX_METERS = 450f;
     private static final int MICRO_TX_PROGRESS_BUCKET = 9;
     private static final long FINISH_COMPASS_SUPPRESS_MS = 0L;
@@ -1534,6 +1535,7 @@ public final class NavigationFeature {
                 laneDistanceText = "";
                 laneDebugDistance = "";
             }
+            boolean lanePostPassBlockedByNearMain = lanePassed && nextMainManeuverCloseForMicroPostPass();
             boolean routeRoadDisplayMicro = false;
             boolean keepActiveMicroTxAllowed = false;
             boolean laneMicroSuppressedByMain = false;
@@ -1548,6 +1550,19 @@ public final class NavigationFeature {
             } else if (yandexLanaGuidance) {
                 microManeuver = first(highlightedMicroManeuver, cleanManeuver, visibleRouteActionManeuver);
                 microSource = !TextUtils.isEmpty(microManeuver);
+            }
+            if (lanePostPassBlockedByNearMain && !TextUtils.isEmpty(microManeuver)) {
+                AppLog.line(app, "Navigation lane micro post-pass cleared by close main: micro="
+                        + clean(microManeuver)
+                        + " main=" + clean(state.maneuver)
+                        + " mainDistance=" + clean(currentMainTxDistance())
+                        + " source=" + clean(source));
+                clearMicroHintHold();
+                microManeuver = "";
+                microSource = false;
+                routeRoadDisplayMicro = false;
+                laneDistanceText = "";
+                laneDebugDistance = "";
             }
             boolean inferredForwardMicro = false;
             if (shouldInferForwardMicro(intent, sourceLower, microManeuver,
@@ -1604,13 +1619,25 @@ public final class NavigationFeature {
                         && !TextUtils.isEmpty(activeMicroManeuver)
                         && microHintUntil > now
                         && !sameManeuverFamily(microManeuver, activeMicroManeuver);
+                boolean trustedExplicitDistanceRejected = trustedLaneDirectionSource(sourceLower)
+                        && explicitLaneDistanceAvailable;
                 if (trustedIncomingDiffersFromActive) {
                     AppLog.line(app, "Navigation cleared stale lane micro after trusted highlight: active="
                             + clean(activeMicroManeuver) + " incoming=" + clean(microManeuver)
                             + " badDistance=" + clean(explicitMicroDistance)
                             + " source=" + clean(source));
                     clearMicroHintHold();
-                    laneDebugDistance = "";
+                    laneDebugDistance = explicitMicroDistance;
+                } else if (trustedExplicitDistanceRejected) {
+                    AppLog.line(app, "Navigation cleared stale lane micro after rejected trusted distance: active="
+                            + clean(activeMicroManeuver) + " incoming=" + clean(microManeuver)
+                            + " badDistance=" + clean(explicitMicroDistance)
+                            + " main=" + clean(mainDistance)
+                            + " source=" + clean(source));
+                    clearMicroHintHold();
+                    laneDistanceText = "";
+                    laneDebugDistance = explicitMicroDistance;
+                    keepActiveMicroTxAllowed = false;
                 } else if (!TextUtils.isEmpty(activeMicroManeuver)
                         && microHintUntil > now
                         && !TextUtils.isEmpty(activeMicroDistanceToPublish())) {
@@ -1890,6 +1917,14 @@ public final class NavigationFeature {
                 return;
             }
             String heldGrayRoad = grayRoadUntil > now ? activeGrayRoadId : "";
+            if (providerVisualLaneSource(sourceLower) && !TextUtils.isEmpty(heldGrayRoad)) {
+                AppLog.line(app, "Navigation cleared stale provider gray road without topology: held="
+                        + clean(heldGrayRoad)
+                        + " source=" + clean(source));
+                clearGrayRoadHold();
+                clearLearnedRoadOptions();
+                heldGrayRoad = "";
+            }
             AppLog.line(app, "Navigation lane gray road skipped: no topology held="
                     + first(heldGrayRoad, "-") + " " + shortRaw(source, rawExtras(intent)));
             state = state.withNavigationDebug(imageManeuver, visibleRouteActionManeuver,
@@ -1954,6 +1989,19 @@ public final class NavigationFeature {
             resetManeuverProgress();
             resetNavigationSendCache();
             clearLaneHintHold(preserveMicro);
+        } else if (TextUtils.isEmpty(explicitGrayRoad)
+                && sameFamilyDistanceResetForNewManeuver(state.maneuver, displayManeuver,
+                state.maneuverDistance, maneuverDistance)
+                && !TextUtils.isEmpty(activeGrayRoadId)) {
+            AppLog.line(app, "Navigation cleared stale gray road on same-family distance reset: maneuver="
+                    + clean(displayManeuver)
+                    + " previous=" + clean(state.maneuverDistance)
+                    + " incoming=" + clean(maneuverDistance)
+                    + " gray=" + clean(activeGrayRoadId)
+                    + " source=" + clean(source));
+            clearGrayRoadHold();
+            clearLearnedRoadOptions();
+            clearLaneTxPostPassHold();
         }
         boolean standaloneFrame = finish || roundabout || isStandaloneManeuverFrame(displayManeuver);
         if (standaloneFrame) {
@@ -2910,7 +2958,7 @@ public final class NavigationFeature {
             if (TextUtils.isEmpty(debugDistance)) {
                 debugDistance = activeMicroDistanceToPublish();
             }
-            if (!TextUtils.isEmpty(debugDistance)) {
+            if (!TextUtils.isEmpty(debugDistance) || !TextUtils.isEmpty(activeMicroStatus)) {
                 state = state.withNavigationDebug(state.mainManeuverId, state.routeActionId,
                         activeMicroManeuver, debugDistance, activeMicroStatus,
                         state.grayRoadId, state.grayRoadScheme, state.updatedAt);
@@ -3088,6 +3136,7 @@ public final class NavigationFeature {
 
     private boolean handleLaneDistancePassed(String distanceText, long now, String source) {
         if (!laneDistancePassed(distanceText)) return false;
+        boolean closeMain = nextMainManeuverCloseForMicroPostPass();
         boolean recentLaneTx = !TextUtils.isEmpty(lastLaneTxManeuver)
                 && lastLaneTxAt > 0L
                 && now - lastLaneTxAt <= LANE_TX_POST_PASS_PRE_TX_MAX_AGE_MS;
@@ -3096,12 +3145,28 @@ public final class NavigationFeature {
                 : "";
         clearLaneDistanceHold();
         if (!TextUtils.isEmpty(activeMicroManeuver)) {
-            activeMicroDistance = "";
-            activeMicroDebugDistance = "";
-            activeMicroStatus = "проехали, TX "
-                    + AppSettings.navMicroHoldSeconds(app) + " сек";
-            microHintUntil = Math.max(microHintUntil, now
-                    + NavigationManeuverPolicy.microPostPassHoldMs(app));
+            if (closeMain) {
+                AppLog.line(app, "Navigation lane post-pass micro cleared: next main="
+                        + clean(state.maneuver)
+                        + " distance=" + clean(currentMainTxDistance())
+                        + " source=" + clean(source));
+                clearMicroHintHold();
+            } else {
+                activeMicroDistance = "";
+                activeMicroDebugDistance = "";
+                activeMicroTxAllowed = false;
+                activeMicroStatus = "проехали, удержание "
+                        + AppSettings.navMicroHoldSeconds(app) + " сек";
+                microHintUntil = Math.max(microHintUntil, now
+                        + NavigationManeuverPolicy.microPostPassHoldMs(app));
+            }
+        }
+        if (closeMain) {
+            clearLaneTxPostPassHold();
+            AppLog.line(app, "Navigation lane TX post-pass skipped by close main: distance="
+                    + clean(currentMainTxDistance())
+                    + " source=" + clean(source));
+            return true;
         }
         if (TextUtils.isEmpty(holdManeuver)) {
             AppLog.line(app, "Navigation lane TX post-pass skipped before TX: source="
@@ -3110,6 +3175,12 @@ public final class NavigationFeature {
         }
         startLaneTxPostPassHold(holdManeuver, now, source);
         return true;
+    }
+
+    private boolean nextMainManeuverCloseForMicroPostPass() {
+        float meters = distanceMeters(first(nonZeroDistance(state.maneuverDistance),
+                nonZeroDistance(currentMainTxDistance())));
+        return meters > 0f && meters <= MICRO_POST_PASS_NEAR_MAIN_CLEAR_METERS;
     }
 
     private void rememberLaneTxForPostPass(String maneuver, int progressBucket, long now) {
@@ -3182,8 +3253,7 @@ public final class NavigationFeature {
             laneTxPostPassUntil = 0L;
             return;
         }
-        sendLaneTxPostPassIfActive(now, true);
-        AppLog.line(app, "Navigation lane TX post-pass started: " + cleanManeuver
+        AppLog.line(app, "Navigation lane TX post-pass debug hold only: " + cleanManeuver
                 + " source=" + clean(source));
     }
 
@@ -3234,6 +3304,7 @@ public final class NavigationFeature {
                 && AppSettings.navMicroManeuvers(app)
                 && !NavigationModeSettings.isTbt(app)
                 && !NavigationModeSettings.isFinishDirection(app)
+                && !nextMainManeuverCloseForMicroPostPass()
                 && !NavigationManeuverPolicy.priorityBlocksMicro(state.maneuver,
                 state.maneuverDistance);
     }
@@ -3284,6 +3355,21 @@ public final class NavigationFeature {
         if (mainMeters <= incomingMeters + MAIN_MANEUVER_MICRO_SEPARATION_METERS) return false;
         float tolerance = Math.max(40f, Math.min(120f, microMeters * 0.4f));
         return Math.abs(incomingMeters - microMeters) <= tolerance;
+    }
+
+    private static boolean sameFamilyDistanceResetForNewManeuver(String currentManeuver,
+                                                                 String incomingManeuver,
+                                                                 String previousDistance,
+                                                                 String incomingDistance) {
+        if (!sameManeuverFamily(currentManeuver, incomingManeuver)) return false;
+        float previousMeters = distanceMeters(previousDistance);
+        float incomingMeters = distanceMeters(incomingDistance);
+        if (incomingMeters <= 0f) return false;
+        if (previousMeters <= 0f) return incomingMeters <= MICRO_POST_PASS_NEAR_MAIN_CLEAR_METERS;
+        if (previousMeters > MICRO_POST_PASS_NEAR_MAIN_CLEAR_METERS) return false;
+        float jump = Math.max(25f, previousMeters * 0.6f);
+        return incomingMeters >= previousMeters + jump
+                && incomingMeters <= MICRO_POST_PASS_NEAR_MAIN_CLEAR_METERS;
     }
 
     private boolean shouldInferForwardMicro(Intent intent, String sourceLower,
@@ -3689,7 +3775,7 @@ public final class NavigationFeature {
         activeMicroDebugDistance = TextUtils.isEmpty(cleanDebugDistance) ? cleanDistance : cleanDebugDistance;
         activeMicroStatus = clean(status);
         activeMicroSource = clean(source);
-        activeMicroTxAllowed = txAllowed;
+        activeMicroTxAllowed = txAllowed && !TextUtils.isEmpty(cleanDistance);
         microHintUntil = now + laneHoldMs();
     }
 
@@ -6056,9 +6142,11 @@ public final class NavigationFeature {
     }
 
     private static String grayRoadTopologyText(Intent intent, String sourceLower) {
+        if (providerVisualLaneSource(sourceLower)) {
+            return providerTrustedGrayRoadTopologyText(intent);
+        }
         String roadTopology = explicitGrayRoadTopologyText(intent);
         if (!TextUtils.isEmpty(roadTopology)) return roadTopology;
-        if (providerVisualLaneSource(sourceLower) && hasVisualLaneItems(intent)) return "";
         String weakerRoadTopology = first(
                 text(intent, "routeRoadOptions"),
                 text(intent, "roadOptions"),
@@ -6074,6 +6162,24 @@ public final class NavigationFeature {
         return canUseAllowedDirectionsForGrayRoad(sourceLower)
                 ? first(text(intent, "allowed_directions"), text(intent, "allowedDirections"))
                 : "";
+    }
+
+    private static String providerTrustedGrayRoadTopologyText(Intent intent) {
+        String rawRoadScheme = first(text(intent, "road_scheme_raw"),
+                text(intent, "raw_road_scheme"),
+                text(intent, "road_scheme_items"),
+                text(intent, "direction_sign_items"),
+                text(intent, "raw_direction_sign_items"),
+                text(intent, "route_road_raw"),
+                text(intent, "gray_road_raw"));
+        if (!TextUtils.isEmpty(rawRoadScheme)) return rawRoadScheme;
+        String source = clean(first(text(intent, "route_road_source"),
+                text(intent, "gray_road_source"),
+                text(intent, "road_scheme_source"))).toLowerCase(Locale.US);
+        if (containsAny(source, "road_scheme", "direction_sign", "route_road")) {
+            return explicitGrayRoadTopologyText(intent);
+        }
+        return "";
     }
 
     private static String explicitGrayRoadTopologyText(Intent intent) {
@@ -6216,8 +6322,18 @@ public final class NavigationFeature {
     private static boolean hasLaneData(Intent intent) {
         return !TextUtils.isEmpty(grayRoadTopologyText(intent))
                 || !TextUtils.isEmpty(laneRawItemsText(intent))
+                || !TextUtils.isEmpty(providerLaneHighlightText(intent))
+                || hasLaneTopologyData(intent)
                 || hasVisualLaneItems(intent)
                 || hasExplicitGrayDirectionFlags(intent);
+    }
+
+    private static boolean hasLaneTopologyData(Intent intent) {
+        return !TextUtils.isEmpty(first(text(intent, "lane_topology"),
+                text(intent, "lane_topology_json"),
+                text(intent, "raw_lane_topology"),
+                text(intent, "lane_sign_topology"),
+                text(intent, "lane_sign_topology_json")));
     }
 
     private static boolean grayRoadHasStraight(Intent intent) {
@@ -6675,7 +6791,7 @@ public final class NavigationFeature {
     }
 
     private static String explicitProviderGrayRoadManeuver(Intent intent) {
-        String topology = explicitGrayRoadTopologyText(intent);
+        String topology = providerTrustedGrayRoadTopologyText(intent);
         if (TextUtils.isEmpty(topology)) return "";
         boolean straight = containsLaneToken(topology, "straight");
         boolean hardRight = containsLaneToken(topology, "hard_right")

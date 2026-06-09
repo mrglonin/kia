@@ -93,12 +93,12 @@ public final class AppSettings {
     public static final int RCTA_BACKGROUND_ALPHA_MIN = 0;
     public static final int RCTA_BACKGROUND_ALPHA_MAX = 180;
     public static final int RCTA_BACKGROUND_ALPHA_DEFAULT = 75;
-    private static final int SCHEMA = 35;
+    private static final int SCHEMA = 36;
     private static final int DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS = 0;
     private static final int DEFAULT_NAV_MANEUVER_TEXT_SECONDS = 0;
     private static final int DEFAULT_NAV_MICRO_HOLD_SECONDS = 5;
-    private static final int DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS = 100;
-    private static final int MAX_NAV_MICRO_MAX_DISTANCE_METERS = 200;
+    private static final int DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS = 150;
+    private static final int MAX_NAV_MICRO_MAX_DISTANCE_METERS = 250;
     private static final int DEFAULT_SAS_RATIO = 10;
     private static final int DEFAULT_TPMS_LOW_PRESSURE = 200;
     private static final int DEFAULT_TPMS_HIGH_PRESSURE = 320;
@@ -281,6 +281,11 @@ public final class AppSettings {
                 edit.putInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS, DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS);
             }
             if (schema < 32) {
+                edit.putInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS,
+                        normalizeNavMicroMaxDistanceMeters(prefs.getInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS,
+                                DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS)));
+            }
+            if (schema < 36) {
                 edit.putInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS,
                         normalizeNavMicroMaxDistanceMeters(prefs.getInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS,
                                 DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS)));
@@ -504,9 +509,9 @@ public final class AppSettings {
     private static int normalizeNavMicroMaxDistanceMeters(int value) {
         int clamped = clamp(value, DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS,
                 MAX_NAV_MICRO_MAX_DISTANCE_METERS);
-        if (clamped <= 100) return 100;
         if (clamped <= 150) return 150;
-        return 200;
+        if (clamped <= 200) return 200;
+        return 250;
     }
 
     public static boolean navDebugVisible(Context context) {

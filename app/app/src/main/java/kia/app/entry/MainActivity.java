@@ -3465,7 +3465,7 @@ public final class MainActivity extends Activity {
         View button = action("Порог " + navMicroDistanceText(meters), hint,
                 enabled ? COLOR_ACCENT_BLUE : COLOR_MUTED, false, () -> {
                     if (!navNormalSettingsEnabled() || !AppSettings.navMicroManeuvers(this)) return;
-                    setNavMicroMaxDistanceMeters(nextValue(meters, 100, 150, 200));
+                    setNavMicroMaxDistanceMeters(nextValue(meters, 150, 200, 250));
                 });
         return navSettingsAction(button, enabled);
     }
