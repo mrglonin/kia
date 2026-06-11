@@ -155,6 +155,7 @@ public final class MainActivity extends Activity {
     private CompoundButton navigationDebugToggle;
     private CompoundButton navigationOverlayToggle;
     private CompoundButton microManeuverToggle;
+    private CompoundButton finishCompassAutoToggle;
     private CompoundButton navTbtToggle;
     private CompoundButton overspeedToggle;
     private CompoundButton autoStartToggle;
@@ -1019,6 +1020,7 @@ public final class MainActivity extends Activity {
         navigationDebugToggle = null;
         navigationOverlayToggle = null;
         microManeuverToggle = null;
+        finishCompassAutoToggle = null;
         navTbtToggle = null;
         overspeedToggle = null;
         tpmsAlertsToggle = null;
@@ -2731,9 +2733,9 @@ public final class MainActivity extends Activity {
 
     private void renderNavigationTab(LinearLayout root) {
         root.addView(navigationOutputPanel());
-        addSection(root, "Источник", "Auto принимает Yandex и 2GIS; ручной режим блокирует второй источник.",
-                navSourceAction(AppSettings.NAV_SOURCE_AUTO, "Auto", "Yandex + 2GIS"),
-                navSourceAction(AppSettings.NAV_SOURCE_YANDEX, "Yandex", "только Yandex provider"),
+        addSection(root, "Источник", "Yandex использует прямой Core Bridge; Auto оставлен как резервный режим.",
+                navSourceAction(AppSettings.NAV_SOURCE_AUTO, "Auto", "fallback Yandex + 2GIS"),
+                navSourceAction(AppSettings.NAV_SOURCE_YANDEX, "Yandex", "только Yandex Core Bridge"),
                 navSourceAction(AppSettings.NAV_SOURCE_2GIS, "2GIS", "только dashboard 2GIS"));
         root.addView(navigationOptionsPanel());
         navigationDebugToggle = addSettingSwitch(root, "Панель диагностики",
@@ -2934,6 +2936,9 @@ public final class MainActivity extends Activity {
                 navRouteModeAction(NavigationOutputMode.NORMAL, "Обычный", "манёвр + серая дорога"),
                 navRouteModeAction(NavigationOutputMode.TBT, "TBT", "отдельные TBT-иконки"),
                 navRouteModeAction(NavigationOutputMode.FINISH_DIRECTION, "К флагу", "стрелка к точке финиша"));
+        finishCompassAutoToggle = addSettingsPanelSwitchHeader(panel, "Компас к финишу",
+                "300 м всегда, до 1 км после последнего манёвра",
+                AppSettings.navFinishCompassAuto(this), this::toggleFinishCompassAuto);
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "1. Настройки основной навигации",
                 normalMode ? "манёвр маршрута, серая дорога и текстовые строки"
@@ -4051,6 +4056,13 @@ public final class MainActivity extends Activity {
     private void toggleNavFinishDirection(CompoundButton button, boolean enabled) {
         NavigationFeature.get(this).setFinishDirectionMode(enabled);
         AppService.start(this);
+        refresh();
+    }
+
+    private void toggleFinishCompassAuto(CompoundButton button, boolean enabled) {
+        NavigationFeature.get(this).setFinishCompassAuto(enabled);
+        AppService.start(this);
+        renderTab();
         refresh();
     }
 

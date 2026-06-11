@@ -36,6 +36,8 @@ public final class YandexCoreBridgeClient {
     private static final long FINISH_MIN_ROUTE_ALIVE_MS = 3000L;
     private static final long ROUTE_REMAINING_MANEUVER_CONFLICT_METERS = 30L;
     private static final long MANEUVER_ROUTE_DELTA_MAX_METERS = 350L;
+    private static final long REROUTE_ROUTE_GROWTH_METERS = 25L;
+    private static final long MANEUVER_ZERO_METERS = 1L;
     private static final Pattern DISTANCE_NUMBER =
             Pattern.compile("[-+]?\\d+(?:[\\.,]\\d+)?");
     private static YandexCoreBridgeClient shared;
@@ -284,6 +286,7 @@ public final class YandexCoreBridgeClient {
         long freshness = freshnessMs(snapshot, timestampElapsed);
         boolean routeLive = routeLive(state);
         if (YandexCoreBridgeContract.STATE_ACTIVE.equals(state)) {
+            resetManeuverGuardForRouteChange(snapshot);
             normalizeActiveSnapshot(snapshot, freshness);
             rememberLiveRoute(snapshot);
         } else if (!routeLive) {
@@ -700,6 +703,23 @@ public final class YandexCoreBridgeClient {
                 && lastManeuverRouteRemainingMeters >= 0L;
         long routeDelta = routeRemainingKnown
                 ? lastManeuverRouteRemainingMeters - routeRemainingMeters : 0L;
+        boolean routeGrew = routeRemainingKnown
+                && routeRemainingMeters > lastManeuverRouteRemainingMeters + REROUTE_ROUTE_GROWTH_METERS;
+        if (routeGrew) {
+            rememberManeuverDistance(key, meters, routeRemainingMeters);
+            AppLog.line(app, "Yandex Core Bridge: maneuver guard reset by route growth"
+                    + " lastRoute=" + lastManeuverRouteRemainingMeters
+                    + " route=" + routeRemainingMeters
+                    + " meters=" + meters);
+            return meters;
+        }
+        if (lastManeuverDistanceMeters <= MANEUVER_ZERO_METERS && meters > MANEUVER_ZERO_METERS) {
+            rememberManeuverDistance(key, meters, routeRemainingMeters);
+            AppLog.line(app, "Yandex Core Bridge: maneuver distance recovered from zero"
+                    + " meters=" + meters
+                    + " route=" + routeRemainingMeters);
+            return meters;
+        }
         boolean routeDidNotGrow = routeRemainingKnown
                 && routeRemainingMeters <= lastManeuverRouteRemainingMeters + 10L;
         boolean noisyBackstep = routeDidNotGrow && meters > lastManeuverDistanceMeters + 5L;
@@ -747,6 +767,25 @@ public final class YandexCoreBridgeClient {
         lastManeuverDistanceKey = "";
         lastManeuverDistanceMeters = -1L;
         lastManeuverRouteRemainingMeters = -1L;
+    }
+
+    private void resetManeuverGuardForRouteChange(Bundle snapshot) {
+        if (snapshot == null) return;
+        String routeId = firstString(snapshot, "route_id", "routeId");
+        String marker = lower(firstString(snapshot, "last_callback", "callback",
+                "event_type", "bridge_reason", "reason"));
+        boolean rerouting = marker.contains("rerout") || marker.contains("перестро");
+        boolean routeChanged = !TextUtils.isEmpty(routeId)
+                && !TextUtils.isEmpty(lastLiveRouteId)
+                && !routeId.equals(lastLiveRouteId);
+        if (!rerouting && !routeChanged) return;
+        if (!TextUtils.isEmpty(lastManeuverDistanceKey)) {
+            AppLog.line(app, "Yandex Core Bridge: maneuver guard reset by "
+                    + (routeChanged ? "route_id" : "reroute")
+                    + " lastRouteId=" + lastLiveRouteId
+                    + " routeId=" + routeId);
+        }
+        resetManeuverDistanceGuard();
     }
 
     private void resetLiveRouteGuard() {

@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 
 import kia.app.core.AppLog;
+import kia.app.core.settings.AppSettings;
 import kia.app.entry.AppService;
 import kia.app.navigation.domain.NavigationFeature;
 
@@ -19,10 +20,14 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
     private static final long DUPLICATE_WINDOW_MS = 120L;
     private static final long SERVICE_START_MIN_INTERVAL_MS = 5000L;
     private static final long NAV_WAKE_MS = 12000L;
+    private static final long CORE_BRIDGE_FALLBACK_SUPPRESS_MS = 5000L;
+    private static final long SUPPRESSED_LOG_MS = 10000L;
 
     private static String lastSignature = "";
     private static long lastSignatureAt;
     private static long lastServiceStartAt;
+    private static long lastCoreBridgeSnapshotAt;
+    private static long lastSuppressedLogAt;
     private static PowerManager.WakeLock wakeLock;
 
     @Override
@@ -33,9 +38,11 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
         if (duplicate(intent)) return;
         String action = intent.getAction();
         if (YandexCoreBridgeContract.ACTION_V2_SNAPSHOT.equals(action)) {
+            lastCoreBridgeSnapshotAt = System.currentTimeMillis();
             YandexCoreBridgeClient.get(context).acceptBroadcastSnapshot(intent.getExtras());
             return;
         }
+        if (legacyFallbackSuppressed(context, action)) return;
         NavigationFeature feature = NavigationFeature.get(context);
         if ("com.yf.navinfo".equals(action)
                 || "com.teyes.MapAssistantService".equals(action)
@@ -119,5 +126,22 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
             out.append(key).append('=').append(value == null ? "null" : String.valueOf(value)).append(';');
         }
         return out.toString();
+    }
+
+    private static boolean legacyFallbackSuppressed(Context context, String action) {
+        int mode = AppSettings.navSourceMode(context);
+        long now = System.currentTimeMillis();
+        boolean strictYandex = mode == AppSettings.NAV_SOURCE_YANDEX;
+        boolean recentCoreBridge = mode == AppSettings.NAV_SOURCE_AUTO
+                && lastCoreBridgeSnapshotAt > 0L
+                && now - lastCoreBridgeSnapshotAt < CORE_BRIDGE_FALLBACK_SUPPRESS_MS;
+        if (!strictYandex && !recentCoreBridge) return false;
+        if (now - lastSuppressedLogAt >= SUPPRESSED_LOG_MS) {
+            lastSuppressedLogAt = now;
+            AppLog.line(context, "Navigation legacy fallback suppressed: "
+                    + (strictYandex ? "strict_yandex" : "core_bridge_recent")
+                    + " action=" + action);
+        }
+        return true;
     }
 }

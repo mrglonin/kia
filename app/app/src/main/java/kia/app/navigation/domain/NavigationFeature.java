@@ -65,7 +65,9 @@ public final class NavigationFeature {
     private static final float AUTO_FINISH_ROUTE_METERS = 35f;
     private static final float AUTO_FINISH_GPS_METERS = 10f;
     private static final float DASHBOARD_FINISH_METERS = 10f;
-    private static final float FINAL_SEGMENT_FINISH_DIRECTION_METERS = 250f;
+    private static final float FINAL_SEGMENT_FINISH_DIRECTION_METERS = 300f;
+    private static final float NO_MORE_MANEUVER_FINISH_DIRECTION_METERS = 1000f;
+    private static final float NO_MORE_MANEUVER_ROUTE_MARGIN_METERS = 25f;
     private static final float FINAL_SEGMENT_MANEUVER_DONE_METERS = 1f;
     private static final float FINAL_SEGMENT_NEW_MANEUVER_METERS = 20f;
     private static final float NEW_ROUTE_AFTER_FINISH_METERS = 50f;
@@ -4497,6 +4499,18 @@ public final class NavigationFeature {
         setOutputMode(enabled ? NavigationOutputMode.FINISH_DIRECTION : NavigationOutputMode.NORMAL);
     }
 
+    public synchronized void setFinishCompassAuto(boolean enabled) {
+        AppSettings.setNavFinishCompassAuto(app, enabled);
+        if (!enabled) {
+            clearFinalSegmentFinishDirection("finish compass auto disabled");
+            resendCurrentVisual();
+        } else if (state.active && !state.finishReached) {
+            lastSentFinishDirectionKey = "";
+            sendDirectionToFinishIfNeeded(true);
+        }
+        AppLog.line(app, "Navigation finish compass auto: " + enabled);
+    }
+
     public synchronized void setOutputMode(int mode) {
         syncRouteStateFromStore();
         NavigationModeSettings.setMode(app, mode);
@@ -5009,7 +5023,8 @@ public final class NavigationFeature {
 
     private boolean finishDirectionShouldOverride() {
         return state.active && !state.finishReached
-                && (NavigationModeSettings.isFinishDirection(app) || finalSegmentFinishDirectionActive);
+                && (NavigationModeSettings.isFinishDirection(app)
+                || (AppSettings.navFinishCompassAuto(app) && finalSegmentFinishDirectionActive));
     }
 
     private String finishDirectionReason() {
@@ -5040,9 +5055,13 @@ public final class NavigationFeature {
         if (!state.active || state.finishReached || NavigationModeSettings.isFinishDirection(app)) {
             return false;
         }
+        if (!AppSettings.navFinishCompassAuto(app)) {
+            clearFinalSegmentFinishDirection("finish compass auto off " + clean(source));
+            return false;
+        }
         String routeText = first(normalizeDistanceText(routeDistance), state.routeDistance);
         float routeMeters = distanceMeters(routeText);
-        if (routeMeters > FINAL_SEGMENT_FINISH_DIRECTION_METERS) {
+        if (routeMeters > NO_MORE_MANEUVER_FINISH_DIRECTION_METERS) {
             clearFinalSegmentFinishDirection("route beyond final segment " + clean(source));
             return false;
         }
@@ -5051,17 +5070,39 @@ public final class NavigationFeature {
         }
         String maneuver = first(clean(incomingManeuver), clean(previousManeuver));
         String incomingDistance = normalizeDistanceText(incomingManeuverDistance);
+        String previousDistance = normalizeDistanceText(previousManeuverDistance);
+        String decisionDistance = first(nonZeroDistance(incomingDistance), nonZeroDistance(previousDistance));
+        boolean incomingManeuverUsable = isUsableManeuver(incomingManeuver)
+                && !isFinishManeuver(incomingManeuver);
+        boolean previousManeuverUsable = isUsableManeuver(previousManeuver)
+                && !isFinishManeuver(previousManeuver);
+        boolean noIncomingManeuver = !incomingManeuverUsable
+                && TextUtils.isEmpty(nonZeroDistance(incomingDistance));
         if (finalSegmentFinishDirectionActive) {
-            if (finalSegmentNewManeuverArrived(maneuver, incomingDistance)) {
+            if (routeMeters <= FINAL_SEGMENT_FINISH_DIRECTION_METERS) return true;
+            if (finalSegmentNewManeuverArrived(maneuver, decisionDistance, routeMeters)) {
                 clearFinalSegmentFinishDirection("new maneuver before finish " + clean(source));
                 return false;
             }
             return true;
         }
+        if (routeMeters <= FINAL_SEGMENT_FINISH_DIRECTION_METERS) {
+            startFinalSegmentFinishDirection(first(maneuver, "final_segment"),
+                    routeText, source, "route_within_300m", now);
+            return true;
+        }
         if (!isUsableManeuver(maneuver) || isFinishManeuver(maneuver)) return false;
-        String completionReason = finalSegmentManeuverCompletionReason(incomingDistance, routeMeters);
+        String completionReason = "";
+        if (previousManeuverUsable && noIncomingManeuver
+                && distanceMeters(previousDistance) <= NO_MORE_MANEUVER_FINISH_DIRECTION_METERS) {
+            completionReason = "last_maneuver_no_more";
+        }
+        if (TextUtils.isEmpty(completionReason)) {
+            completionReason = finalSegmentManeuverCompletionReason(decisionDistance, routeMeters);
+        }
         if (TextUtils.isEmpty(completionReason)) return false;
         if (!"maneuver_beyond_route".equals(completionReason)
+                && !"last_maneuver_no_more".equals(completionReason)
                 && !isUsableManeuver(previousManeuver)
                 && TextUtils.isEmpty(nonZeroDistance(previousManeuverDistance))) {
             return false;
@@ -5075,21 +5116,28 @@ public final class NavigationFeature {
         float maneuverMeters = distanceMeters(incomingDistance);
         if (maneuverMeters <= FINAL_SEGMENT_MANEUVER_DONE_METERS) return "maneuver_zero";
         if (routeMeters > AUTO_FINISH_ROUTE_METERS
-                && routeMeters <= FINAL_SEGMENT_FINISH_DIRECTION_METERS
-                && maneuverMeters >= routeMeters) {
+                && routeMeters <= NO_MORE_MANEUVER_FINISH_DIRECTION_METERS
+                && maneuverBeyondRoute(maneuverMeters, routeMeters)) {
             return "maneuver_beyond_route";
         }
         return "";
     }
 
-    private boolean finalSegmentNewManeuverArrived(String maneuver, String distanceText) {
+    private boolean finalSegmentNewManeuverArrived(String maneuver, String distanceText, float routeMeters) {
         if (!finalSegmentFinishDirectionActive) return false;
+        if (routeMeters > 0f && routeMeters <= FINAL_SEGMENT_FINISH_DIRECTION_METERS) return false;
         if (!isUsableManeuver(maneuver) || isFinishManeuver(maneuver)) return false;
         String distance = nonZeroDistance(distanceText);
         if (TextUtils.isEmpty(distance)) return false;
         float meters = distanceMeters(distance);
+        if (routeMeters > 0f && maneuverBeyondRoute(meters, routeMeters)) return false;
         if (!sameManeuverFamily(finalSegmentManeuver, maneuver)) return true;
         return meters > FINAL_SEGMENT_NEW_MANEUVER_METERS;
+    }
+
+    private static boolean maneuverBeyondRoute(float maneuverMeters, float routeMeters) {
+        return maneuverMeters > 0f && routeMeters > 0f
+                && maneuverMeters + NO_MORE_MANEUVER_ROUTE_MARGIN_METERS >= routeMeters;
     }
 
     private void startFinalSegmentFinishDirection(String maneuver, String routeDistance,

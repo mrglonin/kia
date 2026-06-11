@@ -4,8 +4,8 @@
     "version_code": 348,
     "asset_name": "kia_348.apk",
     "download_url": "https://raw.githubusercontent.com/mrglonin/kia/main/updates/kia_348.apk",
-    "sha256": "b9fab8bbe6dfaebcb9f29fed0bd8ef2898a980492c8580645f8700ea172e6be2",
-    "size": 5843863
+    "sha256": "f216852852e3175f97a18e7d7bece8c57f5c9b9f23e5e7b7a7d7281c5f787490",
+    "size": 5847355
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
@@ -16,8 +16,8 @@
     "files": [
       {
         "name": "yandex_navi-7_10-arm7-kia-mod.apk",
-        "sha256": "35794831b77f4a6070ec7921e0e47d707e79794b94d1686782d471f322d52d12",
-        "size": 90242546
+        "sha256": "eeddc935570e1dafb76e3aef89ed9515e6d8e9065089726bcef83efd3b5cfd46",
+        "size": 79674074
       }
     ]
   },

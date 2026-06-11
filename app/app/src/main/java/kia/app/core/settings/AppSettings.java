@@ -24,6 +24,7 @@ public final class AppSettings {
     private static final String KEY_NAV_TBT = "nav_tbt";
     private static final String KEY_NAV_FINISH_DIRECTION = "nav_finish_direction";
     private static final String KEY_NAV_FINISH_DIRECTION_LEAD_METERS = "nav_finish_direction_lead_meters";
+    private static final String KEY_NAV_FINISH_COMPASS_AUTO = "nav_finish_compass_auto";
     private static final String KEY_NAV_TEXT_MODE = "nav_text_mode";
     private static final String KEY_NAV_MANEUVER_TEXT_SECONDS = "nav_maneuver_text_seconds";
     private static final String KEY_NAV_SOURCE_MODE = "nav_source_mode";
@@ -102,7 +103,7 @@ public final class AppSettings {
     public static final int RCTA_BACKGROUND_ALPHA_MIN = 0;
     public static final int RCTA_BACKGROUND_ALPHA_MAX = 180;
     public static final int RCTA_BACKGROUND_ALPHA_DEFAULT = RCTA_BACKGROUND_ALPHA_MAX;
-    private static final int SCHEMA = 45;
+    private static final int SCHEMA = 46;
     private static final int DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS = 0;
     private static final int DEFAULT_NAV_MANEUVER_TEXT_SECONDS = 0;
     private static final int DEFAULT_NAV_MICRO_HOLD_SECONDS = 5;
@@ -138,9 +139,10 @@ public final class AppSettings {
                     .putBoolean(KEY_NAV_TBT, false)
                     .putBoolean(KEY_NAV_FINISH_DIRECTION, false)
                     .putInt(KEY_NAV_FINISH_DIRECTION_LEAD_METERS, DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS)
+                    .putBoolean(KEY_NAV_FINISH_COMPASS_AUTO, true)
                     .putInt(KEY_NAV_TEXT_MODE, 0)
                     .putInt(KEY_NAV_MANEUVER_TEXT_SECONDS, DEFAULT_NAV_MANEUVER_TEXT_SECONDS)
-                    .putInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_AUTO)
+                    .putInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_YANDEX)
                     .putInt(KEY_NAV_ETA_TIME_MODE, NAV_ETA_TIME_ARRIVAL)
                     .putBoolean(KEY_NAV_OVERSPEED_TEXT, true)
                     .putBoolean(KEY_NAV_OVERLAY, false)
@@ -184,7 +186,9 @@ public final class AppSettings {
                 edit.putInt(KEY_OTHER_MEDIA_SOURCE_MODE, OTHER_SOURCE_ANDROID);
             }
             if (schema < 6 || !prefs.contains(KEY_NAV_SOURCE_MODE)) {
-                edit.putInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_AUTO);
+                edit.putInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_YANDEX);
+            } else if (schema < 46 && prefs.getInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_AUTO) == NAV_SOURCE_AUTO) {
+                edit.putInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_YANDEX);
             }
             if (schema < 40 || !prefs.contains(KEY_NAV_ETA_TIME_MODE)) {
                 edit.putInt(KEY_NAV_ETA_TIME_MODE, NAV_ETA_TIME_ARRIVAL);
@@ -300,6 +304,9 @@ public final class AppSettings {
             if (schema < 28 || !prefs.contains(KEY_NAV_FINISH_DIRECTION_LEAD_METERS)) {
                 edit.putInt(KEY_NAV_FINISH_DIRECTION_LEAD_METERS,
                         DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS);
+            }
+            if (schema < 46 || !prefs.contains(KEY_NAV_FINISH_COMPASS_AUTO)) {
+                edit.putBoolean(KEY_NAV_FINISH_COMPASS_AUTO, true);
             }
             if (schema < 29 || !prefs.contains(KEY_NAV_MANEUVER_TEXT_SECONDS)) {
                 edit.putInt(KEY_NAV_MANEUVER_TEXT_SECONDS, DEFAULT_NAV_MANEUVER_TEXT_SECONDS);
@@ -483,6 +490,14 @@ public final class AppSettings {
         prefs(context).edit().putInt(KEY_NAV_FINISH_DIRECTION_LEAD_METERS, 0).apply();
     }
 
+    public static boolean navFinishCompassAuto(Context context) {
+        return prefs(context).getBoolean(KEY_NAV_FINISH_COMPASS_AUTO, true);
+    }
+
+    public static void setNavFinishCompassAuto(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_NAV_FINISH_COMPASS_AUTO, value).apply();
+    }
+
     public static int navTextMode(Context context) {
         int mode = prefs(context).getInt(KEY_NAV_TEXT_MODE, 0);
         if (mode >= 3) return 0;
@@ -511,7 +526,7 @@ public final class AppSettings {
     }
 
     public static int navSourceMode(Context context) {
-        return clamp(prefs(context).getInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_AUTO),
+        return clamp(prefs(context).getInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_YANDEX),
                 NAV_SOURCE_AUTO, NAV_SOURCE_2GIS);
     }
 
