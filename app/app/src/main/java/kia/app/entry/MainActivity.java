@@ -35,6 +35,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -185,6 +186,8 @@ public final class MainActivity extends Activity {
     private final TextView[] navTextModeChecks = new TextView[3];
     private final View[] navRouteModeViews = new View[3];
     private final TextView[] navRouteModeChecks = new TextView[3];
+    private final View[] mediaWizardProfileViews = new View[4];
+    private final TextView[] mediaWizardProfileChecks = new TextView[4];
     private ScrollView activeScrollView;
     private BlindSpotOverlayView rctaPreview;
     private BlindSpotOverlayView rctaDemoOverlay;
@@ -341,6 +344,7 @@ public final class MainActivity extends Activity {
     private void maybeShowMediaProfileWizard() {
         if (isFinishing() || isDestroyed() || AppSettings.mediaProfileConfigured(this)) return;
         AlertDialog dialog = new AlertDialog.Builder(this).create();
+        dialog.setCanceledOnTouchOutside(false);
         dialog.setView(mediaProfileWizardView(dialog), 0, 0, 0, 0);
         dialog.setOnCancelListener(d -> AppSettings.setMediaProfileConfigured(this, true));
         dialog.show();
@@ -351,7 +355,7 @@ public final class MainActivity extends Activity {
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
             lp.copyFrom(window.getAttributes());
             int screenWidth = getResources().getDisplayMetrics().widthPixels;
-            lp.width = Math.min(screenWidth - dp(28), dp(mediaProfileWizardWideLayout() ? 640 : 720));
+            lp.width = Math.min(screenWidth - dp(36), dp(mediaProfileWizardWideLayout() ? 560 : 620));
             lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
             window.setAttributes(lp);
         }
@@ -359,67 +363,78 @@ public final class MainActivity extends Activity {
 
     private View mediaProfileWizardView(AlertDialog dialog) {
         boolean wide = mediaProfileWizardWideLayout();
+        clearChoiceViews(mediaWizardProfileViews, mediaWizardProfileChecks);
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(wide ? 18 : 22), dp(wide ? 16 : 20),
-                dp(wide ? 18 : 22), dp(wide ? 24 : 26));
-        panel.setBackground(gradient(Color.rgb(18, 23, 31), Color.rgb(11, 14, 20),
-                softColor(COLOR_ACCENT_BLUE, 120), dp(1), dp(22)));
+        panel.setPadding(dp(wide ? 18 : 22), dp(wide ? 16 : 18),
+                dp(wide ? 18 : 22), dp(wide ? 18 : 22));
+        panel.setBackground(round(COLOR_SETTINGS_PANEL, dp(8), COLOR_SETTINGS_DIVIDER, dp(1)));
 
         LinearLayout head = row();
         head.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
-        TextView title = text("KIA Media", wide ? 21 : (isCompact() ? 23 : 28), Color.WHITE);
+        TextView title = text("Профиль магнитолы", wide ? 16 : (isCompact() ? 18 : 20), Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        TextView subtitle = text("Выберите профиль магнитолы", wide ? 12 : (isCompact() ? 13 : 15),
-                COLOR_MUTED);
+        title.setIncludeFontPadding(false);
         titleBox.addView(title);
-        titleBox.addView(subtitle);
-        head.addView(titleBox, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        panel.addView(head);
-
-        TextView hint = text("Поменять можно позже в Media. TEYES отделен, универсальные режимы не смешиваются со старым рабочим.",
-                wide ? 11 : (isCompact() ? 12 : 14), COLOR_MUTED);
-        hint.setMaxLines(wide ? 2 : 3);
+        TextView hint = text("Выберите источник музыки для приборки. Потом можно изменить в настройках.",
+                wide ? 10 : (isCompact() ? 11 : 12), COLOR_MUTED);
+        hint.setIncludeFontPadding(false);
+        hint.setMaxLines(2);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hintLp.setMargins(0, dp(wide ? 6 : 12), 0, dp(wide ? 4 : 10));
-        panel.addView(hint, hintLp);
+        hintLp.setMargins(0, dp(2), 0, 0);
+        titleBox.addView(hint, hintLp);
+        head.addView(titleBox, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView close = text("×", wide ? 20 : 24, COLOR_MUTED);
+        close.setGravity(Gravity.CENTER);
+        close.setTypeface(Typeface.DEFAULT_BOLD);
+        close.setClickable(true);
+        close.setFocusable(true);
+        close.setBackground(settingsButtonBackground(false));
+        close.setOnClickListener(v -> closeMediaProfileWizard(dialog));
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(wide ? 34 : 40),
+                dp(wide ? 34 : 40));
+        head.addView(close, closeLp);
+        LinearLayout.LayoutParams headLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headLp.setMargins(0, 0, 0, dp(wide ? 4 : 6));
+        panel.addView(head, headLp);
 
         if (wide) {
             panel.addView(mediaProfileWizardChoiceRow(dialog,
                     mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_TEYES,
-                            "TEYES / CC4 Pro", "виджеты TEYES, SPD media, radio, BT",
+                            "TEYES / CC4 Pro", "Музыка, радио и Bluetooth с магнитолы TEYES",
                             COLOR_ACCENT_BLUE),
                     mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID,
-                            "Universal Android", "MediaSession + база радиостанций Kia",
+                            "Universal Android", "Трек и источник из Android-приложений",
                             COLOR_ACCENT)));
             panel.addView(mediaProfileWizardChoiceRow(dialog,
                     mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UART_REAL,
-                            "UART real + Android", "0x7A не трогаем, шлем только текст",
+                            "UART real + Android", "Магнитола ведет режим, Kia показывает трек",
                             COLOR_WARNING),
                     mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_OFF,
-                            "Media выключено", "музыку ведет штатный UART",
+                            "Media выключено", "Не отправлять музыку на приборку",
                             COLOR_MUTED)));
         } else {
             panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_TEYES,
-                    "TEYES / CC4 Pro", "старый стабильный режим: widget, SPD media, radio, Bluetooth",
+                    "TEYES / CC4 Pro", "Музыка, радио и Bluetooth с магнитолы TEYES",
                     COLOR_ACCENT_BLUE));
             panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID,
-                    "Universal Android", "музыка через MediaSession, радио по частоте и базе Kia",
+                    "Universal Android", "Трек и источник из Android-приложений",
                     COLOR_ACCENT));
             panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UART_REAL,
-                    "UART real + Android", "не меняет source 0x7A, отправляет только текст 0x20-0x25",
+                    "UART real + Android", "Магнитола ведет режим, Kia показывает трек",
                     COLOR_WARNING));
             panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_OFF,
-                    "Media выключено", "Kia не отправляет музыку, штатный UART работает сам",
+                    "Media выключено", "Не отправлять музыку на приборку",
                     COLOR_MUTED));
         }
         Space bottomGuard = new Space(this);
         panel.addView(bottomGuard, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(wide ? 2 : 4)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
 
         return panel;
     }
@@ -428,10 +443,10 @@ public final class MainActivity extends Activity {
         LinearLayout line = row();
         LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        leftLp.setMargins(0, dp(6), dp(5), 0);
+        leftLp.setMargins(0, dp(6), dp(5), dp(4));
         LinearLayout.LayoutParams rightLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        rightLp.setMargins(dp(5), dp(6), 0, 0);
+        rightLp.setMargins(dp(5), dp(6), 0, dp(4));
         line.addView(left, leftLp);
         line.addView(right, rightLp);
         return line;
@@ -444,43 +459,68 @@ public final class MainActivity extends Activity {
         LinearLayout item = new LinearLayout(this);
         item.setOrientation(LinearLayout.VERTICAL);
         item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(wide ? 12 : 16), dp(wide ? 9 : 12),
-                dp(wide ? 12 : 16), dp(wide ? 9 : 12));
-        item.setMinimumHeight(dp(wide ? 72 : 80));
+        item.setPadding(dp(wide ? 14 : 16), dp(wide ? 8 : 12),
+                dp(wide ? 14 : 16), dp(wide ? 8 : 12));
+        item.setMinimumHeight(dp(wide ? 58 : 78));
         item.setClickable(true);
         item.setFocusable(true);
-        item.setBackground(gradient(softColor(color, selected ? 92 : 42),
-                softColor(COLOR_SETTINGS_PANEL_ALT, 220),
-                softColor(selected ? color : Color.WHITE, selected ? 120 : 32), dp(1), dp(12)));
+        item.setBackground(settingsButtonBackground(selected));
 
         LinearLayout header = row();
-        TextView name = text(title, wide ? 13 : (isCompact() ? 15 : 17), Color.WHITE);
+        TextView name = text(title, wide ? 12 : (isCompact() ? 15 : 16), Color.WHITE);
         name.setTypeface(Typeface.DEFAULT_BOLD);
         name.setSingleLine(false);
         name.setMaxLines(1);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         header.addView(name, nameLp);
-        TextView check = text("выбрано", wide ? 10 : 11, COLOR_MUTED);
+        TextView check = text("выбрано", wide ? 10 : 11, selected ? COLOR_ACCENT : COLOR_MUTED);
         check.setGravity(Gravity.CENTER);
         check.setTypeface(Typeface.DEFAULT_BOLD);
         check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
         header.addView(check);
 
-        TextView sub = text(hint, wide ? 10 : (isCompact() ? 11 : 13), COLOR_MUTED);
+        TextView sub = text(hint, wide ? 9 : (isCompact() ? 11 : 12), COLOR_MUTED);
         sub.setMaxLines(2);
         item.addView(header);
         item.addView(sub);
 
+        int index = mediaWizardProfileIndex(profile);
+        if (index >= 0) {
+            mediaWizardProfileViews[index] = item;
+            mediaWizardProfileChecks[index] = check;
+        }
         item.setOnClickListener(v -> {
             setMediaProfile(profile);
-            dialog.dismiss();
+            updateMediaWizardChoices(profile);
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, dp(8), 0, 0);
+        lp.setMargins(0, dp(6), 0, dp(4));
         item.setLayoutParams(lp);
         return item;
+    }
+
+    private void closeMediaProfileWizard(AlertDialog dialog) {
+        AppSettings.setMediaProfileConfigured(this, true);
+        dialog.dismiss();
+    }
+
+    private void updateMediaWizardChoices(int selectedProfile) {
+        int selectedIndex = mediaWizardProfileIndex(selectedProfile);
+        for (int i = 0; i < mediaWizardProfileViews.length; i++) {
+            View view = mediaWizardProfileViews[i];
+            TextView check = mediaWizardProfileChecks[i];
+            if (view == null || check == null) continue;
+            boolean selected = i == selectedIndex;
+            view.setBackground(settingsButtonBackground(selected));
+            check.setTextColor(selected ? COLOR_ACCENT : COLOR_MUTED);
+            check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
+        }
+    }
+
+    private int mediaWizardProfileIndex(int profile) {
+        return profile >= 0 && profile < mediaWizardProfileViews.length ? profile : -1;
     }
 
     private boolean mediaProfileWizardWideLayout() {
@@ -943,7 +983,26 @@ public final class MainActivity extends Activity {
         final int target = settings ? settingsScrollY : mainScrollY;
         if (target <= 0) return;
         scroll.scrollTo(0, target);
-        scroll.post(() -> scroll.scrollTo(0, target));
+        scroll.getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                if (scroll.getViewTreeObserver().isAlive()) {
+                    scroll.getViewTreeObserver().removeOnPreDrawListener(this);
+                }
+                restoreScrollY(scroll, target);
+                return true;
+            }
+        });
+        scroll.post(() -> restoreScrollY(scroll, target));
+        scroll.postDelayed(() -> restoreScrollY(scroll, target), 80L);
+    }
+
+    private void restoreScrollY(ScrollView scroll, int target) {
+        int max = 0;
+        if (scroll.getChildCount() > 0) {
+            max = Math.max(0, scroll.getChildAt(0).getHeight() - scroll.getHeight());
+        }
+        scroll.scrollTo(0, Math.min(target, max));
     }
 
     private void clearTabViews() {
@@ -2505,37 +2564,27 @@ public final class MainActivity extends Activity {
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "Профиль магнитолы", "старый TEYES не смешивается с универсальными режимами");
         addActionGridColumns(panel, 2,
-                mediaProfileAction(AppSettings.MEDIA_PROFILE_TEYES, "TEYES / CC4", "текущий стабильный режим"),
-                mediaProfileAction(AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID, "Android", "MediaSession + радио"),
-                mediaProfileAction(AppSettings.MEDIA_PROFILE_UART_REAL, "UART real", "только текст поверх UART"),
-                mediaProfileAction(AppSettings.MEDIA_PROFILE_OFF, "Выкл", "не трогать медиа"));
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_TEYES, "TEYES / CC4", "магнитола TEYES, радио, USB, BT"),
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID, "Android", "музыка из Android и база радио"),
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_UART_REAL, "UART real", "оставить штатный режим, менять только текст"),
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_OFF, "Выкл", "Kia не отправляет медиа"));
 
         if (!AppSettings.mediaEnabled(this)) {
             return panel;
         }
         int profile = AppSettings.mediaProfile(this);
         panel.addView(settingsDivider());
-        addSettingsSubHeader(panel, mediaProfileSettingsTitle(profile), mediaProfileSettingsHint(profile));
-        if (profile == AppSettings.MEDIA_PROFILE_TEYES) {
-            addActionGrid(panel,
-                    action("TEYES widget", "SPD media/radio/bt", COLOR_ACCENT_BLUE, true, this::noopAction));
-        } else if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID) {
-            addActionGrid(panel,
-                    action("MediaSession", "трек, артист, длительность", COLOR_ACCENT_BLUE, true, this::noopAction),
-                    action("Радио", "частота + база Kia", COLOR_ACCENT_BLUE, true, this::noopAction));
-        } else if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) {
-            addActionGrid(panel,
-                    action("Text only", "без отправки source 0x7A", COLOR_ACCENT_BLUE, true, this::noopAction),
-                    action("UART real", "режим и частота штатно", COLOR_ACCENT_BLUE, true, this::noopAction));
-        }
-        panel.addView(settingsDivider());
         addSettingsSubHeader(panel, otherMediaSourceTitle(profile), otherMediaSourceHint(profile));
-        addActionGrid(panel,
-                action("Android", "универсальный режим", otherModeColor(AppSettings.OTHER_SOURCE_ANDROID),
+        addActionGridColumns(panel, 3,
+                action("Android", "обычная Android-музыка", otherModeColor(AppSettings.OTHER_SOURCE_ANDROID),
                         () -> setOtherMediaSourceMode(AppSettings.OTHER_SOURCE_ANDROID)),
-                action("My Music", "как штатная музыка", otherModeColor(AppSettings.OTHER_SOURCE_MY_MUSIC),
+                action("Bluetooth", "показать как BT Audio", otherModeColor(AppSettings.OTHER_SOURCE_BLUETOOTH),
+                        () -> setOtherMediaSourceMode(AppSettings.OTHER_SOURCE_BLUETOOTH)),
+                action("USB", "показать как USB Music", otherModeColor(AppSettings.OTHER_SOURCE_USB),
+                        () -> setOtherMediaSourceMode(AppSettings.OTHER_SOURCE_USB)),
+                action("My Music", "показать как штатную музыку", otherModeColor(AppSettings.OTHER_SOURCE_MY_MUSIC),
                         () -> setOtherMediaSourceMode(AppSettings.OTHER_SOURCE_MY_MUSIC)),
-                action("CarPlay", "как CarPlay-экран", otherModeColor(AppSettings.OTHER_SOURCE_CARPLAY),
+                action("CarPlay", "показать как CarPlay", otherModeColor(AppSettings.OTHER_SOURCE_CARPLAY),
                         () -> setOtherMediaSourceMode(AppSettings.OTHER_SOURCE_CARPLAY)));
 
         panel.addView(settingsDivider());
@@ -2549,35 +2598,17 @@ public final class MainActivity extends Activity {
         return panel;
     }
 
-    private void noopAction() {
-    }
-
-    private String mediaProfileSettingsTitle(int profile) {
-        if (profile == AppSettings.MEDIA_PROFILE_TEYES) return "TEYES источники";
-        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) return "UART real";
-        return "Universal Android";
-    }
-
-    private String mediaProfileSettingsHint(int profile) {
-        if (profile == AppSettings.MEDIA_PROFILE_TEYES) {
-            return "старый прямой захват CC4 Pro без универсальных сканов";
-        }
-        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) {
-            return "музыка из MediaSession, радио по частоте, source 0x7A не отправляем";
-        }
-        return "музыка из MediaSession, радио по частоте и внутренней базе";
-    }
-
     private String otherMediaSourceTitle(int profile) {
-        return profile == AppSettings.MEDIA_PROFILE_TEYES ? "Уведомление other" : "ID текстового кадра";
+        if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) return "Обычные Android-плееры";
+        return "Обычная музыка";
     }
 
     private String otherMediaSourceHint(int profile) {
         if (profile == AppSettings.MEDIA_PROFILE_UART_REAL) {
-            return "куда отправлять обычные Android-плееры без смены source 0x7A";
+            return "как показать трек, не меняя штатный режим магнитолы";
         }
         if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID) {
-            return "куда отправлять обычные Android-плееры";
+            return "каким штатным источником показать музыку без точного source";
         }
         return "какой штатный режим имитировать для Yandex Music, Spotify и Android-плееров";
     }
@@ -2699,7 +2730,7 @@ public final class MainActivity extends Activity {
     }
 
     private void renderNavigationTab(LinearLayout root) {
-        root.addView(navigationPreviewPanel());
+        root.addView(navigationOutputPanel());
         addSection(root, "Источник", "Auto принимает Yandex и 2GIS; ручной режим блокирует второй источник.",
                 navSourceAction(AppSettings.NAV_SOURCE_AUTO, "Auto", "Yandex + 2GIS"),
                 navSourceAction(AppSettings.NAV_SOURCE_YANDEX, "Yandex", "только Yandex provider"),
@@ -2710,17 +2741,183 @@ public final class MainActivity extends Activity {
                 AppSettings.navOverlayEnabled(this), this::toggleNavDebug);
     }
 
-    private LinearLayout navigationPreviewPanel() {
+    private LinearLayout navigationOutputPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
-        addSettingsPanelHeader(panel, "Предпросмотр навигации",
-                "левая панель, лимит скорости и строка для приборки",
+        addSettingsPanelHeader(panel, "Что уйдёт в авто",
+                "итог текущих настроек без декоративного предпросмотра",
                 COLOR_ACCENT_BLUE);
-        NavigationSettingsPreviewView preview = new NavigationSettingsPreviewView(this);
-        LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, isCompact() ? dp(240) : dp(240));
-        previewLp.setMargins(0, dp(12), 0, 0);
-        panel.addView(preview, previewLp);
+        int routeMode = NavigationModeSettings.mode(this);
+        panel.addView(navigationOutputHero(routeMode));
+        addActionGridColumns(panel, 3,
+                navigationOutputTile("Источник", AppSettings.navSourceLabel(this),
+                        navigationSourceOutputHint(), COLOR_ACCENT_BLUE, true),
+                navigationOutputTile(navigationTextTileTitle(routeMode), navigationTextTileValue(routeMode),
+                        navigationTextTileHint(routeMode), COLOR_ACCENT_BLUE, true),
+                navigationOutputTile(navigationAssistTileTitle(routeMode), navigationAssistTileValue(routeMode),
+                        navigationAssistTileHint(routeMode), navigationAssistTileColor(routeMode),
+                        navigationAssistTileActive(routeMode)));
         return panel;
+    }
+
+    private View navigationOutputHero(int routeMode) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(14), dp(16), dp(14));
+        card.setMinimumHeight(navigationOutputHeroHeight());
+        card.setBackground(round(softColor(COLOR_ACCENT_BLUE, 44), dp(8),
+                softColor(COLOR_ACCENT_BLUE, 82), dp(1)));
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, navigationOutputHeroHeight());
+        cardLp.setMargins(0, dp(14), 0, dp(4));
+        card.setLayoutParams(cardLp);
+
+        TextView label = text("Итог", isCompact() ? 12 : 13, COLOR_MUTED);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        card.addView(label);
+
+        TextView value = text(navigationOutputMainValue(routeMode), isCompact() ? 19 : 23, Color.WHITE);
+        value.setTypeface(Typeface.DEFAULT_BOLD);
+        value.setMaxLines(2);
+        LinearLayout.LayoutParams valueLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        valueLp.setMargins(0, dp(8), 0, 0);
+        card.addView(value, valueLp);
+
+        TextView hint = text(navigationOutputMainHint(routeMode), isCompact() ? 12 : 14, COLOR_MUTED);
+        hint.setMaxLines(2);
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hintLp.setMargins(0, dp(3), 0, 0);
+        card.addView(hint, hintLp);
+        return card;
+    }
+
+    private int navigationOutputHeroHeight() {
+        return isCompact() ? dp(104) : dp(126);
+    }
+
+    private View navigationOutputTile(String title, String value, String hint, int color, boolean active) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER_VERTICAL);
+        tile.setPadding(dp(14), dp(11), dp(14), dp(11));
+        tile.setMinimumHeight(isCompact() ? dp(72) : dp(88));
+        tile.setBackground(round(active ? softColor(color, 38) : COLOR_SETTINGS_PANEL_ALT,
+                dp(7), active ? softColor(color, 72) : Color.TRANSPARENT, active ? dp(1) : 0));
+
+        TextView label = text(title, isCompact() ? 11 : 12, active ? color : COLOR_MUTED);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView main = text(value, isCompact() ? 15 : 17, Color.WHITE);
+        main.setTypeface(Typeface.DEFAULT_BOLD);
+        main.setMaxLines(2);
+        TextView sub = text(hint, isCompact() ? 11 : 12, COLOR_MUTED);
+        sub.setMaxLines(2);
+        tile.addView(label);
+        tile.addView(main);
+        tile.addView(sub);
+        return tile;
+    }
+
+    private String navigationOutputMainValue(int mode) {
+        if (mode == NavigationOutputMode.TBT) return "TBT-иконки поворотов";
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) return "стрелка к точке финиша";
+        return "манёвр, lane и серая дорога";
+    }
+
+    private String navigationOutputMainHint(int mode) {
+        String source = AppSettings.navSourceLabel(this);
+        String time = AppSettings.navEtaTimeModeLabel(this).toLowerCase(Locale.ROOT);
+        if (mode == NavigationOutputMode.TBT) return source + " · дорогу не трогать · " + time;
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) {
+            return source + " · старт " + navFinishLeadText(AppSettings.navFinishDirectionLeadMeters(this))
+                    + " · маршрут скрыт";
+        }
+        return source + " · " + navigationTextOutputText(AppSettings.navTextMode(this))
+                + " · " + time;
+    }
+
+    private String navigationSourceOutputHint() {
+        int mode = AppSettings.navSourceMode(this);
+        if (mode == AppSettings.NAV_SOURCE_YANDEX) return "только Yandex";
+        if (mode == AppSettings.NAV_SOURCE_2GIS) return "только 2GIS";
+        return "Yandex и 2GIS";
+    }
+
+    private String navigationTextTileTitle(int mode) {
+        if (mode == NavigationOutputMode.TBT) return "Дорога";
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) return "Старт";
+        return "Строка";
+    }
+
+    private String navigationTextTileValue(int mode) {
+        if (mode == NavigationOutputMode.TBT) return "не трогать";
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) {
+            return navFinishLeadText(AppSettings.navFinishDirectionLeadMeters(this));
+        }
+        return navigationTextOutputText(AppSettings.navTextMode(this));
+    }
+
+    private String navigationTextTileHint(int mode) {
+        if (mode == NavigationOutputMode.TBT) return "без подмены обычного экрана";
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) return "когда включать стрелку";
+        return "что писать на панели";
+    }
+
+    private String navigationAssistTileTitle(int mode) {
+        if (mode == NavigationOutputMode.TBT) return "Время";
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) return "Маршрут";
+        return "Дополнительно";
+    }
+
+    private String navigationAssistTileValue(int mode) {
+        if (mode == NavigationOutputMode.TBT) {
+            return AppSettings.navEtaTimeModeLabel(this).toLowerCase(Locale.ROOT);
+        }
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) return "скрыт";
+        return navigationNormalExtraText();
+    }
+
+    private String navigationAssistTileHint(int mode) {
+        if (mode == NavigationOutputMode.TBT) return "ETA в TBT";
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) return "заменён стрелкой";
+        return AppSettings.navMicroManeuvers(this)
+                ? "ассистент до " + AppSettings.navMicroMaxDistanceMeters(this)
+                + " м, " + AppSettings.navMicroHoldSeconds(this) + "с"
+                : "ассистент выключен";
+    }
+
+    private int navigationAssistTileColor(int mode) {
+        if (mode == NavigationOutputMode.TBT) return COLOR_WARNING;
+        if (mode == NavigationOutputMode.FINISH_DIRECTION) return COLOR_ACCENT;
+        return AppSettings.navOverspeedTextEnabled(this) ? COLOR_WARNING : COLOR_ACCENT;
+    }
+
+    private boolean navigationAssistTileActive(int mode) {
+        return true;
+    }
+
+    private String navigationNormalExtraText() {
+        String speed = AppSettings.navOverspeedTextEnabled(this) ? "warning" : "знак скорости";
+        if (!AppSettings.navMicroManeuvers(this)) return speed;
+        return speed + " + ассистент";
+    }
+
+    private String navigationTextOutputText(int mode) {
+        switch (mode) {
+            case 1:
+                return "после манёвра";
+            case 2:
+                return "финиш";
+            case 0:
+            default:
+                return "текущая улица";
+        }
+    }
+
+    private String navigationAssistantOutputText() {
+        if (!AppSettings.navMicroManeuvers(this)) return "выключен";
+        return "подсказка до " + AppSettings.navMicroMaxDistanceMeters(this)
+                + " м, держать " + AppSettings.navMicroHoldSeconds(this) + "с";
     }
 
     private boolean navNormalSettingsEnabled() {
@@ -3473,11 +3670,19 @@ public final class MainActivity extends Activity {
         if (text.contains("carplay") || text.contains("car play")) return "0x25 carplay";
         if (text.contains("bluetooth") || text.contains("btmusic")
                 || text.contains("a2dp") || text.contains("avrcp")) return "0x21 bt";
-        return AppSettings.otherMediaSourceMode(this) == AppSettings.OTHER_SOURCE_MY_MUSIC
-                ? "0x24 my_music"
-                : AppSettings.otherMediaSourceMode(this) == AppSettings.OTHER_SOURCE_CARPLAY
-                ? "0x25 carplay"
-                : "0x23 android_auto";
+        switch (AppSettings.otherMediaSourceMode(this)) {
+            case AppSettings.OTHER_SOURCE_USB:
+                return "0x22 usb";
+            case AppSettings.OTHER_SOURCE_BLUETOOTH:
+                return "0x21 bt";
+            case AppSettings.OTHER_SOURCE_MY_MUSIC:
+                return "0x24 my_music";
+            case AppSettings.OTHER_SOURCE_CARPLAY:
+                return "0x25 carplay";
+            case AppSettings.OTHER_SOURCE_ANDROID:
+            default:
+                return "0x23 android_auto";
+        }
     }
 
     private String callStatusText() {
@@ -4505,12 +4710,14 @@ public final class MainActivity extends Activity {
         LinearLayout header = row();
         TextView name = text(title, isCompact() ? 16 : 18, Color.WHITE);
         name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setMaxLines(2);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         header.addView(name, nameLp);
-        TextView check = text("выбрано", isCompact() ? 11 : 12, COLOR_MUTED);
+        TextView check = text("✓", isCompact() ? 15 : 16, COLOR_MUTED);
         check.setGravity(Gravity.CENTER);
         check.setTypeface(Typeface.DEFAULT_BOLD);
+        check.setMinWidth(dp(24));
         check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
         header.addView(check);
         TextView sub = text(hint, isCompact() ? 12 : 14, COLOR_MUTED);
@@ -4550,12 +4757,14 @@ public final class MainActivity extends Activity {
         LinearLayout header = row();
         TextView name = text(title, isCompact() ? 16 : 18, Color.WHITE);
         name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setMaxLines(2);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         header.addView(name, nameLp);
-        TextView check = text("выбрано", isCompact() ? 11 : 12, COLOR_MUTED);
+        TextView check = text("✓", isCompact() ? 15 : 16, COLOR_MUTED);
         check.setGravity(Gravity.CENTER);
         check.setTypeface(Typeface.DEFAULT_BOLD);
+        check.setMinWidth(dp(24));
         check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
         header.addView(check);
 
@@ -4648,7 +4857,7 @@ public final class MainActivity extends Activity {
     private int actionColumns(int count) {
         int widthDp = screenWidthDp();
         if (widthDp < 560) return 1;
-        if (widthDp >= 1050 && count >= 3) return 3;
+        if (widthDp >= 820 && count >= 3) return 3;
         return 2;
     }
 

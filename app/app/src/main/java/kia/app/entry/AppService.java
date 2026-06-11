@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.graphics.BitmapFactory;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -37,7 +38,10 @@ import kia.app.tpms.TpmsController;
 
 public final class AppService extends Service {
     private static final String CHANNEL = "kia_canbus_connection";
-    private static final String SERVICE_TEXT = "Kia canbus active";
+    private static final String CHANNEL_NAME = "Kia CANBUS";
+    private static final String SERVICE_TITLE = "Kia CANBUS";
+    private static final String SERVICE_TEXT = "CANBUS и датчики работают в фоне";
+    private static final String SERVICE_DETAILS = "Kia следит за автомобилем, TPMS, медиа и навигацией.";
     private static final int NOTIFICATION_ID = 51;
 
     private AdapterGateway gateway;
@@ -192,7 +196,10 @@ public final class AppService extends Service {
     private Notification notification(String text) {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= 26 && nm != null) {
-            nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Kia canbus", NotificationManager.IMPORTANCE_LOW));
+            NotificationChannel channel = new NotificationChannel(CHANNEL, CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription(SERVICE_DETAILS);
+            nm.createNotificationChannel(channel);
         }
         PendingIntent open = PendingIntent.getActivity(
                 this,
@@ -204,9 +211,11 @@ public final class AppService extends Service {
                 ? new Notification.Builder(this, CHANNEL)
                 : new Notification.Builder(this);
         return builder
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("Kia")
+                .setSmallIcon(R.drawable.ic_launcher)
+                .setLargeIcon(BitmapFactory.decodeResource(getResources(), R.drawable.ic_launcher))
+                .setContentTitle(SERVICE_TITLE)
                 .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(SERVICE_DETAILS))
                 .setContentIntent(open)
                 .setOngoing(true)
                 .build();

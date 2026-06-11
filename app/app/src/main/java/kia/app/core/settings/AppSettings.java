@@ -101,16 +101,16 @@ public final class AppSettings {
     public static final int RCTA_COLOR_GREEN = 0xff39d38d;
     public static final int RCTA_BACKGROUND_ALPHA_MIN = 0;
     public static final int RCTA_BACKGROUND_ALPHA_MAX = 180;
-    public static final int RCTA_BACKGROUND_ALPHA_DEFAULT = 75;
-    private static final int SCHEMA = 44;
+    public static final int RCTA_BACKGROUND_ALPHA_DEFAULT = RCTA_BACKGROUND_ALPHA_MAX;
+    private static final int SCHEMA = 45;
     private static final int DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS = 0;
     private static final int DEFAULT_NAV_MANEUVER_TEXT_SECONDS = 0;
     private static final int DEFAULT_NAV_MICRO_HOLD_SECONDS = 5;
     private static final int DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS = 150;
     private static final int MAX_NAV_MICRO_MAX_DISTANCE_METERS = 250;
-    private static final int DEFAULT_SAS_RATIO = 10;
-    private static final int DEFAULT_TPMS_LOW_PRESSURE = 200;
-    private static final int DEFAULT_TPMS_HIGH_PRESSURE = 320;
+    private static final int DEFAULT_SAS_RATIO = 18;
+    private static final int DEFAULT_TPMS_LOW_PRESSURE = 220;
+    private static final int DEFAULT_TPMS_HIGH_PRESSURE = 280;
     private static final int DEFAULT_TPMS_LOW_TEMP = -20;
     private static final int DEFAULT_TPMS_HIGH_TEMP = 70;
     private static final long USB_PERMISSION_RETRY_MS = 10L * 60L * 1000L;
@@ -148,7 +148,7 @@ public final class AppSettings {
                     .putInt(KEY_NAV_MICRO_HOLD_SECONDS, DEFAULT_NAV_MICRO_HOLD_SECONDS)
                     .putInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS, DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS)
                     .putBoolean(KEY_NAV_DEBUG_VISIBLE, false)
-                    .putBoolean(KEY_AMP, true)
+                    .putBoolean(KEY_AMP, false)
                     .putBoolean(KEY_DIAGNOSTICS, true)
                     .putBoolean(KEY_DEBUG_CAN, false)
                     .putBoolean(KEY_CANBUS_DEBUG_VISIBLE, false)
@@ -162,8 +162,8 @@ public final class AppSettings {
                     .putInt(KEY_TPMS_HIGH_TEMP, DEFAULT_TPMS_HIGH_TEMP)
                     .putBoolean(KEY_RCTA_OVERLAY, true)
                     .putBoolean(KEY_RCTA_SOUND, true)
-                    .putInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_1)
-                    .putInt(KEY_RCTA_COLOR, RCTA_COLOR_AMBER)
+                    .putInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_2)
+                    .putInt(KEY_RCTA_COLOR, RCTA_COLOR_RED)
                     .putInt(KEY_RCTA_BG_ALPHA, RCTA_BACKGROUND_ALPHA_DEFAULT)
                     .putInt(KEY_OTHER_MEDIA_SOURCE_MODE, OTHER_SOURCE_ANDROID)
                     .putInt(KEY_MEDIA_TEXT_MODE, MEDIA_TEXT_ARTIST_THEN_TRACK)
@@ -278,6 +278,15 @@ public final class AppSettings {
             if (schema < 25 || !prefs.contains(KEY_RCTA_BG_ALPHA)) {
                 edit.putInt(KEY_RCTA_BG_ALPHA, RCTA_BACKGROUND_ALPHA_DEFAULT);
             }
+            if (schema < 45) {
+                edit.putInt(KEY_TPMS_LOW_PRESSURE, DEFAULT_TPMS_LOW_PRESSURE)
+                        .putInt(KEY_TPMS_HIGH_PRESSURE, DEFAULT_TPMS_HIGH_PRESSURE)
+                        .putInt(KEY_SAS_RATIO, DEFAULT_SAS_RATIO)
+                        .putBoolean(KEY_AMP, false)
+                        .putInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_2)
+                        .putInt(KEY_RCTA_COLOR, RCTA_COLOR_RED)
+                        .putInt(KEY_RCTA_BG_ALPHA, RCTA_BACKGROUND_ALPHA_DEFAULT);
+            }
             if (schema < 26 || !prefs.contains(KEY_NAV_FINISH_DIRECTION)) {
                 edit.putBoolean(KEY_NAV_FINISH_DIRECTION, false);
             }
@@ -323,12 +332,6 @@ public final class AppSettings {
             }
             if (schema < 21 || !prefs.contains(KEY_MEDIA_OVERLAY)) {
                 edit.putBoolean(KEY_MEDIA_OVERLAY, false);
-            }
-            if (schema < 7) {
-                int oldOther = prefs.getInt(KEY_OTHER_MEDIA_SOURCE_MODE, OTHER_SOURCE_ANDROID);
-                if (oldOther == OTHER_SOURCE_USB || oldOther == OTHER_SOURCE_BLUETOOTH) {
-                    edit.putInt(KEY_OTHER_MEDIA_SOURCE_MODE, OTHER_SOURCE_ANDROID);
-                }
             }
         }
         edit.putInt(KEY_SCHEMA, SCHEMA).apply();
@@ -607,7 +610,7 @@ public final class AppSettings {
     }
 
     public static boolean ampEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_AMP, true);
+        return prefs(context).getBoolean(KEY_AMP, false);
     }
 
     public static void setAmpEnabled(Context context, boolean value) {
@@ -733,7 +736,7 @@ public final class AppSettings {
     }
 
     public static int rctaStyle(Context context) {
-        return normalizeRctaStyle(prefs(context).getInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_1));
+        return normalizeRctaStyle(prefs(context).getInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_2));
     }
 
     public static void setRctaStyle(Context context, int value) {
@@ -745,7 +748,7 @@ public final class AppSettings {
     }
 
     public static int rctaColor(Context context) {
-        return normalizeRctaColor(prefs(context).getInt(KEY_RCTA_COLOR, RCTA_COLOR_AMBER));
+        return normalizeRctaColor(prefs(context).getInt(KEY_RCTA_COLOR, RCTA_COLOR_RED));
     }
 
     public static void setRctaColor(Context context, int value) {
@@ -787,6 +790,10 @@ public final class AppSettings {
 
     public static String otherMediaSourceLabel(Context context) {
         switch (otherMediaSourceMode(context)) {
+            case OTHER_SOURCE_USB:
+                return "USB";
+            case OTHER_SOURCE_BLUETOOTH:
+                return "Bluetooth";
             case OTHER_SOURCE_MY_MUSIC:
                 return "My Music";
             case OTHER_SOURCE_CARPLAY:
@@ -954,7 +961,10 @@ public final class AppSettings {
     }
 
     private static int normalizeOtherSource(int value) {
-        if (value == OTHER_SOURCE_MY_MUSIC || value == OTHER_SOURCE_CARPLAY) return value;
+        if (value == OTHER_SOURCE_USB || value == OTHER_SOURCE_BLUETOOTH
+                || value == OTHER_SOURCE_MY_MUSIC || value == OTHER_SOURCE_CARPLAY) {
+            return value;
+        }
         return OTHER_SOURCE_ANDROID;
     }
 

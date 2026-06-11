@@ -419,6 +419,10 @@ public final class MediaClusterSender {
                 : MediaSourceKind.from(state.source, state.packageName);
         if (kind != MediaSourceKind.CLOUD_MUSIC && kind != MediaSourceKind.GENERIC_MUSIC) return kind;
         switch (AppSettings.otherMediaSourceMode(app)) {
+            case AppSettings.OTHER_SOURCE_USB:
+                return MediaSourceKind.USB_MUSIC;
+            case AppSettings.OTHER_SOURCE_BLUETOOTH:
+                return MediaSourceKind.BLUETOOTH_AUDIO;
             case AppSettings.OTHER_SOURCE_MY_MUSIC:
                 return MediaSourceKind.MY_MUSIC;
             case AppSettings.OTHER_SOURCE_CARPLAY:
