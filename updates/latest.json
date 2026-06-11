@@ -1,10 +1,10 @@
 {
   "app": {
-    "version_name": "22.36",
-    "version_code": 346,
-    "asset_name": "kia_346.apk",
-    "download_url": "https://raw.githubusercontent.com/mrglonin/kia/main/updates/kia_346.apk",
-    "sha256": "bd977c061bc9609740d0af90c606f6430ba7dfdf560d765053d33cffe9508de9",
+    "version_name": "22.38",
+    "version_code": 348,
+    "asset_name": "kia_348.apk",
+    "download_url": "https://raw.githubusercontent.com/mrglonin/kia/main/updates/kia_348.apk",
+    "sha256": "b9fab8bbe6dfaebcb9f29fed0bd8ef2898a980492c8580645f8700ea172e6be2",
     "size": 5843863
   },
   "navigator": {
