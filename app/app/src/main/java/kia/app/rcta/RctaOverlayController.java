@@ -119,6 +119,7 @@ public final class RctaOverlayController {
         view.setStyleType(AppSettings.rctaStyle(app));
         view.setAlertColor(AppSettings.rctaColor(app));
         view.setBackgroundAlpha(AppSettings.rctaBackgroundAlpha(app));
+        view.setArrowCount(AppSettings.rctaArrowCount(app));
     }
 
     private void hide() {

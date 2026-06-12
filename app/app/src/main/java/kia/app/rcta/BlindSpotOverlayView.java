@@ -26,8 +26,11 @@ public final class BlindSpotOverlayView extends View {
     private static final int CHEVRON_BOTTOM_TYPE_2_DP = 44;
     private static final int CHEVRON_STROKE_DP = 7;
     private static final int CHEVRON_TRAVEL_DP = 10;
-    private static final int[] CHEVRON_MARGINS_DP = new int[]{72, 126, 180};
-    private static final int[] CHEVRON_MARGINS_TYPE_2_DP = new int[]{34, 88, 142};
+    private static final int CHEVRON_MARGIN_START_DP = 72;
+    private static final int CHEVRON_MARGIN_TYPE_2_START_DP = 34;
+    private static final int CHEVRON_MARGIN_STEP_DP = 54;
+    private static final int CHEVRON_COUNT_MIN = 3;
+    private static final int CHEVRON_COUNT_MAX = 6;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
@@ -38,6 +41,7 @@ public final class BlindSpotOverlayView extends View {
     private int styleType = 1;
     private int alertColor = COLOR_AMBER;
     private int backgroundAlpha = GLOW_ALPHA;
+    private int arrowCount = CHEVRON_COUNT_MIN;
 
     public BlindSpotOverlayView(Context context) {
         this(context, null);
@@ -80,6 +84,11 @@ public final class BlindSpotOverlayView extends View {
         invalidate();
     }
 
+    public void setArrowCount(int value) {
+        arrowCount = clamp(value, CHEVRON_COUNT_MIN, CHEVRON_COUNT_MAX);
+        invalidate();
+    }
+
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
@@ -96,29 +105,30 @@ public final class BlindSpotOverlayView extends View {
 
         long now = SystemClock.uptimeMillis();
         float phase = isInEditMode() ? 0.5f : (now % 900L) / 900f;
-        float pulse = 0.68f + 0.32f * (1f - Math.abs(phase - 0.5f) * 2f);
+        float pulse = 0.52f + 0.48f * (1f - Math.abs(phase - 0.5f) * 2f);
         boolean drawLeft = previewLeft || previewUnknown;
         boolean drawRight = previewRight || previewUnknown;
-        if (drawLeft) drawSide(canvas, w, h, true, phase);
-        if (drawRight) drawSide(canvas, w, h, false, phase);
+        if (drawLeft) drawSide(canvas, w, h, true, phase, pulse);
+        if (drawRight) drawSide(canvas, w, h, false, phase, pulse);
         postInvalidateOnAnimation();
     }
 
-    private void drawSide(Canvas canvas, int w, int h, boolean leftSide, float phase) {
+    private void drawSide(Canvas canvas, int w, int h, boolean leftSide, float phase, float pulse) {
         int baseColor = previewUnknown ? COLOR_RED : alertColor;
-        drawCornerGlow(canvas, w, h, leftSide, baseColor);
+        drawCornerGlow(canvas, w, h, leftSide, baseColor, pulse);
         if (styleType == 1) {
             drawCornerRail(canvas, w, h, leftSide, baseColor);
         }
         drawCornerChevronStack(canvas, w, h, leftSide, baseColor, phase);
     }
 
-    private void drawCornerGlow(Canvas canvas, int w, int h, boolean leftSide, int baseColor) {
+    private void drawCornerGlow(Canvas canvas, int w, int h, boolean leftSide, int baseColor, float pulse) {
         float glowW = dp(GLOW_WIDTH_DP);
         float glowH = dp(GLOW_HEIGHT_DP);
         float centerX = leftSide ? 0f : w;
         float centerY = h;
         float radius = Math.max(glowW, glowH);
+        int pulsedAlpha = Math.round(backgroundAlpha * clampFloat(pulse, 0.45f, 1f));
 
         canvas.save();
         if (leftSide) {
@@ -132,8 +142,8 @@ public final class BlindSpotOverlayView extends View {
                 centerY,
                 radius,
                 new int[]{
-                        withAlpha(baseColor, backgroundAlpha),
-                        withAlpha(baseColor, Math.round(backgroundAlpha * 0.42f)),
+                        withAlpha(baseColor, pulsedAlpha),
+                        withAlpha(baseColor, Math.round(pulsedAlpha * 0.42f)),
                         withAlpha(baseColor, 0)
                 },
                 new float[]{0f, 0.48f, 1f},
@@ -167,17 +177,18 @@ public final class BlindSpotOverlayView extends View {
                                         float phase) {
         float size = dp(CHEVRON_SIZE_DP);
         int bottomDp = styleType == 2 ? CHEVRON_BOTTOM_TYPE_2_DP : CHEVRON_BOTTOM_DP;
-        int[] margins = styleType == 2 ? CHEVRON_MARGINS_TYPE_2_DP : CHEVRON_MARGINS_DP;
+        int marginStart = styleType == 2 ? CHEVRON_MARGIN_TYPE_2_START_DP : CHEVRON_MARGIN_START_DP;
         float top = h - dp(bottomDp) - size;
+        float phaseStep = arrowCount <= 3 ? 0.22f : 0.72f / arrowCount;
 
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeCap(Paint.Cap.ROUND);
         paint.setStrokeJoin(Paint.Join.ROUND);
         paint.setStrokeWidth(dp(CHEVRON_STROKE_DP));
 
-        for (int i = 0; i < margins.length; i++) {
-            float margin = dp(margins[i]);
-            float arrowPhase = (phase - i * 0.22f + 1f) % 1f;
+        for (int i = 0; i < arrowCount; i++) {
+            float margin = dp(marginStart + i * CHEVRON_MARGIN_STEP_DP);
+            float arrowPhase = (phase - i * phaseStep + 1f) % 1f;
             float arrowPulse = 1f - Math.abs(arrowPhase - 0.5f) * 2f;
             float movement = dp(CHEVRON_TRAVEL_DP) * arrowPulse;
             float left = leftSide ? margin + movement : w - margin - size - movement;
@@ -213,6 +224,10 @@ public final class BlindSpotOverlayView extends View {
     }
 
     private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private float clampFloat(float value, float min, float max) {
         return Math.max(min, Math.min(max, value));
     }
 }

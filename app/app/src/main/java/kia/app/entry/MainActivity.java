@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Canvas;
@@ -147,7 +148,6 @@ public final class MainActivity extends Activity {
     private int rootInsetBottom;
     private TextView status;
     private TextView tpmsStatus;
-    private CompoundButton mediaEnabledToggle;
     private CompoundButton mediaTabToggle;
     private CompoundButton callEnabledToggle;
     private CompoundButton mediaDebugToggle;
@@ -477,7 +477,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         header.addView(name, nameLp);
-        TextView check = text("выбрано", wide ? 10 : 11, selected ? COLOR_ACCENT : COLOR_MUTED);
+        TextView check = text("выбрано", wide ? 10 : 11, selected ? COLOR_ACCENT_BLUE : COLOR_MUTED);
         check.setGravity(Gravity.CENTER);
         check.setTypeface(Typeface.DEFAULT_BOLD);
         check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
@@ -517,7 +517,7 @@ public final class MainActivity extends Activity {
             if (view == null || check == null) continue;
             boolean selected = i == selectedIndex;
             view.setBackground(settingsButtonBackground(selected));
-            check.setTextColor(selected ? COLOR_ACCENT : COLOR_MUTED);
+            check.setTextColor(selected ? COLOR_ACCENT_BLUE : COLOR_MUTED);
             check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
         }
     }
@@ -670,6 +670,7 @@ public final class MainActivity extends Activity {
         rctaDemoOverlay.setStyleType(AppSettings.rctaStyle(this));
         rctaDemoOverlay.setAlertColor(AppSettings.rctaColor(this));
         rctaDemoOverlay.setBackgroundAlpha(AppSettings.rctaBackgroundAlpha(this));
+        rctaDemoOverlay.setArrowCount(AppSettings.rctaArrowCount(this));
         rctaDemoOverlay.setPreview(left, right, false);
         if (rctaDemoOverlay.getParent() == null) {
             screenFrame.addView(rctaDemoOverlay, new FrameLayout.LayoutParams(
@@ -1012,7 +1013,6 @@ public final class MainActivity extends Activity {
         status = null;
         tpmsStatus = null;
         tpmsDashboard = null;
-        mediaEnabledToggle = null;
         mediaTabToggle = null;
         callEnabledToggle = null;
         mediaDebugToggle = null;
@@ -2569,9 +2569,9 @@ public final class MainActivity extends Activity {
 
     private LinearLayout mediaMusicPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
-        mediaEnabledToggle = addSettingsPanelSwitchHeader(panel, "Музыка и текст",
+        addSettingsPanelHeader(panel, "Музыка и текст",
                 "профиль магнитолы, трек, артист и отправка в машину",
-                AppSettings.mediaEnabled(this), this::toggleMediaEnabled);
+                COLOR_ACCENT_BLUE);
 
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "Профиль магнитолы", "старый TEYES не смешивается с универсальными режимами");
@@ -2755,9 +2755,6 @@ public final class MainActivity extends Activity {
 
     private LinearLayout navigationOutputPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
-        addSettingsPanelHeader(panel, "Что уйдёт в авто",
-                "итог текущих настроек без декоративного предпросмотра",
-                COLOR_ACCENT_BLUE);
         int routeMode = NavigationModeSettings.mode(this);
         panel.addView(navigationOutputHero(routeMode));
         addActionGridColumns(panel, 3,
@@ -2780,19 +2777,14 @@ public final class MainActivity extends Activity {
                 Color.TRANSPARENT, 0));
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, navigationOutputHeroHeight());
-        cardLp.setMargins(0, dp(14), 0, dp(4));
+        cardLp.setMargins(0, 0, 0, dp(4));
         card.setLayoutParams(cardLp);
-
-        TextView label = text("Итог", isCompact() ? 12 : 13, COLOR_MUTED);
-        label.setTypeface(Typeface.DEFAULT_BOLD);
-        card.addView(label);
 
         TextView value = text(navigationOutputMainValue(routeMode), isCompact() ? 19 : 23, Color.WHITE);
         value.setTypeface(Typeface.DEFAULT_BOLD);
         value.setMaxLines(2);
         LinearLayout.LayoutParams valueLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        valueLp.setMargins(0, dp(8), 0, 0);
         card.addView(value, valueLp);
 
         TextView hint = text(navigationOutputMainHint(routeMode), isCompact() ? 12 : 14, COLOR_MUTED);
@@ -2805,7 +2797,7 @@ public final class MainActivity extends Activity {
     }
 
     private int navigationOutputHeroHeight() {
-        return isCompact() ? dp(104) : dp(126);
+        return isCompact() ? dp(82) : dp(98);
     }
 
     private View navigationOutputTile(String title, String value, String hint, int color, boolean active) {
@@ -3083,19 +3075,21 @@ public final class MainActivity extends Activity {
         overlay.setStyleType(AppSettings.rctaStyle(this));
         overlay.setAlertColor(AppSettings.rctaColor(this));
         overlay.setBackgroundAlpha(AppSettings.rctaBackgroundAlpha(this));
+        overlay.setArrowCount(AppSettings.rctaArrowCount(this));
         overlay.setPreview(true, true, false);
         overlay.setBottomLiftDp(0);
         stage.addView(overlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout.LayoutParams stageLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, isCompact() ? dp(190) : dp(260));
+                ViewGroup.LayoutParams.MATCH_PARENT, rctaPreviewHeight());
         stageLp.setMargins(0, dp(12), 0, dp(10));
         preview.addView(stage, stageLp);
 
         TextView status = text("CAN: BB A1 41 08 75 RL RR · 00 нет · 01 предупреждение · "
                         + AppSettings.rctaStyleLabel(this) + " · "
                         + AppSettings.rctaColorLabel(this) + " · фон "
-                        + rctaBackgroundPercent(AppSettings.rctaBackgroundAlpha(this)) + "%",
+                        + rctaBackgroundPercent(AppSettings.rctaBackgroundAlpha(this)) + "%"
+                        + " · стрелок " + AppSettings.rctaArrowCount(this),
                 isCompact() ? 13 : 15, COLOR_MUTED);
         preview.addView(status);
         root.addView(preview);
@@ -3129,6 +3123,7 @@ public final class MainActivity extends Activity {
                 action("Зелёный", "мягкий акцент", rctaColorChoice(AppSettings.RCTA_COLOR_GREEN),
                         AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_GREEN,
                         () -> setRctaColor(AppSettings.RCTA_COLOR_GREEN)));
+        settings.addView(rctaArrowCountSlider());
         settings.addView(rctaBackgroundAlphaSlider());
         settings.addView(settingsDivider());
         addInlineSwitch(settings, "Показывать предупреждение",
@@ -3198,6 +3193,23 @@ public final class MainActivity extends Activity {
         refresh();
     }
 
+    private void setRctaArrowCount(int value) {
+        AppSettings.setRctaArrowCount(this, value);
+        if (rctaPreview != null) {
+            rctaPreview.setArrowCount(AppSettings.rctaArrowCount(this));
+        }
+        RctaOverlayController.get(this).apply();
+        AppLog.line(this, "RCTA arrows: " + AppSettings.rctaArrowCount(this));
+        refresh();
+    }
+
+    private int rctaPreviewHeight() {
+        if (isLandscapeWindow()) {
+            return dp(screenWidthDp() >= 1100 ? 330 : 300);
+        }
+        return isCompact() ? dp(240) : dp(300);
+    }
+
     private int rctaStyleColor(int style) {
         return choiceColor(AppSettings.rctaStyle(this) == style);
     }
@@ -3206,16 +3218,48 @@ public final class MainActivity extends Activity {
         return choiceColor(AppSettings.rctaColor(this) == color);
     }
 
-    private View rctaBackgroundAlphaSlider() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(16), dp(12), dp(16), dp(12));
-        box.setMinimumHeight(isCompact() ? dp(78) : dp(96));
-        box.setBackground(settingsButtonBackground(false));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+    private View rctaArrowCountSlider() {
+        LinearLayout box = rctaSliderBox();
+        TextView title = text("Количество стрелок", isCompact() ? 15 : 17, Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView value = text(rctaArrowCountText(AppSettings.rctaArrowCount(this)),
+                isCompact() ? 12 : 14, COLOR_MUTED);
+
+        SeekBar slider = new SeekBar(this);
+        styleSettingsSeekBar(slider);
+        int min = AppSettings.RCTA_ARROW_COUNT_MIN;
+        int max = AppSettings.RCTA_ARROW_COUNT_MAX;
+        slider.setMax(max - min);
+        slider.setProgress(AppSettings.rctaArrowCount(this) - min);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (!fromUser) return;
+                int next = min + progress;
+                setRctaArrowCount(next);
+                value.setText(rctaArrowCountText(AppSettings.rctaArrowCount(MainActivity.this)));
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+
+        box.addView(title);
+        box.addView(value);
+        LinearLayout.LayoutParams sliderLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, dp(8), 0, dp(4));
-        box.setLayoutParams(lp);
+        sliderLp.setMargins(0, dp(6), 0, 0);
+        box.addView(slider, sliderLp);
+        return box;
+    }
+
+    private View rctaBackgroundAlphaSlider() {
+        LinearLayout box = rctaSliderBox();
 
         TextView title = text("Прозрачность фона", isCompact() ? 15 : 17, Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -3224,6 +3268,7 @@ public final class MainActivity extends Activity {
         value.setMaxLines(2);
 
         SeekBar slider = new SeekBar(this);
+        styleSettingsSeekBar(slider);
         int min = AppSettings.RCTA_BACKGROUND_ALPHA_MIN;
         int max = AppSettings.RCTA_BACKGROUND_ALPHA_MAX;
         slider.setMax(max - min);
@@ -3260,6 +3305,31 @@ public final class MainActivity extends Activity {
         sliderLp.setMargins(0, dp(6), 0, 0);
         box.addView(slider, sliderLp);
         return box;
+    }
+
+    private LinearLayout rctaSliderBox() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(16), dp(12), dp(16), dp(12));
+        box.setMinimumHeight(isCompact() ? dp(78) : dp(96));
+        box.setBackground(settingsButtonBackground(false));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(8), 0, dp(4));
+        box.setLayoutParams(lp);
+        return box;
+    }
+
+    private void styleSettingsSeekBar(SeekBar slider) {
+        if (Build.VERSION.SDK_INT < 21 || slider == null) return;
+        slider.setThumbTintList(ColorStateList.valueOf(COLOR_ACCENT_BLUE));
+        slider.setProgressTintList(ColorStateList.valueOf(COLOR_ACCENT_BLUE));
+        slider.setProgressBackgroundTintList(ColorStateList.valueOf(Color.rgb(63, 74, 89)));
+    }
+
+    private String rctaArrowCountText(int value) {
+        return clamp(value, AppSettings.RCTA_ARROW_COUNT_MIN,
+                AppSettings.RCTA_ARROW_COUNT_MAX) + " стрелки, диапазон 3-6";
     }
 
     private String rctaBackgroundAlphaText(int value) {
@@ -3327,7 +3397,6 @@ public final class MainActivity extends Activity {
         updateNavDebugToggle();
         updateCanbusDebugToggle();
         updateAmpEnabledToggle();
-        updateMediaEnabledToggle();
         updateMediaTabToggle();
         updateCallEnabledToggle();
         updateMediaDebugToggle();
@@ -3529,14 +3598,6 @@ public final class MainActivity extends Activity {
 
     private static String yesNo(boolean value) {
         return value ? "ok" : "нет";
-    }
-
-    private void toggleMediaEnabled(CompoundButton button, boolean enabled) {
-        AppSettings.setMediaEnabled(this, enabled);
-        AppService.start(this);
-        AppLog.line(this, "Media feature: " + AppSettings.mediaProfileLabel(this));
-        renderTab();
-        refresh();
     }
 
     private void setMediaProfile(int profile) {
@@ -4737,7 +4798,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         header.addView(name, nameLp);
-        TextView check = text("выбрано", isCompact() ? 11 : 12, selected ? COLOR_ACCENT : COLOR_MUTED);
+        TextView check = text("выбрано", isCompact() ? 11 : 12, selected ? COLOR_ACCENT_BLUE : COLOR_MUTED);
         check.setGravity(Gravity.CENTER);
         check.setTypeface(Typeface.DEFAULT_BOLD);
         check.setMinWidth(dp(58));
@@ -4787,7 +4848,7 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         header.addView(name, nameLp);
-        TextView check = text("выбрано", isCompact() ? 11 : 12, selected ? COLOR_ACCENT : COLOR_MUTED);
+        TextView check = text("выбрано", isCompact() ? 11 : 12, selected ? COLOR_ACCENT_BLUE : COLOR_MUTED);
         check.setGravity(Gravity.CENTER);
         check.setTypeface(Typeface.DEFAULT_BOLD);
         check.setMinWidth(dp(58));
@@ -4815,7 +4876,7 @@ public final class MainActivity extends Activity {
             if (view == null || check == null) continue;
             boolean selected = i == selectedIndex;
             view.setBackground(settingsActionBackground(selected, COLOR_ACCENT_BLUE));
-            check.setTextColor(selected ? COLOR_ACCENT : COLOR_MUTED);
+            check.setTextColor(selected ? COLOR_ACCENT_BLUE : COLOR_MUTED);
             check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
         }
     }
@@ -4834,7 +4895,7 @@ public final class MainActivity extends Activity {
         panel.setGravity(Gravity.CENTER_VERTICAL);
         panel.setPadding(dp(16), dp(13), dp(16), dp(13));
         panel.setMinimumHeight(isCompact() ? dp(70) : dp(82));
-        panel.setBackground(settingsActionBackground(checked, COLOR_ACCENT));
+        panel.setBackground(settingsActionBackground(checked, COLOR_ACCENT_BLUE));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(9), 0, dp(5));
@@ -4880,6 +4941,18 @@ public final class MainActivity extends Activity {
             box.setTextOn("");
             box.setTextOff("");
             box.setSplitTrack(false);
+            int[][] states = new int[][]{
+                    new int[]{android.R.attr.state_checked},
+                    new int[]{-android.R.attr.state_checked}
+            };
+            box.setThumbTintList(new ColorStateList(states, new int[]{
+                    COLOR_ACCENT_BLUE,
+                    Color.rgb(86, 100, 116)
+            }));
+            box.setTrackTintList(new ColorStateList(states, new int[]{
+                    softColor(COLOR_ACCENT_BLUE, 92),
+                    Color.rgb(35, 43, 55)
+            }));
         }
         return box;
     }
@@ -5208,15 +5281,6 @@ public final class MainActivity extends Activity {
         ampEnabledToggle.setOnCheckedChangeListener(this::toggleAmpEnabled);
     }
 
-    private void updateMediaEnabledToggle() {
-        if (mediaEnabledToggle == null) return;
-        boolean enabled = AppSettings.mediaEnabled(this);
-        if (mediaEnabledToggle.isChecked() == enabled) return;
-        mediaEnabledToggle.setOnCheckedChangeListener(null);
-        mediaEnabledToggle.setChecked(enabled);
-        mediaEnabledToggle.setOnCheckedChangeListener(this::toggleMediaEnabled);
-    }
-
     private void updateCallEnabledToggle() {
         if (callEnabledToggle == null) return;
         boolean enabled = AppSettings.callEnabled(this);
@@ -5508,12 +5572,11 @@ public final class MainActivity extends Activity {
     private GradientDrawable settingsActionBackground(boolean selected, int tint) {
         int accent = settingsAccent(tint);
         int start = selected ? softColor(accent, 66) : COLOR_SETTINGS_PANEL_ALT;
-        int end = selected ? Color.rgb(23, 36, 45) : Color.rgb(21, 27, 36);
+        int end = selected ? Color.rgb(22, 31, 48) : Color.rgb(21, 27, 36);
         return gradient(start, end, Color.TRANSPARENT, 0, dp(10));
     }
 
     private int settingsAccent(int tint) {
-        if (tint == COLOR_ACCENT) return COLOR_ACCENT;
         return COLOR_ACCENT_BLUE;
     }
 
@@ -5645,9 +5708,9 @@ public final class MainActivity extends Activity {
 
         private void legend(Canvas canvas, float x, float y) {
             if (x < dp(220)) return;
-            legendItem(canvas, x, y, 0xff183a30, "норма");
-            legendItem(canvas, x + dp(86), y, 0xff4f3c16, "жёлтая");
-            legendItem(canvas, x + dp(184), y, 0xff4b1d28, "красная");
+            legendItem(canvas, x, y, 0xff1d3b38, "норма");
+            legendItem(canvas, x + dp(86), y, 0xff453b24, "жёлтая");
+            legendItem(canvas, x + dp(184), y, 0xff462d34, "красная");
         }
 
         private void legendItem(Canvas canvas, float x, float y, int color, String text) {
@@ -5667,23 +5730,17 @@ public final class MainActivity extends Activity {
             float redW = (barRight - barLeft) * 0.18f;
             float yellowW = (barRight - barLeft) * 0.15f;
             p.setShader(new LinearGradient(barLeft, 0, barRight, 0,
-                    new int[]{0xff4b1d28, 0xff4f3c16, 0xff183a30, 0xff4f3c16, 0xff4b1d28},
+                    new int[]{0xff30232a, 0xff39331f, 0xff193532, 0xff39331f, 0xff30232a},
                     new float[]{0f, 0.22f, 0.50f, 0.78f, 1f}, Shader.TileMode.CLAMP));
             p.setStyle(Paint.Style.FILL);
             r.set(barLeft, barTop, barRight, barBottom);
             canvas.drawRoundRect(r, dp(9), dp(9), p);
             p.setShader(null);
-            fill(canvas, 0xff452029, barLeft, barTop, barLeft + redW, barBottom, dp(9));
-            fill(canvas, 0xff4a3b18, barLeft + redW, barTop, barLeft + redW + yellowW, barBottom, 0);
-            fill(canvas, 0xff183a30, barLeft + redW + yellowW, barTop, barRight - redW - yellowW, barBottom, 0);
-            fill(canvas, 0xff4a3b18, barRight - redW - yellowW, barTop, barRight - redW, barBottom, 0);
-            fill(canvas, 0xff452029, barRight - redW, barTop, barRight, barBottom, dp(9));
-            stroke(canvas, 0x26ffffff, dp(1), barLeft, barTop, barRight, barBottom, dp(9));
 
             float lowX = barLeft + (barRight - barLeft) * 0.33f;
             float highX = barLeft + (barRight - barLeft) * 0.67f;
             p.setStrokeWidth(dp(2));
-            p.setColor(Color.WHITE);
+            p.setColor(0xb8d9e4ef);
             canvas.drawLine(lowX, barTop - dp(7), lowX, barBottom + dp(10), p);
             canvas.drawLine(highX, barTop - dp(7), highX, barBottom + dp(10), p);
             valuePill(canvas, low, lowX, barBottom + dp(20));
@@ -5691,19 +5748,21 @@ public final class MainActivity extends Activity {
         }
 
         private void drawOverlay(Canvas canvas, float left, float top, float right, float bottom) {
-            fill(canvas, 0xffee3f5d, left, top, right, bottom, dp(8));
+            fill(canvas, 0xff442832, left, top, right, bottom, dp(8));
+            fill(canvas, 0xff7d3b48, left, top, left + dp(10), bottom, dp(8));
             label(canvas, "красная плашка поверх экрана", left + dp(14), top + dp(24),
-                    dp(12), Color.WHITE, true);
-            center(canvas, "×", right - dp(22), top + (bottom - top) / 2f, dp(22), Color.WHITE, true);
+                    dp(12), Color.rgb(238, 232, 235), true);
+            center(canvas, "×", right - dp(22), top + (bottom - top) / 2f, dp(22),
+                    Color.rgb(238, 232, 235), true);
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(dp(2));
-            p.setColor(0xccffffff);
+            p.setColor(0x9fe8d7dc);
             float sx = right - dp(92);
             canvas.drawArc(sx, top + dp(10), sx + dp(18), top + dp(28), -36, 72, false, p);
             canvas.drawArc(sx - dp(7), top + dp(6), sx + dp(30), top + dp(32), -36, 72, false, p);
             p.setStyle(Paint.Style.FILL);
             center(canvas, "звук идёт, пока не нажать ×", right - dp(185),
-                    top + (bottom - top) / 2f, dp(12), Color.WHITE, true);
+                    top + (bottom - top) / 2f, dp(12), Color.rgb(238, 232, 235), true);
         }
 
         private void valuePill(Canvas canvas, String value, float cx, float cy) {
@@ -5807,7 +5866,10 @@ public final class MainActivity extends Activity {
             drawLane(canvas, left + width * 0.63f, laneTop + dp(30), "→");
             if (assistant) {
                 float pulse = 0.70f + 0.30f * (float) Math.sin(phase * Math.PI * 2f);
-                fill(canvas, Color.argb(Math.round(170 * pulse), 57, 211, 190),
+                fill(canvas, Color.argb(Math.round(170 * pulse),
+                                Color.red(COLOR_ACCENT_BLUE),
+                                Color.green(COLOR_ACCENT_BLUE),
+                                Color.blue(COLOR_ACCENT_BLUE)),
                         right - dp(126), top + dp(8), right - dp(14), top + dp(56), dp(9));
                 label(canvas, "ассистент", right - dp(112), top + dp(28), dp(11), Color.WHITE, true);
                 label(canvas, "прямо", right - dp(112), top + dp(47), dp(14), Color.WHITE, true);
@@ -5833,10 +5895,10 @@ public final class MainActivity extends Activity {
 
         private void drawTbtItem(Canvas canvas, float x, float y, float width, String icon,
                                  String text, boolean selected) {
-            fill(canvas, selected ? 0xff203f38 : 0xff151d27, x, y, x + width, y + dp(70), dp(10));
-            stroke(canvas, selected ? COLOR_ACCENT : 0x22ffffff, dp(1), x, y, x + width, y + dp(70), dp(10));
+            fill(canvas, selected ? 0xff20304a : 0xff151d27, x, y, x + width, y + dp(70), dp(10));
+            stroke(canvas, selected ? COLOR_ACCENT_BLUE : 0x22ffffff, dp(1), x, y, x + width, y + dp(70), dp(10));
             center(canvas, icon, x + width / 2f, y + dp(31), dp(25),
-                    selected ? COLOR_ACCENT : COLOR_MUTED, true);
+                    selected ? COLOR_ACCENT_BLUE : COLOR_MUTED, true);
             center(canvas, text, x + width / 2f, y + dp(55), dp(11),
                     selected ? Color.WHITE : COLOR_MUTED, true);
         }
@@ -5869,7 +5931,7 @@ public final class MainActivity extends Activity {
             path.lineTo(cx + dp(11), cy + dp(20));
             path.close();
             p.setStyle(Paint.Style.FILL);
-            p.setColor(COLOR_ACCENT);
+            p.setColor(COLOR_ACCENT_BLUE);
             canvas.drawPath(path, p);
             canvas.restore();
         }
@@ -5939,7 +6001,7 @@ public final class MainActivity extends Activity {
             boolean selected = textMode == mode;
             fill(canvas, selected ? COLOR_SETTINGS_SELECTED : 0xff161c24,
                     x, y - dp(11), x + width, y + dp(11), dp(7));
-            stroke(canvas, selected ? COLOR_ACCENT : 0x22ffffff, dp(1),
+            stroke(canvas, selected ? COLOR_ACCENT_BLUE : 0x22ffffff, dp(1),
                     x, y - dp(11), x + width, y + dp(11), dp(7));
             center(canvas, title, x + width / 2f, y, dp(10),
                     selected ? Color.WHITE : COLOR_MUTED, selected);
@@ -6036,7 +6098,7 @@ public final class MainActivity extends Activity {
             drawGuide(canvas, center + topGap, top, center + bottomGap, bottom, 0f, 0f);
 
             paint.setStrokeWidth(dp(4));
-            paint.setColor(COLOR_ACCENT);
+            paint.setColor(COLOR_ACCENT_BLUE);
             drawGuide(canvas, center - topGap, top, center - bottomGap + curve, bottom, curve, -1f);
             drawGuide(canvas, center + topGap, top, center + bottomGap + curve, bottom, curve, 1f);
 

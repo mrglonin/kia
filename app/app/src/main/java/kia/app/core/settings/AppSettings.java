@@ -53,6 +53,7 @@ public final class AppSettings {
     private static final String KEY_RCTA_STYLE = "rcta_style";
     private static final String KEY_RCTA_COLOR = "rcta_color";
     private static final String KEY_RCTA_BG_ALPHA = "rcta_bg_alpha";
+    private static final String KEY_RCTA_ARROW_COUNT = "rcta_arrow_count";
     private static final String KEY_OTHER_MEDIA_SOURCE_MODE = "other_media_source_mode";
     private static final String KEY_MEDIA_TEXT_MODE = "media_text_mode";
     private static final String KEY_CALL_SOURCE_MODE = "call_source_mode";
@@ -103,7 +104,10 @@ public final class AppSettings {
     public static final int RCTA_BACKGROUND_ALPHA_MIN = 0;
     public static final int RCTA_BACKGROUND_ALPHA_MAX = 180;
     public static final int RCTA_BACKGROUND_ALPHA_DEFAULT = RCTA_BACKGROUND_ALPHA_MAX;
-    private static final int SCHEMA = 46;
+    public static final int RCTA_ARROW_COUNT_MIN = 3;
+    public static final int RCTA_ARROW_COUNT_MAX = 6;
+    public static final int RCTA_ARROW_COUNT_DEFAULT = RCTA_ARROW_COUNT_MIN;
+    private static final int SCHEMA = 47;
     private static final int DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS = 0;
     private static final int DEFAULT_NAV_MANEUVER_TEXT_SECONDS = 0;
     private static final int DEFAULT_NAV_MICRO_HOLD_SECONDS = 5;
@@ -167,6 +171,7 @@ public final class AppSettings {
                     .putInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_2)
                     .putInt(KEY_RCTA_COLOR, RCTA_COLOR_RED)
                     .putInt(KEY_RCTA_BG_ALPHA, RCTA_BACKGROUND_ALPHA_DEFAULT)
+                    .putInt(KEY_RCTA_ARROW_COUNT, RCTA_ARROW_COUNT_DEFAULT)
                     .putInt(KEY_OTHER_MEDIA_SOURCE_MODE, OTHER_SOURCE_ANDROID)
                     .putInt(KEY_MEDIA_TEXT_MODE, MEDIA_TEXT_ARTIST_THEN_TRACK)
                     .putInt(KEY_CALL_SOURCE_MODE, CALL_SOURCE_BLUETOOTH)
@@ -282,6 +287,9 @@ public final class AppSettings {
             if (schema < 25 || !prefs.contains(KEY_RCTA_BG_ALPHA)) {
                 edit.putInt(KEY_RCTA_BG_ALPHA, RCTA_BACKGROUND_ALPHA_DEFAULT);
             }
+            if (schema < 47 || !prefs.contains(KEY_RCTA_ARROW_COUNT)) {
+                edit.putInt(KEY_RCTA_ARROW_COUNT, RCTA_ARROW_COUNT_DEFAULT);
+            }
             if (schema < 45) {
                 edit.putInt(KEY_TPMS_LOW_PRESSURE, DEFAULT_TPMS_LOW_PRESSURE)
                         .putInt(KEY_TPMS_HIGH_PRESSURE, DEFAULT_TPMS_HIGH_PRESSURE)
@@ -289,7 +297,8 @@ public final class AppSettings {
                         .putBoolean(KEY_AMP, false)
                         .putInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_2)
                         .putInt(KEY_RCTA_COLOR, RCTA_COLOR_RED)
-                        .putInt(KEY_RCTA_BG_ALPHA, RCTA_BACKGROUND_ALPHA_DEFAULT);
+                        .putInt(KEY_RCTA_BG_ALPHA, RCTA_BACKGROUND_ALPHA_DEFAULT)
+                        .putInt(KEY_RCTA_ARROW_COUNT, RCTA_ARROW_COUNT_DEFAULT);
             }
             if (schema < 26 || !prefs.contains(KEY_NAV_FINISH_DIRECTION)) {
                 edit.putBoolean(KEY_NAV_FINISH_DIRECTION, false);
@@ -792,6 +801,16 @@ public final class AppSettings {
     public static void setRctaBackgroundAlpha(Context context, int value) {
         prefs(context).edit().putInt(KEY_RCTA_BG_ALPHA, clamp(value,
                 RCTA_BACKGROUND_ALPHA_MIN, RCTA_BACKGROUND_ALPHA_MAX)).apply();
+    }
+
+    public static int rctaArrowCount(Context context) {
+        return clamp(prefs(context).getInt(KEY_RCTA_ARROW_COUNT, RCTA_ARROW_COUNT_DEFAULT),
+                RCTA_ARROW_COUNT_MIN, RCTA_ARROW_COUNT_MAX);
+    }
+
+    public static void setRctaArrowCount(Context context, int value) {
+        prefs(context).edit().putInt(KEY_RCTA_ARROW_COUNT, clamp(value,
+                RCTA_ARROW_COUNT_MIN, RCTA_ARROW_COUNT_MAX)).apply();
     }
 
     public static int otherMediaSourceMode(Context context) {
