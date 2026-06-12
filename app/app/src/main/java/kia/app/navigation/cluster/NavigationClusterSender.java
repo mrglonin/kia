@@ -10,10 +10,14 @@ import kia.app.core.StateStore;
 import kia.app.navigation.domain.NavigationModeSettings;
 
 public final class NavigationClusterSender {
+    private static final long FINISH_DIRECTION_DUPLICATE_TX_MS = 5000L;
+
     private final Context app;
     private final NormalNavigationOutput normalOutput = new NormalNavigationOutput();
     private final TbtNavigationOutput tbtOutput = new TbtNavigationOutput();
     private final FinishDirectionNavigationOutput finishDirectionOutput = new FinishDirectionNavigationOutput();
+    private String lastFinishDirectionVisualKey = "";
+    private long lastFinishDirectionFrameAt;
 
     public NavigationClusterSender(Context context) {
         this.app = context.getApplicationContext();
@@ -104,12 +108,21 @@ public final class NavigationClusterSender {
     }
 
     public void sendDirectionToFinish(int uiStep, float distance, boolean km) {
-        sendActive(true);
         byte[] frame = finishDirectionOutput.directionToFinish(uiStep, distance, km);
+        String hex = AdapterProtocol.hex(frame);
+        String visualKey = uiStep + "|" + km;
+        long now = System.currentTimeMillis();
+        if (visualKey.equals(lastFinishDirectionVisualKey)
+                && now - lastFinishDirectionFrameAt < FINISH_DIRECTION_DUPLICATE_TX_MS) {
+            return;
+        }
+        lastFinishDirectionVisualKey = visualKey;
+        lastFinishDirectionFrameAt = now;
+        sendActive(true);
         AppLog.line(app, "Navigation finish direction TX: step=" + uiStep + " dist=" + distance
                 + (km ? "km" : "m"));
         recordTx("finish direction step=" + uiStep + " dist=" + distance + (km ? "km" : "m")
-                + " bytes=" + AdapterProtocol.hex(frame));
+                + " bytes=" + hex);
         AdapterGateway.get(app).send(AdapterCommand.loud("nav finish direction", frame));
     }
 

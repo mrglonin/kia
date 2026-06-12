@@ -4516,7 +4516,7 @@ public final class MainActivity extends Activity {
         if (s.navigatorDownloading) return "Скачиваю Навигатор";
         if (s.navigatorChecking) return "Проверяю Навигатор";
         if (s.navigatorInstalling) return "Установка Навигатора";
-        return "Скачать и установить Навигатор";
+        return s.navigatorAvailable || s.navigatorDownloaded ? "Обновить Навигатор" : "Проверить Навигатор";
     }
 
     private String navigatorUpdateHint() {
@@ -4526,11 +4526,13 @@ public final class MainActivity extends Activity {
         }
         if (s.navigatorDownloaded) return "файлы готовы, открыть установщик Android";
         if (s.navigatorAvailable) return "последний Yandex Navigator с KIA-хуками";
-        return "проверить, скачать и установить в один шаг";
+        return "сравнить с GitHub";
     }
 
     private void runNavigatorUpdateAction() {
-        navigatorUpdater.downloadAndInstall(this);
+        UpdateState s = StateStore.updates();
+        if (s.navigatorAvailable || s.navigatorDownloaded) navigatorUpdater.downloadAndInstall(this);
+        else navigatorUpdater.checkAsync(this);
         refresh();
     }
 

@@ -2,9 +2,9 @@ plugins {
     id "com.android.application"
 }
 
-def kiaVersionCode = 348
-def kiaVersionName = "22.38"
-def kiaReleaseApk = "kia_348.apk"
+def kiaVersionCode = 350
+def kiaVersionName = "22.40"
+def kiaReleaseApk = "kia_350.apk"
 def publicReleaseKey = rootProject.file("../signing/kia-debug-release.keystore")
 
 android {

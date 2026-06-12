@@ -3,7 +3,6 @@ package kia.app.update;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -61,21 +60,28 @@ public final class AppUpdateController {
             try {
                 ReleaseInfo info = loadLatestRelease();
                 latest = info;
-                int currentCode = currentVersionCode();
-                boolean available = info.versionCode > currentCode;
+                InstalledApkInfo installed = currentApk();
+                boolean available = shouldInstall(info, installed);
                 File file = downloadedFile(info.assetName);
+                boolean downloaded = available && file.exists() && file.length() > 0
+                        && verifySha(file, info.sha256);
                 String status;
                 if (TextUtils.isEmpty(info.downloadUrl)) {
                     status = "App update: APK не найден";
+                } else if (sameVersionDifferentArchive(info, installed)) {
+                    status = "App update: доступна пересборка " + info.assetName;
                 } else if (available) {
                     status = "App update: доступно " + info.assetName;
                 } else {
                     status = "App update: актуально";
                 }
                 setApp(status, info.assetName, info.downloadUrl, info.sha256, 0,
-                        info.assetSize, available, false, false, file.exists() && file.length() > 0);
-                AppLog.line(app, "App update: currentCode=" + currentCode
+                        info.assetSize, available, false, false, downloaded);
+                AppLog.line(app, "App update: currentCode=" + installed.versionCode
                         + " latestCode=" + info.versionCode
+                        + " currentSize=" + installed.sourceSize
+                        + " latestSize=" + info.assetSize
+                        + " currentSha=" + installed.shortSha()
                         + " asset=" + info.assetName);
             } catch (Exception e) {
                 setApp("App update: ошибка " + e.getClass().getSimpleName(), "", "", "",
@@ -93,6 +99,13 @@ public final class AppUpdateController {
         if (TextUtils.isEmpty(source.downloadUrl)) {
             checkAsync(activity);
             Toast.makeText(activity, "Сначала проверяю обновление", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        InstalledApkInfo installed = currentApk();
+        if (!shouldInstall(source, installed)) {
+            setApp("App update: актуально", source.assetName, source.downloadUrl,
+                    source.sha256, 0, source.assetSize, false, false, false, false);
+            Toast.makeText(activity, "Kia уже актуальна", Toast.LENGTH_SHORT).show();
             return;
         }
         if (!canInstallPackages(activity)) {
@@ -262,14 +275,26 @@ public final class AppUpdateController {
         return new File(new File(root, UpdateApkProvider.DIR), safe);
     }
 
-    private int currentVersionCode() {
-        try {
-            PackageInfo info = app.getPackageManager().getPackageInfo(app.getPackageName(), 0);
-            if (Build.VERSION.SDK_INT >= 28) return (int) info.getLongVersionCode();
-            return info.versionCode;
-        } catch (Exception e) {
-            return 0;
-        }
+    private InstalledApkInfo currentApk() {
+        return InstalledApkInfo.read(app, app.getPackageName());
+    }
+
+    private static boolean shouldInstall(ReleaseInfo source, InstalledApkInfo installed) {
+        if (source == null || TextUtils.isEmpty(source.downloadUrl)) return false;
+        if (installed == null || !installed.installed) return true;
+        if (source.versionCode > installed.versionCode) return true;
+        if (source.versionCode < installed.versionCode) return false;
+        return sameVersionDifferentArchive(source, installed);
+    }
+
+    private static boolean sameVersionDifferentArchive(ReleaseInfo source, InstalledApkInfo installed) {
+        return source != null
+                && installed != null
+                && installed.installed
+                && source.versionCode > 0
+                && source.versionCode == installed.versionCode
+                && installed.hasComparableArchive(source.sha256, source.assetSize)
+                && !installed.matchesArchive(source.sha256, source.assetSize);
     }
 
     private static int versionCodeFromName(String name) {

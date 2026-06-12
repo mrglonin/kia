@@ -111,6 +111,18 @@ public final class QaReceiver extends BroadcastReceiver {
             NavigationFeature.get(context).setOutputMode(NavigationOutputMode.TBT);
         } else if ("nav_mode_finish_direction".equals(scenario)) {
             NavigationFeature.get(context).setOutputMode(NavigationOutputMode.FINISH_DIRECTION);
+        } else if ("nav_finish_direction_step".equals(scenario)) {
+            sendQaFinishDirection(context,
+                    intent.getIntExtra("step", 0),
+                    intent.getIntExtra("meters", 120));
+        } else if ("nav_finish_direction_sweep".equals(scenario)) {
+            startQaFinishDirectionSweep(context,
+                    intent.getIntExtra("from", 0),
+                    intent.getIntExtra("to", 45),
+                    intent.getIntExtra("stepSize", 3),
+                    intent.getIntExtra("delayMs", 900),
+                    intent.getIntExtra("loops", 1),
+                    intent.getIntExtra("meters", 120));
         } else if ("nav_text_mode".equals(scenario)) {
             NavigationFeature.get(context).setTextMode(intent.getIntExtra("mode", 0));
         } else if ("nav_maneuver_text_seconds".equals(scenario)) {
@@ -293,6 +305,52 @@ public final class QaReceiver extends BroadcastReceiver {
             AppSettings.setCallSourceMode(context, intent.getIntExtra("mode", AppSettings.CALL_SOURCE_CARPLAY));
             CallFeature.get(context).tick();
         }
+    }
+
+    private static void startQaFinishDirectionSweep(Context context, int from, int to,
+                                                    int stepSize, int delayMs, int loops,
+                                                    int meters) {
+        Context app = context.getApplicationContext();
+        int cleanStep = Math.max(1, Math.abs(stepSize));
+        int cleanDelay = Math.max(250, delayMs);
+        int cleanLoops = Math.max(1, Math.min(loops, 5));
+        int cleanFrom = normalizeFinishStep(from);
+        int cleanTo = normalizeFinishStep(to);
+        int count = sweepCount(cleanFrom, cleanTo, cleanStep);
+        int total = Math.max(1, count * cleanLoops);
+        AppLog.line(app, "QA nav finish direction sweep: from=" + cleanFrom
+                + " to=" + cleanTo + " step=" + cleanStep + " total=" + total);
+        Handler handler = new Handler(Looper.getMainLooper());
+        for (int i = 0; i < total; i++) {
+            final int index = i;
+            handler.postDelayed(() -> {
+                int step = normalizeFinishStep(cleanFrom + (index % count) * cleanStep);
+                sendQaFinishDirection(app, step, meters);
+            }, (long) i * cleanDelay);
+        }
+    }
+
+    private static int sweepCount(int from, int to, int stepSize) {
+        int delta = (to - from + 48) % 48;
+        return Math.max(1, delta / stepSize + 1);
+    }
+
+    private static int normalizeFinishStep(int step) {
+        int out = ((step % 48) + 48) % 48;
+        out = Math.round(out / 3f) * 3;
+        return out == 48 ? 0 : out;
+    }
+
+    private static void sendQaFinishDirection(Context context, int step, int meters) {
+        Context app = context.getApplicationContext();
+        int cleanStep = normalizeFinishStep(step);
+        int cleanMeters = Math.max(1, meters);
+        AdapterGateway gateway = AdapterGateway.get(app);
+        gateway.send(AdapterCommand.loud("qa nav active", AdapterProtocol.navOn(true)));
+        byte[] frame = AdapterProtocol.directionToFinish(cleanStep, cleanMeters, false);
+        gateway.send(AdapterCommand.loud("qa nav finish direction step=" + cleanStep, frame));
+        AppLog.line(app, "QA nav finish direction step=" + cleanStep
+                + " bytes=" + AdapterProtocol.hex(frame));
     }
 
     private static void sendMediaSource(Context context, String source, String packageName) {

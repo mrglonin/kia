@@ -32,7 +32,7 @@ public final class NavigatorInstallResultReceiver extends BroadcastReceiver {
         }
         if (status == PackageInstaller.STATUS_SUCCESS) {
             StateStore.setUpdates(context, current.withNavigator("Navigator update: установлен",
-                    version, packageName, asset, total, total, false, false, false, true, false));
+                    version, packageName, asset, total, total, false, false, false, false, false));
             AppLog.line(context, "Navigator update: install success");
             return;
         }

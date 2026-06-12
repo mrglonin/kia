@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.net.Uri;
 import android.os.Build;
@@ -70,21 +69,25 @@ public final class NavigatorUpdateController {
             try {
                 NavigatorInfo info = loadManifestNavigator();
                 latest = info;
-                int currentCode = currentVersionCode(info.packageName);
+                InstalledApkInfo installed = installedNavigator(info.packageName);
                 boolean manifestReady = !info.files.isEmpty();
-                boolean installed = currentCode > 0;
-                boolean canInstall = manifestReady && (!installed || info.versionCode > currentCode);
-                boolean downloaded = manifestReady && allDownloaded(info);
+                boolean canInstall = manifestReady && shouldInstall(info, installed);
+                boolean downloaded = canInstall && allDownloaded(info);
                 String status;
                 if (!manifestReady) status = "Navigator update: APK не найден";
-                else if (!installed) status = "Navigator update: можно установить " + info.version;
-                else if (canInstall) status = "Navigator update: доступен " + info.version;
-                else if (info.versionCode == currentCode) status = "Navigator update: актуально " + info.version;
+                else if (!installed.installed) status = "Navigator update: можно установить " + info.version;
+                else if (sameVersionDifferentArchive(info, installed)) {
+                    status = "Navigator update: доступна пересборка " + info.version;
+                } else if (canInstall) status = "Navigator update: доступен " + info.version;
+                else if (info.versionCode == installed.versionCode) status = "Navigator update: актуально " + info.version;
                 else status = "Navigator update: установлена новее";
                 setNavigator(status, info.version, info.packageName, info.displayAsset(), 0,
                         info.totalSize(), canInstall, false, false, downloaded, false);
-                AppLog.line(app, "Navigator update: installedCode=" + currentCode
+                AppLog.line(app, "Navigator update: installedCode=" + installed.versionCode
                         + " latestCode=" + info.versionCode
+                        + " installedSize=" + installed.sourceSize
+                        + " latestSize=" + info.totalSize()
+                        + " installedSha=" + installed.shortSha()
                         + " files=" + info.files.size());
                 if (installAfterCheck) {
                     installAfterCheck = false;
@@ -112,6 +115,14 @@ public final class NavigatorUpdateController {
             installAfterCheck = true;
             checkAsync(activity);
             Toast.makeText(activity, "Проверяю Yandex Navigator и начну установку", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        InstalledApkInfo installed = installedNavigator(source.packageName);
+        if (!shouldInstall(source, installed)) {
+            setNavigator("Navigator update: актуально " + source.version, source.version,
+                    source.packageName, source.displayAsset(), 0, source.totalSize(),
+                    false, false, false, false, false);
+            Toast.makeText(activity, "Yandex Navigator уже актуален", Toast.LENGTH_SHORT).show();
             return;
         }
         if (!canInstallPackages(activity)) {
@@ -342,15 +353,27 @@ public final class NavigatorUpdateController {
         return new File(new File(root, UpdateApkProvider.DIR), "navigator");
     }
 
-    private int currentVersionCode(String packageName) {
-        try {
-            PackageInfo info = app.getPackageManager().getPackageInfo(
-                    TextUtils.isEmpty(packageName) ? DEFAULT_PACKAGE : packageName, 0);
-            if (Build.VERSION.SDK_INT >= 28) return (int) info.getLongVersionCode();
-            return info.versionCode;
-        } catch (Exception e) {
-            return 0;
-        }
+    private InstalledApkInfo installedNavigator(String packageName) {
+        return InstalledApkInfo.read(app, TextUtils.isEmpty(packageName) ? DEFAULT_PACKAGE : packageName);
+    }
+
+    private static boolean shouldInstall(NavigatorInfo source, InstalledApkInfo installed) {
+        if (source == null || source.files.isEmpty()) return false;
+        if (installed == null || !installed.installed) return true;
+        if (source.versionCode > installed.versionCode) return true;
+        if (source.versionCode < installed.versionCode) return false;
+        return sameVersionDifferentArchive(source, installed);
+    }
+
+    private static boolean sameVersionDifferentArchive(NavigatorInfo source, InstalledApkInfo installed) {
+        NavFile file = source == null ? null : source.singleFile();
+        return file != null
+                && installed != null
+                && installed.installed
+                && source.versionCode > 0
+                && source.versionCode == installed.versionCode
+                && installed.hasComparableArchive(file.sha256, file.size)
+                && !installed.matchesArchive(file.sha256, file.size);
     }
 
     private static boolean canInstallPackages(Activity activity) {
@@ -433,6 +456,10 @@ public final class NavigatorUpdateController {
         String displayAsset() {
             if (files.isEmpty()) return "";
             return files.size() + " APK / " + version;
+        }
+
+        NavFile singleFile() {
+            return files.size() == 1 ? files.get(0) : null;
         }
     }
 

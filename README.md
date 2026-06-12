@@ -2,18 +2,18 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CAN-диагностика и обновления APK без отдельного закрытого сервера.
 
-[![Скачать KIA 22.38 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2022.38%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/raw/v22.38/updates/kia_348.apk)
+[![Скачать KIA 22.40 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2022.40%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/raw/main/updates/kia_350.apk)
 
-- APK KIA: [updates/kia_348.apk](https://github.com/mrglonin/kia/raw/v22.38/updates/kia_348.apk)
-- APK Yandex Navigator mod: [updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk](https://github.com/mrglonin/kia/raw/v22.38/updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk)
+- APK KIA: [updates/kia_350.apk](https://github.com/mrglonin/kia/raw/main/updates/kia_350.apk)
+- APK Yandex Navigator mod: [updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk](https://github.com/mrglonin/kia/raw/main/updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- Тег первого публичного релиза: `v22.38`
+- Текущий публичный релиз: `22.40` / `350`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `22.38` / `348` | `updates/kia_348.apk`, 5.6 MB | `f216852852e3175f97a18e7d7bece8c57f5c9b9f23e5e7b7a7d7281c5f787490` |
+| KIA app | `22.40` / `350` | `updates/kia_350.apk`, 5.6 MB | `d9925dbc43fd66e949ccc463f369e04db64ba7d896dceb34d6f3e9fbc98dd665` |
 | Yandex Navigator Kia mod | `7.10-kia.20260608` / `71011061` | `updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk`, 76 MB | `eeddc935570e1dafb76e3aef89ed9515e6d8e9065089726bcef83efd3b5cfd46` |
 
 ## Что работает
@@ -57,13 +57,13 @@
 ADB:
 
 ```bash
-adb install -r updates/kia_348.apk
+adb install -r updates/kia_350.apk
 adb install -r updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk
 ```
 
 На магнитоле:
 
-1. Установить `kia_348.apk`.
+1. Установить `kia_350.apk`.
 2. Выдать runtime permissions: уведомления, геолокация, Bluetooth, audio/media.
 3. Включить специальные права: поверх окон, изменение системных настроек, доступ к уведомлениям, игнор оптимизации батареи.
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
@@ -88,7 +88,7 @@ Release-сборка подписывается публичным debug-keystor
 
 ```bash
 ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
-$ADB -s emulator-5554 install -r updates/kia_348.apk
+$ADB -s emulator-5554 install -r updates/kia_350.apk
 $ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning
@@ -116,7 +116,7 @@ adb shell dumpsys package kia.app | grep -E 'versionCode|versionName|lastUpdateT
 - APK Yandex Navigator mod лежит как готовый installable artifact; права на Yandex/брендовые компоненты не переоформляются этим репозиторием.
 - Рабочий USB CAN-адаптер не является обычным заводским адаптером: нужна переделка и прошивка от [автора Drive2](https://www.drive2.ru/users/76508/), описание здесь: [drive2.ru/l/717368666034802531](https://www.drive2.ru/l/717368666034802531/).
 - Публичный debug-keystore нужен для воспроизводимости обновлений, не используйте его как приватный production key.
-- `updates/latest.json` указывает на текущий публичный `main`; ссылки в этом README закреплены на tag `v22.38`.
+- `updates/latest.json` и ссылки в этом README указывают на текущий публичный `main`.
 
 ## Лицензия
 

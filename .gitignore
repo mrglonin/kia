@@ -21,6 +21,7 @@ local.properties
 release/
 logs/
 captures/
+work/
 tools/climate_button_review_state.json
 tools/climate_button_review_events.jsonl
 

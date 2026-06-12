@@ -496,9 +496,51 @@ public final class YandexCoreBridgeClient {
         putString(intent, "voice_main_event", firstString(snapshot, "voice_main_event"));
         putString(intent, "voice_prompt", firstString(snapshot, "voice_prompt"));
         putString(intent, "route_id", firstString(snapshot, "route_id", "routeId"));
+        putRoutePose(intent, snapshot);
         long seq = longValue(snapshot, "seq", "sequence", -1L);
         if (seq >= 0) intent.putExtra("seq", seq);
         return intent;
+    }
+
+    private void putRoutePose(Intent intent, Bundle snapshot) {
+        putString(intent, "current_point", firstString(snapshot,
+                "current_point", "currentPoint",
+                "vehicle_point", "vehiclePoint",
+                "car_point", "carPoint",
+                "position_point", "positionPoint",
+                "route_position_point", "routePositionPoint",
+                "location_point", "locationPoint",
+                "gps_point", "gpsPoint"));
+        putString(intent, "current_lat", firstString(snapshot,
+                "current_lat", "currentLat",
+                "vehicle_lat", "vehicleLat",
+                "car_lat", "carLat",
+                "position_lat", "positionLat",
+                "route_position_lat", "routePositionLat",
+                "location_lat", "locationLat",
+                "gps_lat", "gpsLat",
+                "latitude"));
+        putString(intent, "current_lon", firstString(snapshot,
+                "current_lon", "currentLon", "current_lng", "currentLng",
+                "vehicle_lon", "vehicleLon", "vehicle_lng", "vehicleLng",
+                "car_lon", "carLon", "car_lng", "carLng",
+                "position_lon", "positionLon", "position_lng", "positionLng",
+                "route_position_lon", "routePositionLon",
+                "route_position_lng", "routePositionLng",
+                "location_lon", "locationLon", "location_lng", "locationLng",
+                "gps_lon", "gpsLon", "gps_lng", "gpsLng",
+                "longitude"));
+        putString(intent, "yandex_heading", firstString(snapshot,
+                "yandex_heading", "yandexHeading",
+                "vehicle_heading", "vehicleHeading",
+                "car_heading", "carHeading",
+                "map_heading", "mapHeading",
+                "navigation_heading", "navigationHeading",
+                "route_position_heading", "routePositionHeading",
+                "location_heading", "locationHeading",
+                "location_bearing", "locationBearing",
+                "gps_bearing", "gpsBearing",
+                "bearing", "heading", "azimuth", "course"));
     }
 
     private void putRoute(Intent intent, Bundle snapshot) {

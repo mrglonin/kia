@@ -58,9 +58,13 @@ public final class NavigationFeature {
     private static final long YANDEX_ROAD_SPEED_LIMIT_HOLD_MS = 12000L;
     private static final long LANE_HINT_OVERLAY_HOLD_MS = 120000L;
     private static final long EVENT_HINT_HOLD_MS = 45000L;
-    private static final long FINISH_DIRECTION_ANIMATION_STEP_MS = 120L;
+    private static final long FINISH_DIRECTION_ANIMATION_STEP_MS = 240L;
+    private static final long FINISH_DIRECTION_DUPLICATE_TX_MS = 1500L;
     private static final long LANE_TX_POST_PASS_PRE_TX_MAX_AGE_MS = 3000L;
     private static final long BACKGROUND_RESEND_MIN_MS = 2000L;
+    private static final long YANDEX_HEADING_FRESH_MS = 4000L;
+    private static final long GPS_COURSE_FRESH_MS = 8000L;
+    private static final long GPS_COURSE_MAX_POINT_GAP_MS = 12000L;
     private static final float FINISH_STALE_RECOVERY_MARGIN_METERS = 2f;
     private static final float AUTO_FINISH_ROUTE_METERS = 35f;
     private static final float AUTO_FINISH_GPS_METERS = 10f;
@@ -81,6 +85,9 @@ public final class NavigationFeature {
     private static final float MAIN_MANEUVER_MICRO_SEPARATION_METERS = 250f;
     private static final float MICRO_POST_PASS_NEAR_MAIN_CLEAR_METERS = 150f;
     private static final float INFERRED_FORWARD_MICRO_MAX_METERS = 450f;
+    private static final float GPS_BEARING_MIN_SPEED_MPS = 1.4f;
+    private static final float GPS_COURSE_MIN_DISTANCE_METERS = 2.5f;
+    private static final float GPS_COURSE_MAX_ACCURACY_METERS = 35f;
     private static final int MICRO_TX_PROGRESS_BUCKET = 9;
     private static final long FINISH_COMPASS_SUPPRESS_MS = 0L;
     private static final float DGIS_MICRO_DISTANCE_METERS = 160f;
@@ -180,9 +187,15 @@ public final class NavigationFeature {
     private boolean yandexFinishSuppressed;
     private double lastGpsLatitude = Double.NaN;
     private double lastGpsLongitude = Double.NaN;
+    private long lastGpsPointAt;
     private float lastGpsBearing = Float.NaN;
     private long lastGpsBearingAt;
     private float lastGpsSpeedMetersPerSecond = Float.NaN;
+    private float lastGpsCourseBearing = Float.NaN;
+    private long lastGpsCourseBearingAt;
+    private float lastYandexHeading = Float.NaN;
+    private long lastYandexHeadingAt;
+    private long lastYandexHeadingLogAt;
     private float lastDeviceHeading = Float.NaN;
     private float lastDeviceHeadingAccuracy = Float.NaN;
     private long lastDeviceHeadingAt;
@@ -198,6 +211,7 @@ public final class NavigationFeature {
     private boolean finalSegmentFinishDirectionActive;
     private String finalSegmentManeuver = "";
     private int displayedFinishDirectionStep = -1;
+    private int lastKnownFinishDirectionStep = -1;
     private int targetFinishDirectionStep = -1;
     private float activeFinishDirectionDistance;
     private boolean activeFinishDirectionKm;
@@ -244,11 +258,13 @@ public final class NavigationFeature {
         if (!finishDirectionShouldOverride()) {
             return Integer.MIN_VALUE;
         }
-        float heading = finishReferenceHeading();
-        if (!finishPointKnown() || !gpsPointKnown() || Float.isNaN(heading)) {
+        if (!finishPointKnown() || !gpsPointKnown()) {
             return Integer.MIN_VALUE;
         }
-        return compassDirectionStep(bearingToFinish() - heading);
+        float absoluteBearing = bearingToFinish();
+        float heading = finishReferenceHeading();
+        if (Float.isNaN(heading)) heading = absoluteBearing;
+        return compassDirectionStep(absoluteBearing - heading);
     }
 
     public synchronized boolean finishDirectionHeadingNeeded() {
@@ -305,14 +321,16 @@ public final class NavigationFeature {
     public synchronized void updateGpsLocation(Location location) {
         if (location == null) return;
         long now = System.currentTimeMillis();
-        lastGpsLatitude = location.getLatitude();
-        lastGpsLongitude = location.getLongitude();
-        if (location.hasBearing()) {
+        float speed = location.hasSpeed() ? Math.max(0f, location.getSpeed()) : Float.NaN;
+        rememberCurrentPoint(location.getLatitude(), location.getLongitude(), now,
+                location.hasAccuracy() ? location.getAccuracy() : Float.NaN,
+                "gps_location");
+        if (location.hasBearing() && gpsBearingReliable(speed)) {
             lastGpsBearing = normalizeDegrees(location.getBearing());
             lastGpsBearingAt = now;
         }
         if (location.hasSpeed()) {
-            lastGpsSpeedMetersPerSecond = Math.max(0f, location.getSpeed());
+            lastGpsSpeedMetersPerSecond = speed;
             updateGpsSpeed(location.getSpeed());
         }
         maybeRecoverStaleFinishFromMovement();
@@ -365,6 +383,7 @@ public final class NavigationFeature {
                     + clean(source));
             return;
         }
+        rememberYandexRoutePose(intent, source);
         if (yandexRouteHeartbeatIntent(intent)) {
             touchYandexWatchdog(source);
         }
@@ -4355,6 +4374,116 @@ public final class NavigationFeature {
         return validCoordinate(lastGpsLatitude, lastGpsLongitude);
     }
 
+    private void rememberYandexRoutePose(Intent intent, String source) {
+        if (intent == null || !isYandexSource(source)) return;
+        long now = System.currentTimeMillis();
+        double[] point = currentPointFromIntent(intent);
+        if (point != null) {
+            rememberCurrentPoint(point[0], point[1], now, Float.NaN, clean(source) + "_position");
+        }
+        float heading = headingFromIntent(intent);
+        if (!Float.isNaN(heading)) {
+            rememberYandexHeading(heading, source, now);
+        }
+    }
+
+    private double[] currentPointFromIntent(Intent intent) {
+        double lat = coordinate(intent,
+                "current_lat", "currentLat",
+                "vehicle_lat", "vehicleLat",
+                "car_lat", "carLat",
+                "position_lat", "positionLat",
+                "route_position_lat", "routePositionLat",
+                "location_lat", "locationLat",
+                "gps_lat", "gpsLat");
+        double lon = coordinate(intent,
+                "current_lon", "currentLon", "current_lng", "currentLng",
+                "vehicle_lon", "vehicleLon", "vehicle_lng", "vehicleLng",
+                "car_lon", "carLon", "car_lng", "carLng",
+                "position_lon", "positionLon", "position_lng", "positionLng",
+                "route_position_lon", "routePositionLon",
+                "route_position_lng", "routePositionLng",
+                "location_lon", "locationLon", "location_lng", "locationLng",
+                "gps_lon", "gpsLon", "gps_lng", "gpsLng");
+        if (validCoordinate(lat, lon)) return new double[]{lat, lon};
+        return coordinatePair(first(text(intent, "current_point"), text(intent, "currentPoint"),
+                text(intent, "vehicle_point"), text(intent, "vehiclePoint"),
+                text(intent, "car_point"), text(intent, "carPoint"),
+                text(intent, "position_point"), text(intent, "positionPoint"),
+                text(intent, "route_position_point"), text(intent, "routePositionPoint"),
+                text(intent, "location_point"), text(intent, "locationPoint"),
+                text(intent, "gps_point"), text(intent, "gpsPoint")));
+    }
+
+    private float headingFromIntent(Intent intent) {
+        return parseHeadingDegrees(first(text(intent, "yandex_heading"), text(intent, "yandexHeading"),
+                text(intent, "vehicle_heading"), text(intent, "vehicleHeading"),
+                text(intent, "car_heading"), text(intent, "carHeading"),
+                text(intent, "map_heading"), text(intent, "mapHeading"),
+                text(intent, "navigation_heading"), text(intent, "navigationHeading"),
+                text(intent, "route_position_heading"), text(intent, "routePositionHeading"),
+                text(intent, "location_heading"), text(intent, "locationHeading"),
+                text(intent, "location_bearing"), text(intent, "locationBearing"),
+                text(intent, "gps_bearing"), text(intent, "gpsBearing"),
+                text(intent, "bearing"), text(intent, "heading"),
+                text(intent, "azimuth"), text(intent, "course")));
+    }
+
+    private static float parseHeadingDegrees(String value) {
+        String text = clean(value);
+        if (TextUtils.isEmpty(text)) return Float.NaN;
+        Matcher matcher = NUMBER.matcher(text.replace(',', '.'));
+        if (!matcher.find()) return Float.NaN;
+        try {
+            return normalizeDegrees(Float.parseFloat(matcher.group()));
+        } catch (Exception ignored) {
+            return Float.NaN;
+        }
+    }
+
+    private void rememberCurrentPoint(double lat, double lon, long now, float accuracyMeters,
+                                      String source) {
+        if (!validCoordinate(lat, lon)) return;
+        if (gpsPointKnown()) {
+            Location from = new Location("kia_nav_previous");
+            from.setLatitude(lastGpsLatitude);
+            from.setLongitude(lastGpsLongitude);
+            Location to = new Location("kia_nav_current");
+            to.setLatitude(lat);
+            to.setLongitude(lon);
+            float moved = from.distanceTo(to);
+            boolean accurateEnough = Float.isNaN(accuracyMeters)
+                    || accuracyMeters <= GPS_COURSE_MAX_ACCURACY_METERS;
+            boolean recentEnough = lastGpsPointAt <= 0L
+                    || now - lastGpsPointAt <= GPS_COURSE_MAX_POINT_GAP_MS;
+            if (moved >= GPS_COURSE_MIN_DISTANCE_METERS && accurateEnough && recentEnough) {
+                float course = normalizeDegrees(from.bearingTo(to));
+                if (!Float.isNaN(lastGpsCourseBearing)
+                        && now - lastGpsCourseBearingAt <= GPS_COURSE_FRESH_MS) {
+                    course = blendDegrees(lastGpsCourseBearing, course, 0.45f);
+                }
+                lastGpsCourseBearing = course;
+                lastGpsCourseBearingAt = now;
+                AppLog.line(app, "Navigation GPS course: "
+                        + Math.round(course) + " moved=" + Math.round(moved)
+                        + " source=" + clean(source));
+            }
+        }
+        lastGpsLatitude = lat;
+        lastGpsLongitude = lon;
+        lastGpsPointAt = now;
+    }
+
+    private void rememberYandexHeading(float headingDegrees, String source, long now) {
+        lastYandexHeading = normalizeDegrees(headingDegrees);
+        lastYandexHeadingAt = now;
+        if (now - lastYandexHeadingLogAt >= 5000L) {
+            lastYandexHeadingLogAt = now;
+            AppLog.line(app, "Navigation Yandex heading: "
+                    + Math.round(lastYandexHeading) + " source=" + clean(source));
+        }
+    }
+
     private float bearingToFinish() {
         Location from = new Location("kia_nav_current");
         from.setLatitude(lastGpsLatitude);
@@ -4917,10 +5046,10 @@ public final class NavigationFeature {
     }
 
     private void sendFinishDirectionPlaceholder(boolean force) {
-        targetFinishDirectionStep = normalizeCompassStep(6);
+        targetFinishDirectionStep = normalizeCompassStep(0);
         activeFinishDirectionDistance = 0f;
         activeFinishDirectionKm = false;
-        lastFinishDirectionReason = "finish_direction_placeholder";
+        lastFinishDirectionReason = "finish_direction_placeholder_straight";
         sendFinishDirectionStep(targetFinishDirectionStep, targetFinishDirectionStep,
                 activeFinishDirectionDistance, activeFinishDirectionKm,
                 lastFinishDirectionReason, force);
@@ -4940,11 +5069,15 @@ public final class NavigationFeature {
     }
 
     private boolean sendDirectionToFinishFrame(boolean force, String reason) {
-        float heading = finishReferenceHeading();
-        if (!finishPointKnown() || !gpsPointKnown() || Float.isNaN(heading)) return false;
+        if (!finishPointKnown() || !gpsPointKnown()) return false;
         long now = System.currentTimeMillis();
         if (!force && now - lastFinishDirectionAt < 700L) return true;
         float absoluteBearing = bearingToFinish();
+        float heading = finishReferenceHeading();
+        boolean straightFallback = Float.isNaN(heading);
+        if (straightFallback) {
+            heading = absoluteBearing;
+        }
         int step = compassDirectionStep(absoluteBearing - heading);
         String distanceText = first(state.routeDistance, state.maneuverDistance);
         boolean km = isKm(distanceText);
@@ -4954,7 +5087,8 @@ public final class NavigationFeature {
             km = false;
         }
         float sendDistance = clusterDistanceValue(distance, km);
-        sendDirectionToFinishAnimated(step, sendDistance, km, force, reason);
+        sendDirectionToFinishAnimated(step, sendDistance, km, force,
+                straightFallback ? clean(reason) + "_geo_straight" : reason);
         return true;
     }
 
@@ -4965,6 +5099,15 @@ public final class NavigationFeature {
         activeFinishDirectionKm = km;
         lastFinishDirectionReason = clean(reason);
         if (displayedFinishDirectionStep < 0) {
+            if (lastKnownFinishDirectionStep < 0) {
+                sendFinishDirectionStep(targetFinishDirectionStep, targetFinishDirectionStep,
+                        sendDistance, km, reason, force);
+                return;
+            }
+            displayedFinishDirectionStep = normalizeCompassStep(lastKnownFinishDirectionStep);
+        }
+        int delta = compassStepDelta(displayedFinishDirectionStep, targetFinishDirectionStep);
+        if (delta <= 3) {
             sendFinishDirectionStep(targetFinishDirectionStep, targetFinishDirectionStep,
                     sendDistance, km, reason, force);
             return;
@@ -4981,12 +5124,14 @@ public final class NavigationFeature {
         int step = normalizeCompassStep(uiStep);
         int target = normalizeCompassStep(targetStep);
         long now = System.currentTimeMillis();
-        String key = clean(reason) + "|" + step + "|" + target + "|"
+        String key = step + "|" + target + "|"
                 + Math.round(sendDistance * 10f) + "|" + km;
-        if (!force && key.equals(lastSentFinishDirectionKey)) return;
+        long age = now - lastFinishDirectionAt;
+        if (key.equals(lastSentFinishDirectionKey) && age < FINISH_DIRECTION_DUPLICATE_TX_MS) return;
         lastSentFinishDirectionKey = key;
         lastFinishDirectionAt = now;
         displayedFinishDirectionStep = step;
+        lastKnownFinishDirectionStep = step;
         activeClusterVisual = "context_ra_direction_to_finish / step=" + step
                 + " target=" + target
                 + " / " + clusterDistanceText(sendDistance, km);
@@ -5184,6 +5329,12 @@ public final class NavigationFeature {
 
     private float finishReferenceHeading() {
         long now = System.currentTimeMillis();
+        boolean yandexFresh = !Float.isNaN(lastYandexHeading)
+                && now - lastYandexHeadingAt <= YANDEX_HEADING_FRESH_MS;
+        if (yandexFresh) return lastYandexHeading;
+        boolean courseFresh = !Float.isNaN(lastGpsCourseBearing)
+                && now - lastGpsCourseBearingAt <= GPS_COURSE_FRESH_MS;
+        if (courseFresh) return lastGpsCourseBearing;
         boolean deviceFresh = !Float.isNaN(lastDeviceHeading)
                 && now - lastDeviceHeadingAt <= 2500L;
         boolean gpsFresh = !Float.isNaN(lastGpsBearing)
@@ -5195,6 +5346,11 @@ public final class NavigationFeature {
         }
         if (deviceFresh) return lastDeviceHeading;
         return gpsFresh ? lastGpsBearing : Float.NaN;
+    }
+
+    private static boolean gpsBearingReliable(float speedMetersPerSecond) {
+        return Float.isNaN(speedMetersPerSecond)
+                || speedMetersPerSecond >= GPS_BEARING_MIN_SPEED_MPS;
     }
 
     private boolean maybeAutoFinishStaleNearDestination(long now) {
@@ -7814,24 +7970,33 @@ public final class NavigationFeature {
 
     private static int compassDirectionStep(float relativeDegrees) {
         float centered = normalizeSignedDegrees(relativeDegrees);
-        if (Math.abs(centered) < 15f) return 0;
-        int step = Math.round(normalizeDegrees(centered) / 30f) * 3;
-        return step >= 36 ? 0 : step;
+        if (Math.abs(centered) < 11.25f) return 0;
+        int step = Math.round(normalizeDegrees(centered) / 22.5f) * 3;
+        return step >= 48 ? 0 : step;
     }
 
     private static int nextCompassStep(int current, int target) {
         int c = normalizeCompassStep(current);
         int t = normalizeCompassStep(target);
-        int forward = (t - c + 36) % 36;
-        int backward = (c - t + 36) % 36;
+        int forward = (t - c + 48) % 48;
+        int backward = (c - t + 48) % 48;
         if (forward == 0) return t;
-        return normalizeCompassStep(c + (forward <= backward ? 3 : -3));
+        if (forward == backward) return normalizeCompassStep(c + (t >= c ? 3 : -3));
+        return normalizeCompassStep(c + (forward < backward ? 3 : -3));
+    }
+
+    private static int compassStepDelta(int current, int target) {
+        int c = normalizeCompassStep(current);
+        int t = normalizeCompassStep(target);
+        int forward = (t - c + 48) % 48;
+        int backward = (c - t + 48) % 48;
+        return Math.min(forward, backward);
     }
 
     private static int normalizeCompassStep(int step) {
-        int out = ((step % 36) + 36) % 36;
+        int out = ((step % 48) + 48) % 48;
         out = Math.round(out / 3f) * 3;
-        return out == 36 ? 0 : out;
+        return out == 48 ? 0 : out;
     }
 
     private static float normalizeDegrees(float value) {

@@ -286,7 +286,7 @@ public final class AdapterProtocol {
     }
 
     public static byte[] directionToFinish(int uiStep, float distance, boolean km) {
-        int angle = nearestCompassUiStep(uiStep);
+        int angle = calibratedFinishDirectionAngle(uiStep);
         return maneuverExact(0x02, 0x00, 0x00, angle, distance, km, -1);
     }
 
@@ -831,6 +831,12 @@ public final class AdapterProtocol {
         int out = ((value % 36) + 36) % 36;
         out = Math.round(out / 3f) * 3;
         return out == 36 ? 0 : out;
+    }
+
+    private static int calibratedFinishDirectionAngle(int uiStep) {
+        int out = ((uiStep % 48) + 48) % 48;
+        out = Math.round(out / 3f) * 3;
+        return out == 48 ? 0 : out;
     }
 
     private static int nearestManeuverAngle(int value) {
