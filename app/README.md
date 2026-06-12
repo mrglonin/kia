@@ -1,12 +1,16 @@
-# Kia Android App
+# KIA Android app
 
-Current Android source for `kia.app`.
+Android source for `kia.app`.
 
-- `versionName`: `22.26`
-- `versionCode`: `336`
-- release APK name: `kia_336.apk`
+- `applicationId`: `kia.app`
+- `versionName`: `22.38`
+- `versionCode`: `348`
+- release APK name: `kia_348.apk`
+- min SDK: `29`
+- target SDK: `35`
+- compile SDK: `35`
 
-## Runtime Flow
+## Runtime flow
 
 ```text
 capture source -> domain state -> cluster sender -> AdapterGateway -> UsbTransport
@@ -14,18 +18,18 @@ capture source -> domain state -> cluster sender -> AdapterGateway -> UsbTranspo
 
 Main packages:
 
-- `kia.app.core`: state models, settings and logging.
-- `kia.app.transport.usb`: USB serial connection, permissions and frame reader.
-- `kia.app.protocol.adapter`: adapter packet builders, checksums and incoming frame router.
+- `kia.app.core`: state models, settings, logging.
+- `kia.app.transport.usb`: USB serial connection, permissions, frame reader.
+- `kia.app.protocol.adapter`: adapter packets, checksums, incoming frame routing.
 - `kia.app.media`: media/call capture and cluster output.
-- `kia.app.navigation`: navigation capture, overlay and cluster output.
-- `kia.app.tpms`: TPMS polling, state, alert logic and dashboard.
-- `kia.app.rcta`: RCTA protocol state, overlay, preview and sound.
-- `kia.app.update`: APK/mod update checks and manual firmware flashing.
-- `kia.app.diagnostics`: gs_usb logger flow.
+- `kia.app.navigation`: Yandex/2GIS capture, overlay, cluster output.
+- `kia.app.tpms`: TPMS polling, dashboard, alert logic.
+- `kia.app.rcta`: RCTA protocol state, overlay, preview, sound.
+- `kia.app.update`: KIA APK, Yandex mod and firmware update checks.
+- `kia.app.diagnostics`: gs_usb CAN logger flow.
 - `kia.app.entry`: Activity, foreground service, boot and USB receivers.
 
-## Bundled Firmware
+## Bundled firmware
 
 The APK intentionally bundles only this firmware asset:
 
@@ -53,7 +57,7 @@ ANDROID_HOME="/Users/legion/Library/Android/sdk" \
 
 Release signing uses `../signing/kia-debug-release.keystore`.
 
-## Quick QA Broadcast
+## Quick QA broadcast
 
 Use the full adb path if `adb` is not in `PATH`:
 

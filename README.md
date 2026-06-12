@@ -1,41 +1,76 @@
-# Kia CANBUS
+# KIA CANBUS
 
-Clean local workspace for the Kia CANBUS Android app.
+Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CAN-диагностика и обновления APK без отдельного закрытого сервера.
 
-Source was copied from:
+[![Скачать KIA 22.38 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2022.38%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/raw/v22.38/updates/kia_348.apk)
 
-```text
-/Users/legion/Downloads/canbus/build/git/kia
-```
+- APK KIA: [updates/kia_348.apk](https://github.com/mrglonin/kia/raw/v22.38/updates/kia_348.apk)
+- APK Yandex Navigator mod: [updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk](https://github.com/mrglonin/kia/raw/v22.38/updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk)
+- Манифест обновлений: [updates/latest.json](updates/latest.json)
+- Тег первого публичного релиза: `v22.38`
 
-## Layout
+## Релиз
 
-- `app/` - Android Gradle project for `kia.app`.
-- `tools/` - local CAN, UART, navigation and APK utilities.
-- `signing/` - intentionally public debug release keystore used by release builds.
-- `updates/latest.json` - manifest for Kia, Yandex mod and firmware updates.
-- `updates/kia_*.apk` - published Kia APKs used by in-app updates.
+| Компонент | Версия | Файл | SHA-256 |
+| --- | --- | --- | --- |
+| KIA app | `22.38` / `348` | `updates/kia_348.apk`, 5.6 MB | `f216852852e3175f97a18e7d7bece8c57f5c9b9f23e5e7b7a7d7281c5f787490` |
+| Yandex Navigator Kia mod | `7.10-kia.20260608` / `71011061` | `updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk`, 76 MB | `eeddc935570e1dafb76e3aef89ed9515e6d8e9065089726bcef83efd3b5cfd46` |
 
-Not tracked here: Gradle caches, build outputs, local APK dumps, screenshots,
-logs, `.DS_Store`, temporary captures and old generated artifacts.
+## Что работает
 
-## Current App
+- TPMS-экран под Kia: давление, температура, предупреждения, ускоренный опрос при аварийных значениях.
+- Медиа и звонки: TEYES/CC4, Android-плееры, BT/USB/FM/AM, подписи источника и текста на приборку.
+- Навигация: Yandex Core Bridge, 2GIS fallback, режимы `обычный`, `TBT`, `стрелка к финишу`, lane/gray-road/micro-maneuver логика.
+- RCTA: предупреждение слева/справа/с двух сторон, overlay поверх камеры, звук, настройка стиля.
+- CAN/USB: обмен с адаптером, TPMS poll, температура панели, gs_usb CAN logging, прошивка `gs_updated.bin`.
+- Обновления: KIA APK, Yandex mod APK и firmware-слот через `updates/latest.json`.
 
-- `applicationId`: `kia.app`
-- `versionName`: `22.15`
-- `versionCode`: `325`
-- release APK name: `kia_325.apk`
+## Скриншоты
 
-## Build
+| TPMS | TPMS warning |
+| --- | --- |
+| ![TPMS](docs/screenshots/dashboard-tpms.png) | ![TPMS warning](docs/screenshots/dashboard-tpms-warning.png) |
+
+| Widget mode | Sunroof |
+| --- | --- |
+| ![Navigation widget](docs/screenshots/dashboard-navigation-widget.png) | ![Sunroof open](docs/screenshots/dashboard-sunroof-open.png) |
+
+| RCTA overlay | RCTA settings |
+| --- | --- |
+| ![RCTA overlay](docs/screenshots/overlay-rcta-both.png) | ![RCTA settings](docs/screenshots/settings-rcta.png) |
+
+| Navigation | Media |
+| --- | --- |
+| ![Navigation settings](docs/screenshots/settings-navigation.png) | ![Media settings](docs/screenshots/settings-media.png) |
+
+| TPMS settings | CANBUS |
+| --- | --- |
+| ![TPMS settings](docs/screenshots/settings-tpms.png) | ![CANBUS settings](docs/screenshots/settings-canbus.png) |
+
+| General |
+| --- |
+| ![General settings](docs/screenshots/settings-general.png) |
+
+## Установка
+
+ADB:
 
 ```bash
-cd app
-JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
-ANDROID_HOME="/Users/legion/Library/Android/sdk" \
-./gradlew :app:assembleDebug --console=plain
+adb install -r updates/kia_348.apk
+adb install -r updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk
 ```
 
-Release:
+На магнитоле:
+
+1. Установить `kia_348.apk`.
+2. Выдать runtime permissions: уведомления, геолокация, Bluetooth, audio/media.
+3. Включить специальные права: поверх окон, изменение системных настроек, доступ к уведомлениям, игнор оптимизации батареи.
+4. Подключить USB CAN-адаптер и разрешить USB-доступ для `kia.app`.
+5. Установить Yandex Navigator mod, если нужна интеграция через Kia bridge.
+
+## Сборка
+
+Требования: Android SDK, JDK 17 из Android Studio, Gradle wrapper из `app/`.
 
 ```bash
 cd app
@@ -44,14 +79,43 @@ ANDROID_HOME="/Users/legion/Library/Android/sdk" \
 ./gradlew :app:assembleRelease --console=plain
 ```
 
-Release signing looks for `../signing/kia-debug-release.keystore`.
+Release-сборка подписывается публичным debug-keystore из `signing/kia-debug-release.keystore`, чтобы публичный APK можно было пересобрать с той же подписью. Для своего форка меняйте keystore в `app/app/build.gradle`.
 
-## Useful Tools
+## QA
 
-- `tools/can_button_level_capture.py` - guided CAN capture for climate buttons.
-- `tools/climate_button_review_server.py` - local review UI for captured climate states.
-- `tools/gs_can_logger_server.py` - GS-USB CAN logger UI.
-- `tools/navi_lane_server.py` - navigation lane/TRC review server.
-- `tools/analyze_nav_trc.py` - offline TRC analysis.
-- `tools/media_serial_tester.py` - serial/media protocol tester.
-- `tools/apktool_2.9.3.jar` - local APK decode/build helper.
+Быстрые сценарии через встроенный `QaReceiver`:
+
+```bash
+ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
+$ADB -s emulator-5554 install -r updates/kia_348.apk
+$ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
+$ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
+$ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning
+$ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario nav_stale_lane_conflict_sample
+$ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario rcta_both
+```
+
+Проверка установленной версии:
+
+```bash
+adb shell dumpsys package kia.app | grep -E 'versionCode|versionName|lastUpdateTime'
+```
+
+## Структура
+
+- `app/` - Android Gradle project для `kia.app`.
+- `updates/` - публичные APK и `latest.json`.
+- `updates/yandex/` - installable Yandex Navigator Kia mod APK.
+- `signing/` - публичный debug release keystore.
+- `tools/` - CAN/UART/navigation/APK utilities.
+- `docs/screenshots/` - скриншоты текущего публичного релиза.
+
+## Границы
+
+- APK Yandex Navigator mod лежит как готовый installable artifact; права на Yandex/брендовые компоненты не переоформляются этим репозиторием.
+- Публичный debug-keystore нужен для воспроизводимости обновлений, не используйте его как приватный production key.
+- `updates/latest.json` указывает на текущий публичный `main`; ссылки в этом README закреплены на tag `v22.38`.
+
+## Лицензия
+
+Исходный код KIA-приложения и локальные tools открыты по MIT License. Сторонние APK, фирменные изображения, логотипы и материалы сохраняют права владельцев.
