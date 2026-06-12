@@ -44,6 +44,7 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -101,11 +102,13 @@ public final class MainActivity extends Activity {
     private static final int COLOR_PANEL = Color.argb(132, 23, 31, 43);
     private static final int COLOR_PANEL_SOFT = Color.argb(165, 36, 48, 62);
     private static final int COLOR_STROKE = Color.argb(92, 178, 211, 230);
-    private static final int COLOR_SETTINGS_BG = Color.rgb(13, 15, 19);
-    private static final int COLOR_SETTINGS_PANEL = Color.rgb(20, 24, 31);
-    private static final int COLOR_SETTINGS_PANEL_ALT = Color.rgb(27, 32, 40);
-    private static final int COLOR_SETTINGS_SELECTED = Color.rgb(38, 45, 54);
-    private static final int COLOR_SETTINGS_DIVIDER = Color.rgb(43, 49, 58);
+    private static final int COLOR_SETTINGS_BG = Color.rgb(8, 11, 15);
+    private static final int COLOR_SETTINGS_TOP = Color.rgb(11, 15, 21);
+    private static final int COLOR_SETTINGS_PANEL = Color.rgb(18, 23, 31);
+    private static final int COLOR_SETTINGS_PANEL_ALT = Color.rgb(25, 32, 42);
+    private static final int COLOR_SETTINGS_SELECTED = Color.rgb(35, 48, 61);
+    private static final int COLOR_SETTINGS_DIVIDER = Color.rgb(47, 58, 70);
+    private static final int COLOR_SETTINGS_STROKE = Color.rgb(49, 63, 78);
     private static final int COLOR_TEXT = Color.rgb(246, 248, 252);
     private static final int COLOR_MUTED = Color.rgb(157, 172, 190);
     private static final int COLOR_ACCENT = Color.rgb(57, 211, 190);
@@ -1843,6 +1846,7 @@ public final class MainActivity extends Activity {
         content.setOrientation(LinearLayout.VERTICAL);
         content.setClipToPadding(false);
         content.setPadding(settingsContentPadding(), dp(12), settingsContentPadding(), dp(18));
+        content.addView(settingsHeroCard());
         renderSettingsContent(content);
         scroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -1859,12 +1863,11 @@ public final class MainActivity extends Activity {
         item.setGravity(Gravity.CENTER);
         item.setTypeface(Typeface.DEFAULT_BOLD);
         item.setSingleLine(true);
-        item.setPadding(dp(10), 0, dp(10), 0);
+        item.setMinWidth(settingsMenuItemWidth(tab));
+        item.setPadding(dp(14), 0, dp(14), 0);
         item.setClickable(true);
         item.setFocusable(true);
-        item.setBackground(selected
-                ? settingsButtonBackground(true)
-                : round(Color.TRANSPARENT, dp(7), Color.TRANSPARENT, 0));
+        item.setBackground(settingsNavBackground(selected));
         item.setOnClickListener(v -> {
             if (settingsTab != tab) {
                 settingsScrollY = 0;
@@ -1878,52 +1881,88 @@ public final class MainActivity extends Activity {
     }
 
     private String settingsMenuLabel(int tab, String label) {
-        return label;
+        return settingsTabIcon(tab) + "  " + label;
     }
 
     private View settingsTopRow() {
-        LinearLayout row = row();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(8), dp(12), dp(8));
-        row.setBackgroundColor(COLOR_SETTINGS_BG);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+        LinearLayout chrome = new LinearLayout(this);
+        chrome.setOrientation(LinearLayout.VERTICAL);
+        chrome.setPadding(dp(14), dp(8), dp(12), dp(8));
+        chrome.setBackground(settingsTopBackground());
+        LinearLayout.LayoutParams chromeLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, 0);
-        row.setLayoutParams(lp);
+        chrome.setLayoutParams(chromeLp);
 
-        row.addView(settingsMenuItem(SETTINGS_TPMS, "TPMS"), settingsHeaderItemLayout(true));
-        if (AppSettings.mediaTabVisible(this)) {
-            row.addView(settingsMenuItem(SETTINGS_MEDIA, "Медиа"), settingsHeaderItemLayout(false));
-        }
-        row.addView(settingsMenuItem(SETTINGS_NAVIGATION, "Навигация"), settingsHeaderItemLayout(false));
-        row.addView(settingsMenuItem(SETTINGS_CANBUS, "Canbus"), settingsHeaderItemLayout(false));
-        row.addView(settingsMenuItem(SETTINGS_RCTA, "RCTA"), settingsHeaderItemLayout(false));
-        row.addView(settingsMenuItem(SETTINGS_GENERAL, "Общее"), settingsHeaderItemLayout(false));
-        if (AppSettings.logTabVisible(this)) {
-            row.addView(settingsMenuItem(SETTINGS_LOG, "Диагностика"), settingsHeaderItemLayout(false));
-        }
+        LinearLayout titleRow = row();
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView close = text("×", isCompact() ? 30 : 34, Color.WHITE);
+        TextView brand = text("KIA", isCompact() ? 14 : 16, Color.WHITE);
+        brand.setGravity(Gravity.CENTER);
+        brand.setTypeface(Typeface.DEFAULT_BOLD);
+        brand.setBackground(round(softColor(settingsTabAccent(), 48), dp(10),
+                softColor(settingsTabAccent(), 120), dp(1)));
+        titleRow.addView(brand, new LinearLayout.LayoutParams(
+                isCompact() ? dp(54) : dp(62), isCompact() ? dp(42) : dp(46)));
+
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text("Настройки", isCompact() ? 16 : 18, Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView subtitle = text(settingsTabTitle(settingsTab), isCompact() ? 11 : 13, COLOR_MUTED);
+        subtitle.setSingleLine(true);
+        titles.addView(title);
+        titles.addView(subtitle);
+        LinearLayout.LayoutParams titlesLp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        titlesLp.setMargins(dp(12), 0, dp(10), 0);
+        titleRow.addView(titles, titlesLp);
+
+        TextView close = text("×", isCompact() ? 28 : 32, Color.WHITE);
         close.setGravity(Gravity.CENTER);
         close.setTypeface(Typeface.DEFAULT_BOLD);
         close.setClickable(true);
         close.setFocusable(true);
         close.setBackground(settingsButtonBackground(false));
         close.setOnClickListener(v -> closeSettings());
-        row.addView(close, new LinearLayout.LayoutParams(
-                isCompact() ? dp(52) : dp(60), isCompact() ? dp(46) : dp(52)));
-        return row;
+        titleRow.addView(close, new LinearLayout.LayoutParams(
+                isCompact() ? dp(50) : dp(56), isCompact() ? dp(42) : dp(46)));
+        chrome.addView(titleRow);
+
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout nav = row();
+        nav.setPadding(0, 0, 0, 0);
+        nav.addView(settingsMenuItem(SETTINGS_TPMS, "TPMS"), settingsHeaderItemLayout(true));
+        if (AppSettings.mediaTabVisible(this)) {
+            nav.addView(settingsMenuItem(SETTINGS_MEDIA, "Медиа"), settingsHeaderItemLayout(false));
+        }
+        nav.addView(settingsMenuItem(SETTINGS_NAVIGATION, "Навигация"), settingsHeaderItemLayout(false));
+        nav.addView(settingsMenuItem(SETTINGS_CANBUS, "Canbus"), settingsHeaderItemLayout(false));
+        nav.addView(settingsMenuItem(SETTINGS_RCTA, "RCTA"), settingsHeaderItemLayout(false));
+        nav.addView(settingsMenuItem(SETTINGS_GENERAL, "Общее"), settingsHeaderItemLayout(false));
+        if (AppSettings.logTabVisible(this)) {
+            nav.addView(settingsMenuItem(SETTINGS_LOG, "Диагностика"), settingsHeaderItemLayout(false));
+        }
+        scroll.addView(nav, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, isCompact() ? dp(44) : dp(48));
+        scrollLp.setMargins(0, dp(8), 0, 0);
+        chrome.addView(scroll, scrollLp);
+
+        return chrome;
     }
 
     private LinearLayout.LayoutParams settingsHeaderItemLayout(boolean first) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                isCompact() ? dp(46) : dp(52), 1f);
-        lp.setMargins(first ? 0 : dp(3), 0, dp(3), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, isCompact() ? dp(42) : dp(46));
+        lp.setMargins(first ? 0 : dp(7), 0, dp(7), 0);
         return lp;
     }
 
     private int settingsHeaderHeight() {
-        return isCompact() ? dp(62) : dp(68);
+        return isCompact() ? dp(108) : dp(116);
     }
 
     private int settingsContentPadding() {
@@ -1931,6 +1970,130 @@ public final class MainActivity extends Activity {
         if (widthDp >= 1200) return dp(22);
         if (widthDp < 560) return dp(10);
         return dp(16);
+    }
+
+    private int settingsMenuItemWidth(int tab) {
+        if (isCompact()) {
+            return tab == SETTINGS_NAVIGATION || tab == SETTINGS_LOG ? dp(118) : dp(92);
+        }
+        return tab == SETTINGS_NAVIGATION || tab == SETTINGS_LOG ? dp(142) : dp(112);
+    }
+
+    private View settingsHeroCard() {
+        int accent = settingsTabAccent();
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(18), dp(15), dp(18), dp(15));
+        card.setBackground(settingsHeroBackground(accent));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, 0, 0, dp(12));
+        card.setLayoutParams(lp);
+
+        TextView icon = text(settingsTabIcon(settingsTab), isCompact() ? 25 : 29, accent);
+        icon.setGravity(Gravity.CENTER);
+        icon.setTypeface(Typeface.DEFAULT_BOLD);
+        icon.setBackground(round(softColor(accent, 34), dp(14), softColor(accent, 120), dp(1)));
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
+                isCompact() ? dp(48) : dp(56), isCompact() ? dp(48) : dp(56));
+        iconLp.setMargins(0, 0, isCompact() ? dp(12) : dp(14), 0);
+        card.addView(icon, iconLp);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text(settingsTabTitle(settingsTab), isCompact() ? 21 : 25, Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView summary = text(settingsTabSummary(settingsTab), isCompact() ? 12 : 14, COLOR_MUTED);
+        summary.setMaxLines(2);
+        LinearLayout.LayoutParams summaryLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        summaryLp.setMargins(0, dp(4), 0, 0);
+        texts.addView(title);
+        texts.addView(summary, summaryLp);
+        card.addView(texts, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return card;
+    }
+
+    private String settingsTabIcon(int tab) {
+        switch (tab) {
+            case SETTINGS_MEDIA:
+                return "♪";
+            case SETTINGS_NAVIGATION:
+                return "↱";
+            case SETTINGS_CANBUS:
+                return "◇";
+            case SETTINGS_RCTA:
+                return "≪";
+            case SETTINGS_GENERAL:
+                return "⚙";
+            case SETTINGS_LOG:
+                return "≡";
+            case SETTINGS_TPMS:
+            default:
+                return "●";
+        }
+    }
+
+    private String settingsTabTitle(int tab) {
+        switch (tab) {
+            case SETTINGS_MEDIA:
+                return "Медиа";
+            case SETTINGS_NAVIGATION:
+                return "Навигация";
+            case SETTINGS_CANBUS:
+                return "Canbus";
+            case SETTINGS_RCTA:
+                return "RCTA";
+            case SETTINGS_GENERAL:
+                return "Общее";
+            case SETTINGS_LOG:
+                return "Диагностика";
+            case SETTINGS_TPMS:
+            default:
+                return "TPMS";
+        }
+    }
+
+    private String settingsTabSummary(int tab) {
+        switch (tab) {
+            case SETTINGS_MEDIA:
+                return "профиль магнитолы, источники, текст трека и звонки";
+            case SETTINGS_NAVIGATION:
+                return "источник маршрута, режим панели, lane и подсказки";
+            case SETTINGS_CANBUS:
+                return "адаптер, температура, SAS и усилитель";
+            case SETTINGS_RCTA:
+                return "предупреждения поверх камеры заднего хода";
+            case SETTINGS_GENERAL:
+                return "разрешения, обновления и видимость разделов";
+            case SETTINGS_LOG:
+                return "запись CAN, шины и диагностические файлы";
+            case SETTINGS_TPMS:
+            default:
+                return "пороги давления, температуры и поведение предупреждений";
+        }
+    }
+
+    private int settingsTabAccent() {
+        switch (settingsTab) {
+            case SETTINGS_MEDIA:
+                return COLOR_VIOLET;
+            case SETTINGS_NAVIGATION:
+                return COLOR_ACCENT_BLUE;
+            case SETTINGS_CANBUS:
+                return COLOR_WARNING;
+            case SETTINGS_RCTA:
+                return COLOR_ROSE;
+            case SETTINGS_GENERAL:
+                return COLOR_ACCENT;
+            case SETTINGS_LOG:
+                return Color.rgb(120, 159, 255);
+            case SETTINGS_TPMS:
+            default:
+                return COLOR_SUCCESS;
+        }
     }
 
     private void closeSettings() {
@@ -2271,18 +2434,25 @@ public final class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setClipToPadding(false);
-        panel.setPadding(dp(18), dp(15), dp(18), dp(15));
-        panel.setBackground(settingsPanelBackground());
+        panel.setPadding(dp(18), dp(16), dp(18), dp(16));
+        panel.setBackground(settingsPanelBackground(tint));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, 0, 0, dp(10));
+        lp.setMargins(0, 0, 0, dp(12));
         panel.setLayoutParams(lp);
         return panel;
     }
 
     private void addSettingsPanelHeader(LinearLayout panel, String title, String hint, int color) {
         LinearLayout header = row();
-        TextView label = text(title, isCompact() ? 17 : 20, Color.WHITE);
+        TextView marker = text(" ", 1, color);
+        marker.setBackground(round(color, dp(3), Color.TRANSPARENT, 0));
+        LinearLayout.LayoutParams markerLp = new LinearLayout.LayoutParams(dp(4),
+                isCompact() ? dp(24) : dp(28));
+        markerLp.setMargins(0, 0, dp(10), 0);
+        header.addView(marker, markerLp);
+
+        TextView label = text(title, isCompact() ? 18 : 21, Color.WHITE);
         label.setTypeface(Typeface.DEFAULT_BOLD);
         LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(0,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -2294,7 +2464,7 @@ public final class MainActivity extends Activity {
         description.setMaxLines(2);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hintLp.setMargins(0, dp(6), 0, 0);
+        hintLp.setMargins(dp(14), dp(6), 0, 0);
         panel.addView(description, hintLp);
     }
 
@@ -2303,11 +2473,11 @@ public final class MainActivity extends Activity {
                                                        CompoundButton.OnCheckedChangeListener listener) {
         LinearLayout header = row();
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setMinimumHeight(isCompact() ? dp(56) : dp(62));
+        header.setMinimumHeight(isCompact() ? dp(60) : dp(68));
 
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
-        TextView label = text(title, isCompact() ? 17 : 20, Color.WHITE);
+        TextView label = text(title, isCompact() ? 18 : 21, Color.WHITE);
         label.setTypeface(Typeface.DEFAULT_BOLD);
         texts.addView(label);
 
@@ -2331,11 +2501,11 @@ public final class MainActivity extends Activity {
     }
 
     private void addSettingsSubHeader(LinearLayout panel, String title, String hint) {
-        TextView label = text(title, isCompact() ? 14 : 16, Color.WHITE);
+        TextView label = text(title, isCompact() ? 14 : 16, Color.rgb(231, 239, 247));
         label.setTypeface(Typeface.DEFAULT_BOLD);
         LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        labelLp.setMargins(0, dp(14), 0, 0);
+        labelLp.setMargins(0, dp(16), 0, 0);
         panel.addView(label, labelLp);
 
         if (hint == null || hint.length() == 0) return;
@@ -2343,15 +2513,15 @@ public final class MainActivity extends Activity {
         description.setMaxLines(2);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hintLp.setMargins(0, dp(2), 0, dp(8));
+        hintLp.setMargins(0, dp(3), 0, dp(8));
         panel.addView(description, hintLp);
     }
 
     private LinearLayout statusBox(String title, TextView content, int color) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(14), dp(12), dp(14), dp(12));
-        box.setBackground(settingsInsetBackground());
+        box.setPadding(dp(15), dp(13), dp(15), dp(13));
+        box.setBackground(settingsInsetBackground(color));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(12), 0, 0);
@@ -2375,10 +2545,10 @@ public final class MainActivity extends Activity {
 
     private View settingsDivider() {
         View divider = new View(this);
-        divider.setBackgroundColor(COLOR_SETTINGS_DIVIDER);
+        divider.setBackgroundColor(softColor(COLOR_SETTINGS_DIVIDER, 120));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
-        lp.setMargins(0, dp(8), 0, dp(8));
+        lp.setMargins(0, dp(10), 0, dp(10));
         divider.setLayoutParams(lp);
         return divider;
     }
@@ -4709,10 +4879,10 @@ public final class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_VERTICAL);
         box.setPadding(dp(16), dp(12), dp(16), dp(12));
-        box.setMinimumHeight(isCompact() ? dp(68) : dp(88));
+        box.setMinimumHeight(isCompact() ? dp(74) : dp(94));
         box.setClickable(true);
         box.setFocusable(true);
-        box.setBackground(settingsButtonBackground(selected));
+        box.setBackground(settingsActionBackground(selected, color));
         View.OnClickListener click = v -> {
             rememberScrollPosition();
             action.run();
@@ -4720,6 +4890,11 @@ public final class MainActivity extends Activity {
         box.setOnClickListener(click);
 
         LinearLayout header = row();
+        TextView icon = settingsActionIcon(iconForTitle(title), color, selected);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
+                isCompact() ? dp(30) : dp(34), isCompact() ? dp(30) : dp(34));
+        iconLp.setMargins(0, 0, dp(10), 0);
+        header.addView(icon, iconLp);
         TextView name = text(title, isCompact() ? 16 : 18, Color.WHITE);
         name.setTypeface(Typeface.DEFAULT_BOLD);
         name.setMaxLines(2);
@@ -4735,7 +4910,10 @@ public final class MainActivity extends Activity {
         TextView sub = text(hint, isCompact() ? 12 : 14, COLOR_MUTED);
         sub.setMaxLines(2);
         box.addView(header);
-        box.addView(sub);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subLp.setMargins(isCompact() ? dp(40) : dp(44), dp(4), 0, 0);
+        box.addView(sub, subLp);
         return box;
     }
 
@@ -4756,10 +4934,10 @@ public final class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_VERTICAL);
         box.setPadding(dp(16), dp(12), dp(16), dp(12));
-        box.setMinimumHeight(isCompact() ? dp(68) : dp(88));
+        box.setMinimumHeight(isCompact() ? dp(74) : dp(94));
         box.setClickable(true);
         box.setFocusable(true);
-        box.setBackground(settingsButtonBackground(selected));
+        box.setBackground(settingsActionBackground(selected, COLOR_ACCENT_BLUE));
         View.OnClickListener click = v -> {
             rememberScrollPosition();
             action.run();
@@ -4767,6 +4945,11 @@ public final class MainActivity extends Activity {
         box.setOnClickListener(click);
 
         LinearLayout header = row();
+        TextView icon = settingsActionIcon(iconForTitle(title), COLOR_ACCENT_BLUE, selected);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
+                isCompact() ? dp(30) : dp(34), isCompact() ? dp(30) : dp(34));
+        iconLp.setMargins(0, 0, dp(10), 0);
+        header.addView(icon, iconLp);
         TextView name = text(title, isCompact() ? 16 : 18, Color.WHITE);
         name.setTypeface(Typeface.DEFAULT_BOLD);
         name.setMaxLines(2);
@@ -4783,7 +4966,10 @@ public final class MainActivity extends Activity {
         TextView sub = text(hint, isCompact() ? 12 : 14, COLOR_MUTED);
         sub.setMaxLines(2);
         box.addView(header);
-        box.addView(sub);
+        LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subLp.setMargins(isCompact() ? dp(40) : dp(44), dp(4), 0, 0);
+        box.addView(sub, subLp);
         if (index >= 0 && index < views.length) {
             views[index] = box;
             checks[index] = check;
@@ -4797,7 +4983,7 @@ public final class MainActivity extends Activity {
             TextView check = checks[i];
             if (view == null || check == null) continue;
             boolean selected = i == selectedIndex;
-            view.setBackground(settingsButtonBackground(selected));
+            view.setBackground(settingsActionBackground(selected, COLOR_ACCENT_BLUE));
             check.setVisibility(selected ? View.VISIBLE : View.INVISIBLE);
         }
     }
@@ -4814,12 +5000,12 @@ public final class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.HORIZONTAL);
         panel.setGravity(Gravity.CENTER_VERTICAL);
-        panel.setPadding(dp(16), dp(12), dp(16), dp(12));
-        panel.setMinimumHeight(isCompact() ? dp(64) : dp(78));
-        panel.setBackground(settingsButtonBackground(checked));
+        panel.setPadding(dp(16), dp(13), dp(16), dp(13));
+        panel.setMinimumHeight(isCompact() ? dp(70) : dp(82));
+        panel.setBackground(settingsActionBackground(checked, COLOR_ACCENT));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(0, dp(8), 0, dp(4));
+        lp.setMargins(0, dp(9), 0, dp(5));
         panel.setLayoutParams(lp);
 
         LinearLayout texts = new LinearLayout(this);
@@ -5040,7 +5226,7 @@ public final class MainActivity extends Activity {
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setClickable(true);
         button.setFocusable(true);
-        button.setBackground(glassButton(COLOR_PANEL_SOFT));
+        button.setBackground(settingsActionBackground(false, COLOR_ACCENT_BLUE));
         button.setOnClickListener(v -> {
             rememberScrollPosition();
             action.run();
@@ -5063,7 +5249,7 @@ public final class MainActivity extends Activity {
         input.setImeOptions(EditorInfo.IME_ACTION_DONE);
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
         input.setPadding(dp(12), dp(7), dp(12), dp(7));
-        input.setBackground(glassButton(COLOR_ACCENT_BLUE));
+        input.setBackground(settingsActionBackground(true, COLOR_ACCENT_BLUE));
         input.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 setter.set(clamp(readNumeric(input, value), min, max));
@@ -5090,7 +5276,7 @@ public final class MainActivity extends Activity {
         input.setImeOptions(EditorInfo.IME_ACTION_DONE);
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4)});
         input.setPadding(dp(12), dp(7), dp(12), dp(7));
-        input.setBackground(glassButton(COLOR_ACCENT_BLUE));
+        input.setBackground(settingsActionBackground(true, COLOR_ACCENT_BLUE));
         input.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_DONE) {
                 setter.set(clamp(readPressureKpa(input, valueKpa), minKpa, maxKpa));
@@ -5466,16 +5652,59 @@ public final class MainActivity extends Activity {
     }
 
     private GradientDrawable settingsPanelBackground() {
-        return round(COLOR_SETTINGS_PANEL, dp(8), Color.TRANSPARENT, 0);
+        return settingsPanelBackground(COLOR_ACCENT_BLUE);
+    }
+
+    private GradientDrawable settingsPanelBackground(int tint) {
+        return gradient(COLOR_SETTINGS_PANEL, Color.rgb(20, 28, 38),
+                softColor(tint, 56), dp(1), dp(12));
     }
 
     private GradientDrawable settingsInsetBackground() {
-        return round(COLOR_SETTINGS_PANEL_ALT, dp(8), Color.TRANSPARENT, 0);
+        return settingsInsetBackground(COLOR_ACCENT_BLUE);
+    }
+
+    private GradientDrawable settingsInsetBackground(int tint) {
+        return gradient(COLOR_SETTINGS_PANEL_ALT, Color.rgb(23, 29, 38),
+                softColor(tint, 42), dp(1), dp(10));
     }
 
     private GradientDrawable settingsButtonBackground(boolean selected) {
-        return round(selected ? COLOR_SETTINGS_SELECTED : COLOR_SETTINGS_PANEL_ALT,
-                dp(7), Color.TRANSPARENT, 0);
+        return settingsActionBackground(selected, COLOR_ACCENT_BLUE);
+    }
+
+    private GradientDrawable settingsActionBackground(boolean selected, int tint) {
+        int start = selected ? softColor(tint, 48) : COLOR_SETTINGS_PANEL_ALT;
+        int end = selected ? Color.rgb(22, 30, 39) : Color.rgb(21, 27, 36);
+        int stroke = selected ? softColor(tint, 150) : softColor(COLOR_SETTINGS_STROKE, 150);
+        return gradient(start, end, stroke, dp(1), dp(10));
+    }
+
+    private GradientDrawable settingsNavBackground(boolean selected) {
+        int tint = settingsTabAccent();
+        int start = selected ? softColor(tint, 92) : Color.rgb(13, 18, 25);
+        int end = selected ? softColor(tint, 42) : Color.rgb(11, 15, 21);
+        int stroke = selected ? softColor(tint, 150) : softColor(COLOR_SETTINGS_STROKE, 90);
+        return gradient(start, end, stroke, dp(1), dp(10));
+    }
+
+    private GradientDrawable settingsTopBackground() {
+        return gradient(COLOR_SETTINGS_TOP, Color.rgb(10, 14, 20),
+                softColor(COLOR_SETTINGS_STROKE, 70), dp(1), 0);
+    }
+
+    private GradientDrawable settingsHeroBackground(int tint) {
+        return gradient(softColor(tint, 54), Color.rgb(15, 22, 31),
+                softColor(tint, 110), dp(1), dp(13));
+    }
+
+    private TextView settingsActionIcon(String value, int color, boolean selected) {
+        TextView badge = text(value, isCompact() ? 15 : 17, selected ? Color.WHITE : color);
+        badge.setGravity(Gravity.CENTER);
+        badge.setTypeface(Typeface.DEFAULT_BOLD);
+        badge.setBackground(round(softColor(color, selected ? 96 : 34), dp(9),
+                softColor(color, selected ? 150 : 70), dp(1)));
+        return badge;
     }
 
     private int softColor(int color, int alpha) {
