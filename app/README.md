@@ -25,17 +25,16 @@ Main packages:
 - `kia.app.navigation`: Yandex/2GIS capture, overlay, cluster output.
 - `kia.app.tpms`: TPMS polling, dashboard, alert logic.
 - `kia.app.rcta`: RCTA protocol state, overlay, preview, sound.
-- `kia.app.update`: KIA APK, Yandex mod and firmware update checks.
+- `kia.app.update`: KIA APK and Yandex mod update checks.
 - `kia.app.diagnostics`: gs_usb CAN logger flow.
 - `kia.app.entry`: Activity, foreground service, boot and USB receivers.
 
-## Bundled firmware
+## Adapter
 
-The APK intentionally bundles only this firmware asset:
+The public setup is for a USB CAN adapter modified and flashed by the Drive2 author:
 
-```text
-app/src/main/assets/firmware/gs_updated.bin
-```
+- Author profile: <https://www.drive2.ru/users/76508/>
+- Adapter modification notes: <https://www.drive2.ru/l/717368666034802531/>
 
 ## Build
 

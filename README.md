@@ -1,6 +1,6 @@
 # KIA CANBUS
 
-Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CAN-диагностика и обновления APK без отдельного закрытого сервера.
+Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CAN-диагностика и обновления APK без отдельного закрытого сервера.
 
 [![Скачать KIA 22.38 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2022.38%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/raw/v22.38/updates/kia_348.apk)
 
@@ -18,12 +18,13 @@
 
 ## Что работает
 
+- Поддерживается только адаптер после переделки и прошивки от автора Drive2: [профиль автора](https://www.drive2.ru/users/76508/), [информация о переделке адаптера](https://www.drive2.ru/l/717368666034802531/).
 - TPMS-экран под Kia: давление, температура, предупреждения, ускоренный опрос при аварийных значениях.
 - Медиа и звонки: TEYES/CC4, Android-плееры, BT/USB/FM/AM, подписи источника и текста на приборку.
 - Навигация: Yandex Core Bridge, 2GIS fallback, режимы `обычный`, `TBT`, `стрелка к финишу`, lane/gray-road/micro-maneuver логика.
 - RCTA: предупреждение слева/справа/с двух сторон, overlay поверх камеры, звук, настройка стиля.
-- CAN/USB: обмен с адаптером, TPMS poll, температура панели, gs_usb CAN logging, прошивка `gs_updated.bin`.
-- Обновления: KIA APK, Yandex mod APK и firmware-слот через `updates/latest.json`.
+- CAN/USB: обмен с переделанным адаптером, TPMS poll, температура панели, gs_usb CAN logging.
+- Обновления: KIA APK и Yandex mod APK через `updates/latest.json`.
 
 ## Скриншоты
 
@@ -65,7 +66,7 @@ adb install -r updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk
 1. Установить `kia_348.apk`.
 2. Выдать runtime permissions: уведомления, геолокация, Bluetooth, audio/media.
 3. Включить специальные права: поверх окон, изменение системных настроек, доступ к уведомлениям, игнор оптимизации батареи.
-4. Подключить USB CAN-адаптер и разрешить USB-доступ для `kia.app`.
+4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
 5. Установить Yandex Navigator mod, если нужна интеграция через Kia bridge.
 
 ## Сборка
@@ -113,6 +114,7 @@ adb shell dumpsys package kia.app | grep -E 'versionCode|versionName|lastUpdateT
 ## Границы
 
 - APK Yandex Navigator mod лежит как готовый installable artifact; права на Yandex/брендовые компоненты не переоформляются этим репозиторием.
+- Рабочий USB CAN-адаптер не является обычным заводским адаптером: нужна переделка и прошивка от [автора Drive2](https://www.drive2.ru/users/76508/), описание здесь: [drive2.ru/l/717368666034802531](https://www.drive2.ru/l/717368666034802531/).
 - Публичный debug-keystore нужен для воспроизводимости обновлений, не используйте его как приватный production key.
 - `updates/latest.json` указывает на текущий публичный `main`; ссылки в этом README закреплены на tag `v22.38`.
 
