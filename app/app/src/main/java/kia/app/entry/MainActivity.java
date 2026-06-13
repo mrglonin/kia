@@ -210,7 +210,6 @@ public final class MainActivity extends Activity {
     private long renderedTpmsAt = -1L;
     private boolean renderedTpmsAlerts;
     private String renderedTpmsWarningKey = "";
-    private String dismissedInlineTpmsWarningKey = "";
     private int mainScrollY;
     private int settingsScrollY;
 
@@ -1093,12 +1092,7 @@ public final class MainActivity extends Activity {
         stage.addView(dashboard, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        String key = TpmsAlertController.warningKey(this, state);
-        boolean showBanner = key.length() > 0 && !key.equals(dismissedInlineTpmsWarningKey);
-        if (showBanner) {
-            stage.addView(tpmsKia130WarningBanner(state, key), new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(75), Gravity.TOP));
-        } else if (!tpmsWidgetLocksSettings()) {
+        if (!tpmsWidgetLocksSettings()) {
             int gearSize = isCompact() ? dp(36) : dp(48);
             FrameLayout.LayoutParams gearLp = new FrameLayout.LayoutParams(gearSize, gearSize,
                     Gravity.RIGHT | Gravity.TOP);
@@ -1106,50 +1100,6 @@ public final class MainActivity extends Activity {
             stage.addView(tpmsKia130GearButton(), gearLp);
         }
         return stage;
-    }
-
-    private View tpmsKia130WarningBanner(TpmsState state, String key) {
-        FrameLayout banner = new FrameLayout(this);
-        banner.setBackground(gradient(Color.rgb(255, 102, 116), Color.rgb(255, 36, 93),
-                Color.TRANSPARENT, 0, 0));
-        banner.setClickable(true);
-
-        ImageView sign = new ImageView(this);
-        sign.setImageResource(R.drawable.tpms_overlay_logo);
-        sign.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        FrameLayout.LayoutParams signLp = new FrameLayout.LayoutParams(dp(62), dp(62),
-                Gravity.LEFT | Gravity.CENTER_VERTICAL);
-        signLp.leftMargin = dp(32);
-        banner.addView(sign, signLp);
-
-        TextView title = text(tpmsKia130WarningTitle(state), 27, Color.WHITE);
-        title.setGravity(Gravity.CENTER);
-        title.setSingleLine(true);
-        title.setTypeface(Typeface.DEFAULT);
-        title.setShadowLayer(dp(2), dp(1), dp(1), Color.argb(170, 0, 0, 0));
-        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-                Gravity.CENTER);
-        titleLp.leftMargin = dp(126);
-        titleLp.rightMargin = dp(126);
-        banner.addView(title, titleLp);
-
-        ImageView close = new ImageView(this);
-        close.setImageResource(R.drawable.tpms_warning_close);
-        close.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        close.setClickable(true);
-        close.setFocusable(true);
-        close.setOnClickListener(v -> {
-            dismissedInlineTpmsWarningKey = key;
-            TpmsWarningOverlayController.get(this).dismissCurrent();
-            renderTab();
-            refresh();
-        });
-        FrameLayout.LayoutParams closeLp = new FrameLayout.LayoutParams(dp(43), dp(43),
-                Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        closeLp.rightMargin = dp(24);
-        banner.addView(close, closeLp);
-        return banner;
     }
 
     private View tpmsKia130GearButton() {
@@ -1174,38 +1124,6 @@ public final class MainActivity extends Activity {
     private GradientDrawable tpmsGearBackground() {
         return gradient(Color.argb(132, 18, 23, 30), Color.argb(98, 48, 60, 74),
                 Color.argb(132, 244, 241, 234), dp(1), dp(40));
-    }
-
-    private String tpmsKia130WarningTitle(TpmsState state) {
-        int wheel = firstWarningWheel(state);
-        int warning = wheel >= 0 ? TpmsAlertController.warningState(this, state, wheel)
-                : TpmsAlertController.WARNING_NONE;
-        return tpmsKia130WheelLabel(wheel) + ": " + TpmsAlertController.warningText(warning).toLowerCase(Locale.ROOT);
-    }
-
-    private int firstWarningWheel(TpmsState state) {
-        if (state == null) return -1;
-        for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
-            if (TpmsAlertController.warningState(this, state, wheel) != TpmsAlertController.WARNING_NONE) {
-                return wheel;
-            }
-        }
-        return -1;
-    }
-
-    private String tpmsKia130WheelLabel(int wheel) {
-        switch (wheel) {
-            case TpmsState.WHEEL_FL:
-                return "Переднее левое";
-            case TpmsState.WHEEL_FR:
-                return "Переднее правое";
-            case TpmsState.WHEEL_RL:
-                return "Заднее левое";
-            case TpmsState.WHEEL_RR:
-                return "Заднее правое";
-            default:
-                return "TPMS";
-        }
     }
 
     private View tpmsLegacyKiaMain(TpmsState state) {

@@ -35,7 +35,6 @@ public final class TpmsWarningOverlayController {
     private String currentKey = "";
     private String dismissedKey = "";
     private boolean permissionLogged;
-    private boolean activityVisible;
 
     private TpmsWarningOverlayController(Context context) {
         this.app = context.getApplicationContext();
@@ -63,10 +62,7 @@ public final class TpmsWarningOverlayController {
     }
 
     public void setActivityVisible(boolean visible) {
-        handler.post(() -> {
-            activityVisible = visible;
-            if (visible) hide();
-        });
+        // TPMS warnings must stay in the real overlay layer, even while Kia is open.
     }
 
     private synchronized void applyOnMain(String key, String details) {
@@ -86,9 +82,7 @@ public final class TpmsWarningOverlayController {
             stopSoundOnMain();
             return;
         }
-        if (activityVisible) {
-            hide();
-        } else if (canDrawOverlays(app)) {
+        if (canDrawOverlays(app)) {
             show(details);
         } else if (!permissionLogged) {
             permissionLogged = true;

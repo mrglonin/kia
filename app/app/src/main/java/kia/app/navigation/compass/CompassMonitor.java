@@ -24,6 +24,7 @@ import kia.app.core.model.NavigationState;
 import kia.app.core.settings.AppSettings;
 import kia.app.navigation.cluster.NavigationClusterSender;
 import kia.app.navigation.domain.NavigationFeature;
+import kia.app.protocol.adapter.AdapterGateway;
 
 public final class CompassMonitor implements LocationListener, SensorEventListener {
     private static final long MIN_TIME_MS = 500L;
@@ -31,7 +32,6 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private static final long ANIMATION_STEP_MS = 120L;
     private static final long WATCHDOG_MS = 1000L;
     private static final long REREGISTER_MS = 15000L;
-    private static final long KEEPALIVE_MS = 1000L;
     private static final long STARTUP_NAV_GRACE_MS = 3000L;
     private static final long STALE_LOCATION_MS = 2500L;
     private static final long SENSOR_STALE_MS = 1500L;
@@ -55,8 +55,8 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private long lastSensorHeadingAt;
     private long lastSensorPublishAt;
     private long lastRegisterAt;
-    private long lastSentAt;
     private long startedAt;
+    private int lastTransmittedStep = -1;
     private float smoothedSensorHeading = Float.NaN;
     private float lastPublishedSensorHeading = Float.NaN;
     private int sensorAccuracy = SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM;
@@ -64,6 +64,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private boolean registered;
     private boolean sensorRegistered;
     private boolean animationRunning;
+    private boolean lastUsbReady;
     private Location lastLocation;
 
     private final Runnable animate = new Runnable() {
@@ -104,9 +105,11 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
             }
             Location last = bestLastKnownLocation();
             if (last != null) onLocationChanged(last);
-            if (displayedStep >= 0 && now - lastSentAt >= KEEPALIVE_MS && canSendCompass()) {
+            boolean usbReady = AdapterGateway.get(app).usbReady();
+            if (usbReady && !lastUsbReady && displayedStep >= 0 && canSendCompass()) {
                 sendStep(displayedStep);
             }
+            lastUsbReady = usbReady;
             handler.postDelayed(this, WATCHDOG_MS);
         }
     };
@@ -133,6 +136,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         }
         running = true;
         startedAt = System.currentTimeMillis();
+        lastUsbReady = AdapterGateway.get(app).usbReady();
         if (locationNeeded()) acquireWakeLock();
         registerLocation(true);
         updateHeadingSensorRegistration();
@@ -149,9 +153,10 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         targetStep = -1;
         lastLocationAt = 0L;
         lastAnyLocationAt = 0L;
-        lastSentAt = 0L;
         startedAt = 0L;
+        lastTransmittedStep = -1;
         animationRunning = false;
+        lastUsbReady = false;
         lastSensorHeadingAt = 0L;
         lastSensorPublishAt = 0L;
         smoothedSensorHeading = Float.NaN;
@@ -408,10 +413,17 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         int step = Math.round(normalize(heading) / 30f) * 3;
         if (step == 36) step = 0;
         restoreDisplayedStepFromStore(step);
-        if (step == targetStep && displayedStep >= 0) return;
+        if (step == targetStep && displayedStep >= 0) {
+            sendCurrentStepIfNeeded();
+            return;
+        }
         targetStep = step;
         if (displayedStep < 0) {
             sendStep(step);
+            return;
+        }
+        if (displayedStep == targetStep) {
+            sendCurrentStepIfNeeded();
             return;
         }
         if (!animationRunning) {
@@ -441,7 +453,6 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         int stored = lastCompassStepFromStore();
         if (stored < 0) return;
         displayedStep = stored;
-        lastSentAt = System.currentTimeMillis();
         AppLog.line(app, "Compass: restored step=" + displayedStep
                 + " target=" + normalizeStep(target));
     }
@@ -483,8 +494,13 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private void sendStep(int step) {
         if (!canSendCompass()) return;
         displayedStep = normalizeStep(step);
-        lastSentAt = System.currentTimeMillis();
+        lastTransmittedStep = displayedStep;
         sender.sendCompassStep(displayedStep);
+    }
+
+    private void sendCurrentStepIfNeeded() {
+        if (displayedStep < 0 || normalizeStep(displayedStep) == lastTransmittedStep) return;
+        sendStep(displayedStep);
     }
 
     private boolean canSendCompass() {
