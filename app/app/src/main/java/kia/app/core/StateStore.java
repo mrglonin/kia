@@ -7,7 +7,6 @@ import android.os.Looper;
 import kia.app.core.model.AdapterState;
 import kia.app.core.model.AmpState;
 import kia.app.core.model.CallState;
-import kia.app.core.model.DiagnosticState;
 import kia.app.core.model.MediaState;
 import kia.app.core.model.NavigationState;
 import kia.app.core.model.RctaState;
@@ -25,7 +24,6 @@ public final class StateStore {
     private static NavigationState navigation = NavigationState.empty();
     private static CallState call = CallState.empty();
     private static AmpState amp = AmpState.empty();
-    private static DiagnosticState diagnostics = DiagnosticState.empty();
     private static UpdateState updates = UpdateState.empty();
     private static VehicleState vehicle = VehicleState.empty();
     private static TpmsState tpms = TpmsState.empty();
@@ -54,10 +52,6 @@ public final class StateStore {
 
     public static synchronized AmpState amp() {
         return amp;
-    }
-
-    public static synchronized DiagnosticState diagnostics() {
-        return diagnostics;
     }
 
     public static synchronized UpdateState updates() {
@@ -273,11 +267,6 @@ public final class StateStore {
 
     public static synchronized void setAmp(Context context, AmpState value) {
         amp = value == null ? AmpState.empty() : value;
-        changed(context);
-    }
-
-    public static synchronized void setDiagnostics(Context context, DiagnosticState value) {
-        diagnostics = value == null ? DiagnosticState.empty() : value;
         changed(context);
     }
 

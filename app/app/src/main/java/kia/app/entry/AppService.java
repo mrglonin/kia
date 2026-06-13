@@ -20,7 +20,6 @@ import kia.app.R;
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.settings.AppSettings;
-import kia.app.diagnostics.GsUsbCanLogger;
 import kia.app.diagnostics.HealthMonitor;
 import kia.app.media.capture.BluetoothCallReceiver;
 import kia.app.media.capture.MediaCaptureManager;
@@ -85,7 +84,7 @@ public final class AppService extends Service {
         syncMediaCapture();
 
         healthMonitor = new HealthMonitor(this);
-        if (AppSettings.diagnosticsEnabled(this)) healthMonitor.start();
+        healthMonitor.start();
 
         compassMonitor = new CompassMonitor(this);
         if (AppSettings.compassEnabled(this)) {
@@ -104,7 +103,6 @@ public final class AppService extends Service {
         mediaOverlay.start();
         rctaOverlay = RctaOverlayController.get(this);
         rctaOverlay.start();
-        if (AppSettings.debugCan(this)) GsUsbCanLogger.get(this).setRecording(true);
     }
 
     @Override
@@ -115,7 +113,7 @@ public final class AppService extends Service {
         gateway.start();
         TpmsController.get(this).startPolling();
         if (healthMonitor == null) healthMonitor = new HealthMonitor(this);
-        if (AppSettings.diagnosticsEnabled(this)) healthMonitor.start();
+        healthMonitor.start();
         if (mediaCapture == null) mediaCapture = new MediaCaptureManager(this);
         syncMediaCapture();
         if (compassMonitor == null) compassMonitor = new CompassMonitor(this);
@@ -138,7 +136,6 @@ public final class AppService extends Service {
         mediaOverlay.start();
         if (rctaOverlay == null) rctaOverlay = RctaOverlayController.get(this);
         rctaOverlay.start();
-        if (AppSettings.debugCan(this)) GsUsbCanLogger.get(this).setRecording(true);
         return START_STICKY;
     }
 
@@ -162,7 +159,6 @@ public final class AppService extends Service {
         unregisterBluetoothCallReceiver();
         releaseServiceWakeLock();
         TpmsController.get(this).stopPolling();
-        GsUsbCanLogger.get(this).setRecording(false);
         if (gateway != null) gateway.stop();
         AppLog.line(this, "Service: stopped");
         super.onDestroy();

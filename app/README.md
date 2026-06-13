@@ -3,9 +3,9 @@
 Android source for `kia.app`.
 
 - `applicationId`: `kia.app`
-- `versionName`: `22.40`
-- `versionCode`: `350`
-- release APK name: `kia_350.apk`
+- `versionName`: `22.41`
+- `versionCode`: `351`
+- release APK name: `kia_351.apk`
 - min SDK: `29`
 - target SDK: `35`
 - compile SDK: `35`
@@ -26,7 +26,7 @@ Main packages:
 - `kia.app.tpms`: TPMS polling, dashboard, alert logic.
 - `kia.app.rcta`: RCTA protocol state, overlay, preview, sound.
 - `kia.app.update`: KIA APK and Yandex mod update checks.
-- `kia.app.diagnostics`: gs_usb CAN logger flow.
+- `kia.app.diagnostics`: adapter health polling.
 - `kia.app.entry`: Activity, foreground service, boot and USB receivers.
 
 ## Adapter

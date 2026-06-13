@@ -37,10 +37,7 @@ public final class AppSettings {
     private static final String KEY_NAV_DEBUG_VISIBLE = "nav_debug_visible";
     private static final String KEY_RUNTIME_PERMISSIONS_REQUESTED = "runtime_permissions_requested";
     private static final String KEY_AMP = "amp_enabled";
-    private static final String KEY_DIAGNOSTICS = "diagnostics_enabled";
-    private static final String KEY_DEBUG_CAN = "debug_can";
     private static final String KEY_CANBUS_DEBUG_VISIBLE = "canbus_debug_visible";
-    private static final String KEY_LOGGER_BUS_MODE = "logger_bus_mode";
     private static final String KEY_SAS_RATIO = "sas_ratio";
     private static final String KEY_TPMS_ALERTS = "tpms_alerts";
     private static final String KEY_TPMS_SOUND_ALERTS = "tpms_sound_alerts";
@@ -63,7 +60,6 @@ public final class AppSettings {
     private static final String KEY_USB_PERMISSION_REQUEST_AT = "usb_permission_request_at";
     private static final String KEY_BATTERY_OPTIMIZATION_REQUESTED = "battery_optimization_requested";
     private static final String KEY_MEDIA_TAB_VISIBLE = "media_tab_visible";
-    private static final String KEY_LOG_TAB_VISIBLE = "log_tab_visible";
     public static final int OTHER_SOURCE_ANDROID = 0;
     public static final int OTHER_SOURCE_USB = 1;
     public static final int OTHER_SOURCE_BLUETOOTH = 2;
@@ -92,9 +88,6 @@ public final class AppSettings {
     public static final int FIRMWARE_SOURCE_BUNDLED_03 = 1;
     public static final int FIRMWARE_SOURCE_BUNDLED_02 = 2;
     public static final int FIRMWARE_SOURCE_BUNDLED_04 = 3;
-    public static final int LOGGER_BUS_C = 0;
-    public static final int LOGGER_BUS_M = 1;
-    public static final int LOGGER_BUS_BOTH = 2;
     public static final int RCTA_STYLE_TYPE_1 = 1;
     public static final int RCTA_STYLE_TYPE_2 = 2;
     public static final int RCTA_COLOR_AMBER = 0xffffc43b;
@@ -155,10 +148,7 @@ public final class AppSettings {
                     .putInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS, DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS)
                     .putBoolean(KEY_NAV_DEBUG_VISIBLE, false)
                     .putBoolean(KEY_AMP, false)
-                    .putBoolean(KEY_DIAGNOSTICS, true)
-                    .putBoolean(KEY_DEBUG_CAN, false)
                     .putBoolean(KEY_CANBUS_DEBUG_VISIBLE, false)
-                    .putInt(KEY_LOGGER_BUS_MODE, LOGGER_BUS_M)
                     .putInt(KEY_SAS_RATIO, DEFAULT_SAS_RATIO)
                     .putBoolean(KEY_TPMS_ALERTS, true)
                     .putBoolean(KEY_TPMS_SOUND_ALERTS, true)
@@ -207,17 +197,8 @@ public final class AppSettings {
             if (schema < 7 || !prefs.contains(KEY_FIRMWARE_SOURCE)) {
                 edit.putInt(KEY_FIRMWARE_SOURCE, FIRMWARE_SOURCE_LATEST);
             }
-            if (schema < 8) {
-                edit.putBoolean(KEY_DEBUG_CAN, false);
-            }
-            if (schema < 9 || !prefs.contains(KEY_LOGGER_BUS_MODE)) {
-                edit.putInt(KEY_LOGGER_BUS_MODE, LOGGER_BUS_M);
-            }
             if (schema < 10) {
                 edit.putBoolean(KEY_COMPASS_FORCE, true);
-            }
-            if (schema < 11) {
-                edit.putBoolean(KEY_LOG_TAB_VISIBLE, false);
             }
             if (schema < 23 || !prefs.contains(KEY_MEDIA_TAB_VISIBLE)) {
                 edit.putBoolean(KEY_MEDIA_TAB_VISIBLE, true);
@@ -641,50 +622,12 @@ public final class AppSettings {
         prefs(context).edit().putBoolean(KEY_AMP, value).apply();
     }
 
-    public static boolean diagnosticsEnabled(Context context) {
-        return prefs(context).getBoolean(KEY_DIAGNOSTICS, true);
-    }
-
-    public static void setDiagnosticsEnabled(Context context, boolean value) {
-        prefs(context).edit().putBoolean(KEY_DIAGNOSTICS, value).apply();
-    }
-
-    public static boolean debugCan(Context context) {
-        return prefs(context).getBoolean(KEY_DEBUG_CAN, false);
-    }
-
-    public static void setDebugCan(Context context, boolean value) {
-        prefs(context).edit().putBoolean(KEY_DEBUG_CAN, value).apply();
-    }
-
     public static boolean canbusDebugVisible(Context context) {
         return prefs(context).getBoolean(KEY_CANBUS_DEBUG_VISIBLE, false);
     }
 
     public static void setCanbusDebugVisible(Context context, boolean value) {
         prefs(context).edit().putBoolean(KEY_CANBUS_DEBUG_VISIBLE, value).apply();
-    }
-
-    public static int loggerBusMode(Context context) {
-        return clamp(prefs(context).getInt(KEY_LOGGER_BUS_MODE, LOGGER_BUS_M),
-                LOGGER_BUS_C, LOGGER_BUS_BOTH);
-    }
-
-    public static void setLoggerBusMode(Context context, int value) {
-        prefs(context).edit().putInt(KEY_LOGGER_BUS_MODE,
-                clamp(value, LOGGER_BUS_C, LOGGER_BUS_BOTH)).apply();
-    }
-
-    public static String loggerBusLabel(Context context) {
-        switch (loggerBusMode(context)) {
-            case LOGGER_BUS_C:
-                return "C-CAN";
-            case LOGGER_BUS_BOTH:
-                return "C-CAN + M-CAN";
-            case LOGGER_BUS_M:
-            default:
-                return "M-CAN";
-        }
     }
 
     public static int sasRatio(Context context) {
@@ -980,14 +923,6 @@ public final class AppSettings {
 
     public static void setMediaTabVisible(Context context, boolean value) {
         prefs(context).edit().putBoolean(KEY_MEDIA_TAB_VISIBLE, value).apply();
-    }
-
-    public static boolean logTabVisible(Context context) {
-        return prefs(context).getBoolean(KEY_LOG_TAB_VISIBLE, false);
-    }
-
-    public static void setLogTabVisible(Context context, boolean value) {
-        prefs(context).edit().putBoolean(KEY_LOG_TAB_VISIBLE, value).apply();
     }
 
     private static int clamp(int value, int min, int max) {

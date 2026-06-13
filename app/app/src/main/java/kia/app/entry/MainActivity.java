@@ -72,8 +72,6 @@ import kia.app.core.model.TpmsState;
 import kia.app.core.model.UpdateState;
 import kia.app.core.model.VehicleState;
 import kia.app.core.settings.AppSettings;
-import kia.app.diagnostics.CanLogger;
-import kia.app.diagnostics.GsUsbCanLogger;
 import kia.app.media.capture.MediaNotificationListener;
 import kia.app.media.domain.CallFeature;
 import kia.app.media.domain.MediaFeature;
@@ -124,7 +122,6 @@ public final class MainActivity extends Activity {
     private static final int TAB_NAVIGATION = 2;
     private static final int TAB_CANBUS = 3;
     private static final int TAB_SETTINGS = 4;
-    private static final int TAB_LOG = 5;
 
     private static final int SETTINGS_TPMS = 0;
     private static final int SETTINGS_MEDIA = 1;
@@ -132,7 +129,6 @@ public final class MainActivity extends Activity {
     private static final int SETTINGS_CANBUS = 3;
     private static final int SETTINGS_RCTA = 4;
     private static final int SETTINGS_GENERAL = 5;
-    private static final int SETTINGS_LOG = 6;
     private static final int REQUEST_FIRMWARE_FILE = 42;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -161,7 +157,6 @@ public final class MainActivity extends Activity {
     private CompoundButton navTbtToggle;
     private CompoundButton overspeedToggle;
     private CompoundButton autoStartToggle;
-    private CompoundButton logTabToggle;
     private TextView diagnosticsStatus;
     private TextView canbusDebugStatus;
     private CompoundButton canbusDebugToggle;
@@ -170,8 +165,6 @@ public final class MainActivity extends Activity {
     private TextView ampSummary;
     private CompoundButton tpmsAlertsToggle;
     private CompoundButton tpmsSoundToggle;
-    private TextView loggerStatus;
-    private CompoundButton rawCanToggle;
     private TextView updatesStatus;
     private TextView firmwareStatus;
     private FrameLayout firmwareActionButton;
@@ -807,7 +800,7 @@ public final class MainActivity extends Activity {
     }
 
     private View tabBar() {
-        tabButtons = new TextView[6];
+        tabButtons = new TextView[5];
         LinearLayout row = row();
         row.setPadding(dp(5), dp(5), dp(5), dp(5));
         row.setBackground(glassPanel(COLOR_ACCENT_BLUE));
@@ -815,7 +808,6 @@ public final class MainActivity extends Activity {
         addTab(row, TAB_NAVIGATION, "Нави");
         addTab(row, TAB_CANBUS, "CAN");
         addTab(row, TAB_SETTINGS, "Общее");
-        if (AppSettings.logTabVisible(this)) addTab(row, TAB_LOG, "Диаг.");
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 0, 0, dp(14));
@@ -932,7 +924,6 @@ public final class MainActivity extends Activity {
         if (screenFrame == null) return;
         rememberScrollPosition();
         if (selectedTab == TAB_MEDIA && !AppSettings.mediaTabVisible(this)) selectedTab = TAB_TPMS;
-        if (selectedTab == TAB_LOG && !AppSettings.logTabVisible(this)) selectedTab = TAB_SETTINGS;
         clearTabViews();
         prepareContentHost(!settingsMode && selectedTab == TAB_TPMS);
         if (settingsMode) {
@@ -957,9 +948,6 @@ public final class MainActivity extends Activity {
                 break;
             case TAB_CANBUS:
                 renderCanbusTab();
-                break;
-            case TAB_LOG:
-                renderLogTab();
                 break;
             case TAB_SETTINGS:
                 renderSettingsTab();
@@ -1028,15 +1016,12 @@ public final class MainActivity extends Activity {
         tpmsAlertsToggle = null;
         tpmsSoundToggle = null;
         autoStartToggle = null;
-        logTabToggle = null;
         diagnosticsStatus = null;
         canbusDebugStatus = null;
         canbusDebugToggle = null;
         ampEnabledToggle = null;
         ampVisualizer = null;
         ampSummary = null;
-        loggerStatus = null;
-        rawCanToggle = null;
         updatesStatus = null;
         firmwareStatus = null;
         firmwareActionButton = null;
@@ -1901,9 +1886,6 @@ public final class MainActivity extends Activity {
         row.addView(settingsMenuItem(SETTINGS_CANBUS, "Canbus"), settingsHeaderItemLayout(false));
         row.addView(settingsMenuItem(SETTINGS_RCTA, "RCTA"), settingsHeaderItemLayout(false));
         row.addView(settingsMenuItem(SETTINGS_GENERAL, "Общее"), settingsHeaderItemLayout(false));
-        if (AppSettings.logTabVisible(this)) {
-            row.addView(settingsMenuItem(SETTINGS_LOG, "Диагностика"), settingsHeaderItemLayout(false));
-        }
 
         TextView close = text("×", isCompact() ? 30 : 34, Color.WHITE);
         close.setGravity(Gravity.CENTER);
@@ -1959,9 +1941,6 @@ public final class MainActivity extends Activity {
             case SETTINGS_GENERAL:
                 renderGeneralSettingsTab(root);
                 break;
-            case SETTINGS_LOG:
-                renderLogTab(root);
-                break;
             case SETTINGS_TPMS:
             default:
                 renderTpmsSettingsTab(root);
@@ -1981,8 +1960,6 @@ public final class MainActivity extends Activity {
                 return "RCTA";
             case SETTINGS_GENERAL:
                 return "Общее";
-            case SETTINGS_LOG:
-                return "Диагностика CAN";
             case SETTINGS_TPMS:
             default:
                 return "TPMS";
@@ -3016,32 +2993,6 @@ public final class MainActivity extends Activity {
         return panel;
     }
 
-    private void renderLogTab() {
-        renderLogTab(tabContent);
-    }
-
-    private void renderLogTab(LinearLayout root) {
-        loggerStatus = text("", 15, Color.rgb(235, 241, 246));
-        root.addView(infoPanel("Состояние диагностики", loggerStatus));
-        rawCanToggle = addSettingSwitch(root, "Запись CAN",
-                "включает сбор кадров через gs_usb", AppSettings.debugCan(this), this::toggleRaw);
-        addSection(root, "Шина CAN", "C-CAN это ch1 500k, M-CAN это ch0 100k.",
-                action("C-CAN", "channel 1, 500k", loggerBusColor(AppSettings.LOGGER_BUS_C),
-                        () -> setLoggerBusMode(AppSettings.LOGGER_BUS_C)),
-                action("M-CAN", "channel 0, 100k", loggerBusColor(AppSettings.LOGGER_BUS_M),
-                        () -> setLoggerBusMode(AppSettings.LOGGER_BUS_M)),
-                action("Обе", "M ch0 100k + C ch1 500k", loggerBusColor(AppSettings.LOGGER_BUS_BOTH),
-                        () -> setLoggerBusMode(AppSettings.LOGGER_BUS_BOTH)));
-        addSection(root, "Прошивка gs_usb", loggerWarningText(),
-                action("Прошить gs_usb", "gs_updated.bin, режим записи CAN",
-                        Color.rgb(145, 54, 54), this::confirmFlashLoggerFirmware));
-        addSection(root, "Файл записи", "Сохранение текущего буфера в Downloads.",
-                action("Сохранить .log.gz", "записать текущий буфер", Color.rgb(76, 94, 119),
-                        this::saveCanLog),
-                action("Очистить", "сбросить текущий буфер", Color.rgb(74, 86, 98),
-                        this::clearCanLog));
-    }
-
     private void renderSettingsTab() {
         renderGeneralSettingsTab(tabContent);
     }
@@ -3058,7 +3009,6 @@ public final class MainActivity extends Activity {
         addPermissionSection(root);
         root.addView(generalUpdatesPanel());
         root.addView(mediaVisibilityPanel());
-        root.addView(logVisibilityPanel());
         root.addView(generalVersionFooter());
     }
 
@@ -3371,9 +3321,6 @@ public final class MainActivity extends Activity {
         if (canbusDebugStatus != null) {
             canbusDebugStatus.setText(canbusDebugText());
         }
-        if (loggerStatus != null) {
-            loggerStatus.setText(loggerText());
-        }
         if (updatesStatus != null) {
             updatesStatus.setText(updatesText());
         }
@@ -3403,8 +3350,6 @@ public final class MainActivity extends Activity {
         updateTpmsAlertsToggle();
         updateTpmsSoundToggle();
         updateAutoStartToggle();
-        updateLogTabToggle();
-        updateRawCanToggle();
         updateTpmsInputs();
         updateAmpInputs();
         updateFirmwareActionButton();
@@ -3477,11 +3422,7 @@ public final class MainActivity extends Activity {
                 + " | FW: " + emptyDash(StateStore.adapter().firmware)
                 + " | RX: " + timeText(StateStore.adapter().lastFrameAt)
                 + " | health: " + StateStore.adapter().health
-                + "\n" + StateStore.vehicle().summary()
-                + "\nЗапись CAN: " + yesNo(StateStore.diagnostics().rawCanEnabled)
-                + " | кадров: " + StateStore.diagnostics().capturedFrames
-                + "\nПоследний кадр: " + emptyDash(StateStore.diagnostics().lastFrame)
-                + "\nФайл: " + emptyDash(StateStore.diagnostics().lastSaved);
+                + "\n" + StateStore.vehicle().summary();
     }
 
     private String compassStatusText() {
@@ -3867,75 +3808,8 @@ public final class MainActivity extends Activity {
         return new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date(value));
     }
 
-    private String loggerWarningText() {
-        return "Переводит адаптер в режим gs_usb для записи CAN. Для возврата к обычной прошивке отключи адаптер, подключи его с зажатой кнопкой и прошей штатный BIN в разделе Общие.";
-    }
-
-    private String loggerText() {
-        return "Прошивка: " + displayStatus(StateStore.updates().firmwareStatus)
-                + "\nUSB gs_usb: " + GsUsbCanLogger.get(this).statusText()
-                + "\nШина: " + AppSettings.loggerBusLabel(this)
-                + "\nЗапись: " + StateStore.diagnostics().rawCanEnabled
-                + " | кадров: " + StateStore.diagnostics().capturedFrames
-                + "\nПоследний кадр: " + emptyDash(StateStore.diagnostics().lastFrame)
-                + "\nФайл: " + emptyDash(StateStore.diagnostics().lastSaved);
-    }
-
     private static String emptyDash(String value) {
         return value == null || value.length() == 0 ? "-" : value;
-    }
-
-    private void confirmFlashLoggerFirmware() {
-        new AlertDialog.Builder(this)
-                .setTitle("Прошить gs_usb?")
-                .setMessage(loggerWarningText())
-                .setPositiveButton("Прошить", (dialog, which) -> flashLoggerFirmware())
-                .setNegativeButton("Отмена", null)
-                .show();
-    }
-
-    private void flashLoggerFirmware() {
-        AppLog.line(this, "CAN diagnostics firmware: flash gs_updated.bin");
-        firmwareUpdater.flashBundled("logger");
-        refresh();
-    }
-
-    private void toggleRaw(CompoundButton button, boolean enabled) {
-        setRawLogging(enabled);
-    }
-
-    private void setLoggerBusMode(int mode) {
-        AppSettings.setLoggerBusMode(this, mode);
-        AppLog.line(this, "CAN diagnostics bus: " + AppSettings.loggerBusLabel(this));
-        renderTab();
-        refresh();
-    }
-
-    private int loggerBusColor(int mode) {
-        return choiceColor(AppSettings.loggerBusMode(this) == mode);
-    }
-
-    private void setRawLogging(boolean enabled) {
-        AppSettings.setDebugCan(this, enabled);
-        AdapterGateway.get(this).setRawStream(false);
-        GsUsbCanLogger.get(this).setRecording(enabled);
-        AppLog.line(this, "CAN diagnostics gs_usb: " + enabled);
-        refresh();
-    }
-
-    private void saveCanLog() {
-        new Thread(() -> {
-            try {
-                CanLogger.get(this).saveCompressed();
-            } catch (Exception e) {
-                AppLog.line(this, "CAN log save failed " + e.getClass().getSimpleName() + " " + e.getMessage());
-            }
-        }, "kia-canbus-save-can").start();
-    }
-
-    private void clearCanLog() {
-        CanLogger.get(this).clear();
-        refresh();
     }
 
     private void adjustSasRatio(int delta) {
@@ -3958,16 +3832,6 @@ public final class MainActivity extends Activity {
         if (!enabled && selectedTab == TAB_MEDIA) selectedTab = TAB_TPMS;
         if (!enabled && settingsTab == SETTINGS_MEDIA) settingsTab = SETTINGS_GENERAL;
         AppLog.line(this, "Media settings tab visible: " + enabled);
-        setContentView(buildUi());
-        applyImmersiveMode();
-        refresh();
-    }
-
-    private void toggleLogTab(CompoundButton button, boolean enabled) {
-        AppSettings.setLogTabVisible(this, enabled);
-        if (!enabled && selectedTab == TAB_LOG) selectedTab = TAB_SETTINGS;
-        if (!enabled && settingsTab == SETTINGS_LOG) settingsTab = SETTINGS_GENERAL;
-        AppLog.line(this, "CAN diagnostics tab visible: " + enabled);
         setContentView(buildUi());
         applyImmersiveMode();
         refresh();
@@ -4633,15 +4497,6 @@ public final class MainActivity extends Activity {
 
         autoStartToggle = addInlineSwitch(panel, "Автозапуск", "старт сервиса после загрузки",
                 AppSettings.autoStart(this), this::toggleAutoStart);
-        return panel;
-    }
-
-    private LinearLayout logVisibilityPanel() {
-        LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
-        logTabToggle = addSettingsPanelSwitchHeader(panel, "Диагностика CAN",
-                "показывать отдельный пункт в верхнем меню настроек для записи шин",
-                AppSettings.logTabVisible(this),
-                this::toggleLogTab);
         return panel;
     }
 
@@ -5335,24 +5190,6 @@ public final class MainActivity extends Activity {
         mediaTabToggle.setOnCheckedChangeListener(null);
         mediaTabToggle.setChecked(enabled);
         mediaTabToggle.setOnCheckedChangeListener(this::toggleMediaTab);
-    }
-
-    private void updateLogTabToggle() {
-        if (logTabToggle == null) return;
-        boolean enabled = AppSettings.logTabVisible(this);
-        if (logTabToggle.isChecked() == enabled) return;
-        logTabToggle.setOnCheckedChangeListener(null);
-        logTabToggle.setChecked(enabled);
-        logTabToggle.setOnCheckedChangeListener(this::toggleLogTab);
-    }
-
-    private void updateRawCanToggle() {
-        if (rawCanToggle == null) return;
-        boolean enabled = AppSettings.debugCan(this);
-        if (rawCanToggle.isChecked() == enabled) return;
-        rawCanToggle.setOnCheckedChangeListener(null);
-        rawCanToggle.setChecked(enabled);
-        rawCanToggle.setOnCheckedChangeListener(this::toggleRaw);
     }
 
     private void updateAmpInputs() {
@@ -6137,8 +5974,6 @@ public final class MainActivity extends Activity {
                 return "◇";
             case TAB_SETTINGS:
                 return "⚙";
-            case TAB_LOG:
-                return "≡";
             default:
                 return "•";
         }
@@ -6154,7 +5989,7 @@ public final class MainActivity extends Activity {
         if (title.contains("Текст")) return "T";
         if (title.contains("APK") || title.contains("Система")) return "↻";
         if (title.contains("Прошив")) return "⇧";
-        if (title.contains("Диаг") || title.contains("gs_usb") || title.contains("Отлад")) return "≡";
+        if (title.contains("Отлад")) return "≡";
         return "•";
     }
 
@@ -6170,8 +6005,7 @@ public final class MainActivity extends Activity {
         if (title.contains("CAN") || title.contains("SAS") || title.contains("AMP")
                 || title.contains("адаптер")) return "◇";
         if (title.contains("Наст") || title.contains("Система") || title.contains("Авто")) return "⚙";
-        if (title.contains("Отлад") || title.contains("Диаг") || title.contains("gs_usb")
-                || title.contains("Запись")) return "≡";
+        if (title.contains("Отлад")) return "≡";
         if (title.contains("Запрос") || title.contains("Разреш")) return "✓";
         if (title.contains("Прош") || title.contains("Обнов") || title.contains("APK")) return "⇧";
         if (title.contains("CarPlay") || title.contains("Android")) return "▣";

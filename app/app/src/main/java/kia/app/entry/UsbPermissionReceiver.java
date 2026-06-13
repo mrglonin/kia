@@ -7,7 +7,6 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 
 import kia.app.core.AppLog;
-import kia.app.diagnostics.GsUsbCanLogger;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.transport.usb.UsbTransport;
 
@@ -20,7 +19,6 @@ public final class UsbPermissionReceiver extends BroadcastReceiver {
         boolean granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
         if (granted) UsbTransport.clearPermissionRequest(context, device);
         else UsbTransport.onPermissionResult(device, false);
-        GsUsbCanLogger.onPermissionResult(context, device, granted);
         AppLog.line(context, "USB permission result: " + (granted ? "granted" : "denied"));
         if (!granted) return;
         AppService.start(context);

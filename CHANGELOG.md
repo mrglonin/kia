@@ -1,5 +1,15 @@
 # Changelog
 
+## v22.41 / 351 - 2026-06-13
+
+- KIA app `22.41 / 351`: `updates/kia_351.apk`.
+- Вырезан режим logger/gs_usb CAN: отдельная вкладка/раздел диагностики, переключатель записи CAN, выбор C-CAN/M-CAN, сохранение `.log.gz` и прошивка `gs_updated.bin`.
+- Удалены app-side классы `CanLogger`, `GsUsbCanLogger`, `DiagnosticState` и asset `firmware/gs_updated.bin`; bundled firmware list больше не содержит logger-прошивку.
+- Health polling оставлен для штатного адаптера, но быстрый RAW CAN poll каждые 40 мс для записи лога убран; обычный разбор RAW CAN кадров для температуры/люка сохранён.
+- `updates/latest.json` переведён на `kia_351.apk` с актуальными SHA-256 и размером.
+- Проверена оптимизация APK: размер `5861279` -> `5826835` байт, минус `34444` байта; внутри APK нет `firmware/gs_updated.bin`, dex-строк `gs_usb`, `CanLogger`, `GsUsbCanLogger`.
+- Проверено сборкой `./gradlew clean :app:assembleRelease`; APK внутри: `kia.app` / `versionCode=351` / `versionName=22.41`, SHA-256 `caacec68ed27a9ace02c16c6e846eca2a7b3ad27d5d3ba363fab2cbb5d4d7a6d`.
+
 ## v22.40 / 350 - 2026-06-12
 
 - KIA app `22.40 / 350`: `updates/kia_350.apk`.

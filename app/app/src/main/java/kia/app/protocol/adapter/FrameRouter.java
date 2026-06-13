@@ -9,7 +9,6 @@ import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.model.AdapterState;
 import kia.app.core.model.VehicleState;
-import kia.app.diagnostics.CanLogger;
 import kia.app.media.domain.MediaFeature;
 import kia.app.rcta.RctaController;
 import kia.app.tpms.TpmsController;
@@ -101,7 +100,6 @@ public final class FrameRouter {
     }
 
     private void handleRawCan(byte[] frame) {
-        CanLogger.get(app).recordRawFrame(frame);
         ParsedCan parsed = parseRawCan(frame);
         if (parsed != null) applyCanFrame(parsed.canId, parsed.data);
     }
@@ -118,7 +116,6 @@ public final class FrameRouter {
     }
 
     private void handleSnapshot(byte[] frame) {
-        CanLogger.get(app).recordSnapshot(frame);
         int frameLen = frame == null || frame.length < 6 ? 0 : Math.min(frame.length, frame[3] & 0xff);
         int payloadLen = frameLen >= 6 ? frameLen - 6 : 0;
         if (payloadLen < 22) return;

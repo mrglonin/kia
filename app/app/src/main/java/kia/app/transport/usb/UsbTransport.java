@@ -25,7 +25,6 @@ import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.model.AdapterState;
 import kia.app.core.settings.AppSettings;
-import kia.app.diagnostics.GsUsbCanLogger;
 import kia.app.entry.UsbPermissionReceiver;
 import kia.app.protocol.adapter.AdapterProtocol;
 
@@ -70,18 +69,12 @@ public final class UsbTransport {
         try {
             List<UsbSerialDriver> drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager);
             if (drivers == null || drivers.isEmpty()) {
-                if (hasGsUsbDevice()) {
-                    setUsb(false, "USB: gs_usb, запись в разделе Диагностика CAN");
-                    return;
-                }
                 setUsb(false, "USB: адаптер не найден");
                 return;
             }
             UsbSerialDriver driver = findCanboxDriver(drivers);
             if (driver == null) {
-                setUsb(false, hasGsUsbDevice()
-                        ? "USB: gs_usb, запись в разделе Диагностика CAN"
-                        : "USB: подходящий адаптер не найден");
+                setUsb(false, "USB: подходящий адаптер не найден");
                 return;
             }
             UsbDevice device = driver.getDevice();
@@ -257,7 +250,6 @@ public final class UsbTransport {
         for (UsbSerialDriver candidate : drivers) {
             UsbDevice device = candidate.getDevice();
             if (isKnownCanbox(device)) return candidate;
-            if (GsUsbCanLogger.isGsUsbDevice(device)) return null;
             if (fallback == null) fallback = candidate;
         }
         return fallback;
@@ -269,14 +261,6 @@ public final class UsbTransport {
         int product = device.getProductId();
         return (vendor == FTDI_VENDOR_ID && product == FTDI_CANBOX_PRODUCT_ID)
                 || (vendor == STM_VENDOR_ID && product == STM_CDC_PRODUCT_ID);
-    }
-
-    private boolean hasGsUsbDevice() {
-        if (usbManager == null) return false;
-        for (UsbDevice device : usbManager.getDeviceList().values()) {
-            if (GsUsbCanLogger.isGsUsbDevice(device)) return true;
-        }
-        return false;
     }
 
     public static void onPermissionResult(UsbDevice device, boolean granted) {

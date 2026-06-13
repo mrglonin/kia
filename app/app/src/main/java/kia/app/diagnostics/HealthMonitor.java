@@ -4,7 +4,6 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 
-import kia.app.core.settings.AppSettings;
 import kia.app.protocol.adapter.AdapterGateway;
 
 public final class HealthMonitor {
@@ -28,10 +27,7 @@ public final class HealthMonitor {
                 lastHealthAt = now;
                 gateway.requestAdapterInfoQuiet();
             }
-            if (AppSettings.debugCan(app) || CanLogger.get(app).recording()) {
-                gateway.pollRawCan();
-            }
-            handler.postDelayed(this, AppSettings.debugCan(app) ? 40L : 750L);
+            handler.postDelayed(this, 750L);
         }
     };
 

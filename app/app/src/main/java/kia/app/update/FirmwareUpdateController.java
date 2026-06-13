@@ -31,13 +31,7 @@ public final class FirmwareUpdateController {
             "https://api.github.com/repos/mrglonin/kia/contents/updates/latest.json?ref=main";
     private static final String LATEST_RELEASE_URL =
             "https://api.github.com/repos/mrglonin/kia/releases/latest";
-    private static final BundledFirmware[] BUNDLED_FIRMWARES = new BundledFirmware[]{
-            new BundledFirmware("logger", "Logger / gs_updated",
-                    "firmware/gs_updated.bin",
-                    "gs_updated.bin",
-                    "9bb405c2c77e147c4d63d3ab7980402bff20844b962118d07ccdb0b9f9aa2523",
-                    13868)
-    };
+    private static final BundledFirmware[] BUNDLED_FIRMWARES = new BundledFirmware[0];
     private static final int MAX_FIRMWARE_SIZE = 114688;
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor();
     private static FirmwareUpdateController instance;
