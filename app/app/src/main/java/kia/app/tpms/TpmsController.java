@@ -15,11 +15,12 @@ public final class TpmsController {
     private static final long FOREGROUND_POLL_MS = 5_000L;
     private static final long WARNING_POLL_MS = 5_000L;
     private static final long CRITICAL_POLL_MS = 1_000L;
+    // Adapter 0x51 payload order is FR, FL, RR, RL.
     private static final int[] NATIVE_TPMS_WHEEL_ORDER = {
             TpmsState.WHEEL_FR,
             TpmsState.WHEEL_FL,
-            TpmsState.WHEEL_RL,
-            TpmsState.WHEEL_RR
+            TpmsState.WHEEL_RR,
+            TpmsState.WHEEL_RL
     };
 
     private static TpmsController instance;

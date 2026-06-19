@@ -1,5 +1,12 @@
 # Changelog
 
+## v22.43 / 353 - 2026-06-19
+
+- KIA app `22.43 / 353`: `updates/kia_353.apk`.
+- Исправлен порядок данных TPMS для задних колес в native-пакете `0x51`: заднее правое и заднее левое больше не меняются местами.
+- `updates/latest.json` переведён на `kia_353.apk` с актуальными SHA-256 и размером.
+- Проверено сборкой `./gradlew :app:assembleRelease`; APK внутри: `kia.app` / `versionCode=353` / `versionName=22.43`, SHA-256 `d1c87dc7706590ac326f35e1651b94f592e8adcba460a4ff7a770c7c03b3b6cb`.
+
 ## v22.42 / 352 - 2026-06-13
 
 - KIA app `22.42 / 352`: `updates/kia_352.apk`.
