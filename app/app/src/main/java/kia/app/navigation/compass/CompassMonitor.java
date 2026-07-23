@@ -1,6 +1,7 @@
 package kia.app.navigation.compass;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.hardware.GeomagneticField;
@@ -36,6 +37,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private static final long STALE_LOCATION_MS = 2500L;
     private static final long SENSOR_STALE_MS = 1500L;
     private static final long SENSOR_PUBLISH_MS = 120L;
+    private static final long WAKE_LOCK_TIMEOUT_MS = 15000L;
     private static final String FUSED_PROVIDER = "fused";
 
     private final Context app;
@@ -249,7 +251,9 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         }
     }
 
+    @SuppressLint("MissingPermission")
     private boolean requestProvider(String provider) {
+        if (!hasLocationPermission()) return false;
         try {
             if (locationManager.getProvider(provider) == null) return false;
             if (!locationManager.isProviderEnabled(provider)) return false;
@@ -316,7 +320,9 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         return best != null && (best.hasBearing() || best.hasSpeed()) ? best : null;
     }
 
+    @SuppressLint("MissingPermission")
     private Location lastKnown(String provider) {
+        if (!hasLocationPermission()) return null;
         try {
             return locationManager == null ? null : locationManager.getLastKnownLocation(provider);
         } catch (Exception ignored) {
@@ -547,7 +553,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
                     wakeLock.setReferenceCounted(false);
                 }
             }
-            if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire();
+            if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
         } catch (Exception e) {
             AppLog.line(app, "Compass: wakelock failed " + e.getClass().getSimpleName());
         }

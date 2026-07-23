@@ -1,5 +1,6 @@
 package kia.app.navigation.overlay;
 
+import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -360,6 +361,7 @@ public final class NavigationOverlayController {
         }
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerReceiver() {
         if (receiverRegistered) return;
         receiver = new BroadcastReceiver() {

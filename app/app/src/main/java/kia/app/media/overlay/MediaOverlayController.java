@@ -1,5 +1,6 @@
 package kia.app.media.overlay;
 
+import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -366,6 +367,7 @@ public final class MediaOverlayController {
         out.append("\nБаза станций: ").append(RadioStationStore.summary(app, 3));
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerReceiver() {
         if (receiverRegistered) return;
         receiver = new BroadcastReceiver() {

@@ -263,6 +263,7 @@ public final class AppUpdateController {
             info.downloadUrl = asset.optString("browser_download_url", "");
             info.assetSize = asset.optLong("size", 0);
             info.versionCode = assetCode;
+            info.sha256 = githubSha256(asset.optString("digest", ""));
         }
         return info;
     }
@@ -307,6 +308,15 @@ public final class AppUpdateController {
         }
     }
 
+    static String githubSha256(String digest) {
+        String value = digest == null ? "" : digest.trim();
+        String prefix = "sha256:";
+        if (value.regionMatches(true, 0, prefix, 0, prefix.length())) {
+            value = value.substring(prefix.length()).trim();
+        }
+        return value.matches("(?i)[0-9a-f]{64}") ? value.toLowerCase(Locale.US) : "";
+    }
+
     private static boolean canInstallPackages(Activity activity) {
         return Build.VERSION.SDK_INT < 26 || activity.getPackageManager().canRequestPackageInstalls();
     }
@@ -323,8 +333,7 @@ public final class AppUpdateController {
     }
 
     private static boolean verifySha(File file, String expected) {
-        if (file == null || !file.exists()) return false;
-        if (TextUtils.isEmpty(expected)) return true;
+        if (file == null || !file.exists() || TextUtils.isEmpty(expected)) return false;
         try (InputStream in = new BufferedInputStream(new java.io.FileInputStream(file))) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[32768];

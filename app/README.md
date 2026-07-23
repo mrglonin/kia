@@ -3,9 +3,9 @@
 Android source for `kia.app`.
 
 - `applicationId`: `kia.app`
-- `versionName`: `22.43`
-- `versionCode`: `353`
-- release APK name: `kia_353.apk`
+- `versionName`: `23.00`
+- `versionCode`: `354`
+- release APK name: `kia_354.apk`
 - min SDK: `29`
 - target SDK: `35`
 - compile SDK: `35`
@@ -55,6 +55,9 @@ ANDROID_HOME="/Users/legion/Library/Android/sdk" \
 ```
 
 Release signing uses `../signing/kia-debug-release.keystore`.
+
+Navigation decisions and adapter TX outcomes are written to the bounded rotating log at
+`/sdcard/Android/data/kia.app/files/navigation-logs/navigation.log`.
 
 ## Quick QA broadcast
 

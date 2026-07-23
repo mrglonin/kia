@@ -14,11 +14,9 @@ import com.hoho.android.usbserial.driver.UsbSerialProber;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Queue;
 import java.util.Set;
 
 import kia.app.core.AppLog;
@@ -27,6 +25,7 @@ import kia.app.core.model.AdapterState;
 import kia.app.core.settings.AppSettings;
 import kia.app.entry.UsbPermissionReceiver;
 import kia.app.protocol.adapter.AdapterProtocol;
+import kia.app.protocol.adapter.AdapterTxOutcome;
 
 public final class UsbTransport {
     public static final String ACTION_USB_PERMISSION = "kia.app.USB_PERMISSION";
@@ -45,7 +44,7 @@ public final class UsbTransport {
     private final Context app;
     private final UsbManager usbManager;
     private final Listener listener;
-    private final Queue<byte[]> pending = new ArrayDeque<>();
+    private final PendingFrameQueue pending = new PendingFrameQueue(MAX_QUEUE);
     private final ByteArrayOutputStream incoming = new ByteArrayOutputStream();
 
     private UsbSerialPort port;
@@ -105,10 +104,10 @@ public final class UsbTransport {
         }
     }
 
-    public void write(byte[] frame, boolean quiet) {
-        if (frame == null || frame.length == 0) return;
+    public AdapterTxOutcome write(byte[] frame, boolean quiet) {
+        if (frame == null || frame.length == 0) return AdapterTxOutcome.BLOCKED;
         byte[] copy = Arrays.copyOf(frame, frame.length);
-        writeOrQueue(copy, quiet);
+        return writeOrQueue(copy, quiet);
     }
 
     public synchronized void close() {
@@ -130,10 +129,12 @@ public final class UsbTransport {
         setUsb(false, "USB: закрыто");
     }
 
-    private synchronized void writeOrQueue(byte[] frame, boolean quiet) {
+    private synchronized AdapterTxOutcome writeOrQueue(byte[] frame, boolean quiet) {
+        if (PendingFrameQueue.isNavigationOff(frame) && port != null) {
+            pending.invalidateNavigation();
+        }
         if (port == null) {
             if (!quiet) {
-                if (pending.size() > MAX_QUEUE) pending.poll();
                 pending.offer(frame);
             }
             long now = System.currentTimeMillis();
@@ -141,18 +142,19 @@ public final class UsbTransport {
                 lastQuietConnectAt = now;
                 connect();
             }
-            return;
+            return quiet ? AdapterTxOutcome.BLOCKED : AdapterTxOutcome.QUEUED;
         }
         try {
             port.write(frame, 300);
+            return AdapterTxOutcome.WRITTEN;
         } catch (IOException e) {
             if (!quiet) {
-                if (pending.size() > MAX_QUEUE) pending.poll();
                 pending.offer(frame);
             }
             close();
             if (!quiet) AppLog.line(app, "USB: запись не прошла, переподключение");
             connect();
+            return quiet ? AdapterTxOutcome.BLOCKED : AdapterTxOutcome.QUEUED;
         }
     }
 

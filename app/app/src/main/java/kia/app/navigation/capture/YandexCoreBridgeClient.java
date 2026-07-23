@@ -10,11 +10,11 @@ import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.text.TextUtils;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import kia.app.core.AppLog;
 import kia.app.core.settings.AppSettings;
@@ -38,16 +38,50 @@ public final class YandexCoreBridgeClient {
     private static final long MANEUVER_ROUTE_DELTA_MAX_METERS = 350L;
     private static final long REROUTE_ROUTE_GROWTH_METERS = 25L;
     private static final long MANEUVER_ZERO_METERS = 1L;
-    private static final Pattern DISTANCE_NUMBER =
-            Pattern.compile("[-+]?\\d+(?:[\\.,]\\d+)?");
     private static YandexCoreBridgeClient shared;
+
+    private static final class SnapshotApplyResult {
+        final long delayMs;
+        final boolean accepted;
+
+        SnapshotApplyResult(long delayMs, boolean accepted) {
+            this.delayMs = delayMs;
+            this.accepted = accepted;
+        }
+    }
+
+    private static final class MainManeuverSnapshot {
+        final String mainEvent;
+        final String maneuver;
+        final String provenance;
+        final String distance;
+        final String annotationManeuver;
+        final String annotationDistance;
+        final String notificationManeuver;
+        final String notificationDistance;
+        final String roundaboutExit;
+
+        MainManeuverSnapshot(String mainEvent, String maneuver, String provenance,
+                             String distance, String annotationManeuver,
+                             String annotationDistance, String notificationManeuver,
+                             String notificationDistance, String roundaboutExit) {
+            this.mainEvent = mainEvent;
+            this.maneuver = maneuver;
+            this.provenance = provenance;
+            this.distance = distance;
+            this.annotationManeuver = annotationManeuver;
+            this.annotationDistance = annotationDistance;
+            this.notificationManeuver = notificationManeuver;
+            this.notificationDistance = notificationDistance;
+            this.roundaboutExit = roundaboutExit;
+        }
+    }
 
     private final Context app;
     private HandlerThread thread;
     private Handler handler;
     private boolean running;
-    private long lastSeq = Long.MIN_VALUE;
-    private long lastTimestampElapsed = Long.MIN_VALUE;
+    private final YandexSnapshotOrderGuard snapshotOrderGuard = new YandexSnapshotOrderGuard();
     private long lastMissingProviderLogAt;
     private long lastErrorLogAt;
     private String lastState = "";
@@ -63,9 +97,11 @@ public final class YandexCoreBridgeClient {
     private String lastLiveRouteId = "";
     private long lastBroadcastSnapshotAt = -1L;
     private final Object broadcastLock = new Object();
-    private Bundle pendingBroadcastSnapshot;
+    private static final int MAX_PENDING_BROADCASTS = 64;
+    private final ArrayDeque<Bundle> pendingBroadcastSnapshots = new ArrayDeque<>();
     private boolean broadcastApplyPosted;
     private long lastBroadcastApplyAt = -1L;
+    private String lastAppliedCoalescingIdentity = "";
 
     private final Runnable poller = new Runnable() {
         @Override
@@ -103,6 +139,7 @@ public final class YandexCoreBridgeClient {
         thread = new HandlerThread("KiaYandexCoreBridge");
         thread.start();
         handler = new Handler(thread.getLooper());
+        snapshotOrderGuard.reset();
         handler.post(poller);
         AppLog.line(app, "Yandex Core Bridge: client started");
     }
@@ -113,10 +150,12 @@ public final class YandexCoreBridgeClient {
         handler = null;
         if (thread != null) thread.quitSafely();
         thread = null;
+        snapshotOrderGuard.reset();
         synchronized (broadcastLock) {
-            pendingBroadcastSnapshot = null;
+            pendingBroadcastSnapshots.clear();
             broadcastApplyPosted = false;
             lastBroadcastApplyAt = -1L;
+            lastAppliedCoalescingIdentity = "";
         }
         AppLog.line(app, "Yandex Core Bridge: client stopped");
     }
@@ -126,7 +165,6 @@ public final class YandexCoreBridgeClient {
         try {
             Bundle snapshot = new Bundle(input);
             normalizeSnapshotEnvelope(snapshot);
-            lastBroadcastSnapshotAt = SystemClock.elapsedRealtime();
             enqueueBroadcastSnapshot(snapshot);
         } catch (Exception e) {
             logError("v2_broadcast", e);
@@ -139,10 +177,30 @@ public final class YandexCoreBridgeClient {
             applyBroadcastSnapshot(snapshot);
             return;
         }
-        boolean priority = priorityBroadcastSnapshot(snapshot);
+        boolean lifecyclePriority = priorityBroadcastSnapshot(snapshot);
+        String incomingIdentity = coalescingIdentity(snapshot);
         synchronized (broadcastLock) {
-            pendingBroadcastSnapshot = snapshot;
-            if (priority) {
+            Bundle tail = pendingBroadcastSnapshots.peekLast();
+            String tailIdentity = coalescingIdentity(tail);
+            String referenceIdentity = tail == null
+                    ? lastAppliedCoalescingIdentity : tailIdentity;
+            boolean semanticTransition = YandexSnapshotCoalescingPolicy.isTransition(
+                    referenceIdentity, incomingIdentity);
+            if (lifecyclePriority) {
+                // Keep producer order intact and retain queued route/micro
+                // transitions until the order guard has validated this packet.
+                if (!makePendingBroadcastRoom(snapshot, true, semanticTransition)) return;
+                pendingBroadcastSnapshots.addLast(snapshot);
+            } else {
+                if (tail != null && YandexSnapshotCoalescingPolicy.canReplaceTail(
+                        priorityBroadcastSnapshot(tail),
+                        tailIdentity, incomingIdentity)) {
+                    pendingBroadcastSnapshots.removeLast();
+                }
+                if (!makePendingBroadcastRoom(snapshot, false, semanticTransition)) return;
+                pendingBroadcastSnapshots.addLast(snapshot);
+            }
+            if (lifecyclePriority || semanticTransition) {
                 broadcastApplyPosted = true;
                 target.removeCallbacks(broadcastDrainer);
                 target.post(broadcastDrainer);
@@ -155,11 +213,43 @@ public final class YandexCoreBridgeClient {
         }
     }
 
+    private boolean makePendingBroadcastRoom(Bundle incoming,
+                                             boolean incomingLifecyclePriority,
+                                             boolean incomingSemanticTransition) {
+        if (pendingBroadcastSnapshots.size() < MAX_PENDING_BROADCASTS) return true;
+        boolean[] lifecycleFlags = new boolean[pendingBroadcastSnapshots.size()];
+        int flagIndex = 0;
+        for (Bundle queued : pendingBroadcastSnapshots) {
+            lifecycleFlags[flagIndex++] = priorityBroadcastSnapshot(queued);
+        }
+        int evictionIndex = YandexSnapshotCoalescingPolicy.evictionIndex(
+                incomingLifecyclePriority, incomingSemanticTransition, lifecycleFlags);
+        if (evictionIndex < 0) {
+            AppLog.navigation(app, "Yandex Core Bridge queue overflow; retained lifecycle/"
+                    + "transition history, dropped ordinary incoming seq="
+                    + longValue(incoming, "seq", -1L));
+            return false;
+        }
+        Iterator<Bundle> iterator = pendingBroadcastSnapshots.iterator();
+        Bundle evicted = null;
+        for (int i = 0; iterator.hasNext(); i++) {
+            Bundle candidate = iterator.next();
+            if (i != evictionIndex) continue;
+            evicted = candidate;
+            iterator.remove();
+            break;
+        }
+        AppLog.navigation(app, "Yandex Core Bridge queue overflow; preserved incoming "
+                + (incomingLifecyclePriority ? "lifecycle" : "transition")
+                + " seq=" + longValue(incoming, "seq", -1L)
+                + " evictedSeq=" + longValue(evicted, "seq", -1L));
+        return true;
+    }
+
     private void drainBroadcastSnapshot() {
         Bundle snapshot;
         synchronized (broadcastLock) {
-            snapshot = pendingBroadcastSnapshot;
-            pendingBroadcastSnapshot = null;
+            snapshot = pendingBroadcastSnapshots.pollFirst();
             broadcastApplyPosted = false;
         }
         if (snapshot == null) return;
@@ -169,9 +259,17 @@ public final class YandexCoreBridgeClient {
         Handler target = handler;
         if (target == null) return;
         synchronized (broadcastLock) {
-            if (pendingBroadcastSnapshot == null || broadcastApplyPosted) return;
+            if (pendingBroadcastSnapshots.isEmpty() || broadcastApplyPosted) return;
             broadcastApplyPosted = true;
-            target.postDelayed(broadcastDrainer, broadcastApplyDelayMs());
+            Bundle next = pendingBroadcastSnapshots.peekFirst();
+            boolean transition = next != null
+                    && YandexSnapshotCoalescingPolicy.isTransition(
+                    lastAppliedCoalescingIdentity, coalescingIdentity(next));
+            if (transition || priorityBroadcastSnapshot(next)) {
+                target.post(broadcastDrainer);
+            } else {
+                target.postDelayed(broadcastDrainer, broadcastApplyDelayMs());
+            }
         }
     }
 
@@ -183,39 +281,19 @@ public final class YandexCoreBridgeClient {
 
     private void applyBroadcastSnapshot(Bundle snapshot) {
         try {
-            Bundle applied = latestProviderSnapshotForActiveBroadcast(snapshot);
             lastBroadcastApplyAt = SystemClock.elapsedRealtime();
-            long delay = applySnapshot(applied);
-            AppLog.line(app, "Yandex Core Bridge v2 broadcast accepted state="
-                    + firstString(applied, "state", "status")
-                    + " seq=" + longValue(applied, "seq", -1L)
-                    + " nextPoll=" + delay);
+            SnapshotApplyResult result = applySnapshot(snapshot);
+            if (result.accepted) {
+                lastBroadcastSnapshotAt = SystemClock.elapsedRealtime();
+            }
+            AppLog.line(app, "Yandex Core Bridge v2 broadcast "
+                    + (result.accepted ? "accepted" : "ignored") + " state="
+                    + firstString(snapshot, "state", "status")
+                    + " seq=" + longValue(snapshot, "seq", -1L)
+                    + " nextPoll=" + result.delayMs);
         } catch (Exception e) {
             logError("v2_broadcast_apply", e);
         }
-    }
-
-    private Bundle latestProviderSnapshotForActiveBroadcast(Bundle broadcast) {
-        String state = lower(firstString(broadcast, "state", "route_state", "status"));
-        if (!YandexCoreBridgeContract.STATE_ACTIVE.equals(state)) return broadcast;
-        Bundle latest = readSnapshot();
-        if (latest == null || latest.isEmpty()) return broadcast;
-        normalizeSnapshotEnvelope(latest);
-        long broadcastSeq = longValue(broadcast, "seq", "sequence", -1L);
-        long latestSeq = longValue(latest, "seq", "sequence", -1L);
-        long broadcastTimestamp = longValue(broadcast,
-                "timestamp_elapsed_ms", "elapsed_realtime_ms", -1L);
-        long latestTimestamp = longValue(latest,
-                "timestamp_elapsed_ms", "elapsed_realtime_ms", -1L);
-        long broadcastFreshness = freshnessMs(broadcast, broadcastTimestamp);
-        long latestFreshness = freshnessMs(latest, latestTimestamp);
-        boolean newerSeq = latestSeq >= 0L && broadcastSeq >= 0L && latestSeq > broadcastSeq;
-        boolean fresher = latestFreshness + 100L < broadcastFreshness;
-        if (!newerSeq && !fresher) return broadcast;
-        AppLog.line(app, "Yandex Core Bridge v2 broadcast refreshed from provider seq="
-                + broadcastSeq + "->" + latestSeq
-                + " freshness=" + broadcastFreshness + "->" + latestFreshness);
-        return latest;
     }
 
     private long pollOnce() {
@@ -234,7 +312,7 @@ public final class YandexCoreBridgeClient {
         try {
             Bundle snapshot = readSnapshot();
             if (snapshot == null || snapshot.isEmpty()) return IDLE_POLL_MS;
-            return applySnapshot(snapshot);
+            return applySnapshot(snapshot).delayMs;
         } catch (Exception e) {
             logError("poll", e);
             return ERROR_POLL_MS;
@@ -275,7 +353,7 @@ public final class YandexCoreBridgeClient {
         }
     }
 
-    private synchronized long applySnapshot(Bundle snapshot) {
+    private synchronized SnapshotApplyResult applySnapshot(Bundle snapshot) {
         String state = lower(firstString(snapshot, "state", "route_state", "status"));
         if (TextUtils.isEmpty(state)) {
             state = bool(snapshot, "active", false)
@@ -285,6 +363,26 @@ public final class YandexCoreBridgeClient {
         long timestampElapsed = longValue(snapshot, "timestamp_elapsed_ms", "elapsed_realtime_ms", -1L);
         long freshness = freshnessMs(snapshot, timestampElapsed);
         boolean routeLive = routeLive(state);
+        if (routeLive && freshness > MAX_ACTIVE_FRESHNESS_MS) {
+            AppLog.line(app, "Yandex Core Bridge: stale snapshot ignored freshness=" + freshness);
+            return snapshotResult(ACTIVE_POLL_MS, false);
+        }
+        YandexSnapshotOrderGuard.Result orderResult = snapshotOrderGuard.evaluate(
+                firstString(snapshot, "route_id", "routeId"), seq, timestampElapsed);
+        if (orderResult != YandexSnapshotOrderGuard.Result.ACCEPT
+                && orderResult != YandexSnapshotOrderGuard.Result.ACCEPT_UNTRUSTED_INITIAL) {
+            AppLog.line(app, "Yandex Core Bridge: out-of-order snapshot ignored"
+                    + " reason=" + orderResult
+                    + " state=" + state
+                    + " seq=" + seq
+                    + " timestamp=" + timestampElapsed);
+            return snapshotResult(routeLive(state) ? ACTIVE_POLL_MS : IDLE_POLL_MS, false);
+        }
+        if (orderResult == YandexSnapshotOrderGuard.Result.ACCEPT_UNTRUSTED_INITIAL) {
+            AppLog.line(app, "Yandex Core Bridge: accepted initial untrusted envelope"
+                    + " state=" + state);
+        }
+        rememberAppliedCoalescingIdentity(snapshot);
         if (YandexCoreBridgeContract.STATE_ACTIVE.equals(state)) {
             resetManeuverGuardForRouteChange(snapshot);
             normalizeActiveSnapshot(snapshot, freshness);
@@ -293,30 +391,20 @@ public final class YandexCoreBridgeClient {
             resetManeuverDistanceGuard();
         }
         String signature = snapshotSignature(state, snapshot);
-        if (routeLive && freshness > MAX_ACTIVE_FRESHNESS_MS) {
-            AppLog.line(app, "Yandex Core Bridge: stale snapshot ignored freshness=" + freshness);
-            return ACTIVE_POLL_MS;
-        }
         sendSpeedSnapshot(snapshot, freshness);
         if (YandexCoreBridgeContract.STATE_OFF.equals(state)
                 && YandexCoreBridgeContract.STATE_OFF.equals(lastState)) {
-            lastSeq = seq;
-            lastTimestampElapsed = timestampElapsed;
             lastSignature = signature;
-            return IDLE_POLL_MS;
+            return snapshotResult(IDLE_POLL_MS, true);
         }
         if (state.equals(lastState) && signature.equals(lastSignature)) {
-            lastSeq = seq;
-            lastTimestampElapsed = timestampElapsed;
             if (routeLive) {
                 NavigationFeature.get(app).touchYandexCoreBridgeHeartbeat(hasRouteMetrics(snapshot));
             }
-            return routeLive ? ACTIVE_POLL_MS : IDLE_POLL_MS;
+            return snapshotResult(routeLive ? ACTIVE_POLL_MS : IDLE_POLL_MS, true);
         }
         if (YandexCoreBridgeContract.STATE_FINISHED.equals(state)
                 && !finishedSnapshotConfirmed(snapshot, freshness)) {
-            lastSeq = seq;
-            lastTimestampElapsed = timestampElapsed;
             lastSignature = "";
             long remaining = routeRemainingMeters(snapshot);
             AppLog.line(app, "Yandex Core Bridge: ignored unconfirmed finished state"
@@ -330,28 +418,36 @@ public final class YandexCoreBridgeClient {
             } else {
                 sendLoading("finished_unconfirmed", freshness, snapshot);
             }
-            return ACTIVE_POLL_MS;
+            return snapshotResult(ACTIVE_POLL_MS, true);
         }
-        lastSeq = seq;
-        lastTimestampElapsed = timestampElapsed;
         lastState = state;
         lastSignature = signature;
 
         if (YandexCoreBridgeContract.STATE_OFF.equals(state)) {
             sendOff("off", freshness, snapshot);
-            return IDLE_POLL_MS;
+            return snapshotResult(IDLE_POLL_MS, true);
         }
         if (YandexCoreBridgeContract.STATE_FINISHED.equals(state)) {
             sendFinished(freshness, snapshot);
-            return IDLE_POLL_MS;
+            return snapshotResult(IDLE_POLL_MS, true);
         }
         if (YandexCoreBridgeContract.STATE_LOADING.equals(state)
                 || YandexCoreBridgeContract.STATE_REROUTING.equals(state)) {
             sendLoading(state, freshness, snapshot);
-            return ACTIVE_POLL_MS;
+            return snapshotResult(ACTIVE_POLL_MS, true);
         }
         sendActiveSnapshot(freshness, snapshot);
-        return ACTIVE_POLL_MS;
+        return snapshotResult(ACTIVE_POLL_MS, true);
+    }
+
+    private static SnapshotApplyResult snapshotResult(long delayMs, boolean accepted) {
+        return new SnapshotApplyResult(delayMs, accepted);
+    }
+
+    private void rememberAppliedCoalescingIdentity(Bundle snapshot) {
+        synchronized (broadcastLock) {
+            lastAppliedCoalescingIdentity = coalescingIdentity(snapshot);
+        }
     }
 
     private void sendLoading(String state, long freshness, Bundle snapshot) {
@@ -370,29 +466,42 @@ public final class YandexCoreBridgeClient {
         putRoute(active, snapshot);
         NavigationFeature.get(app).handle(active);
 
-        String mainEvent = firstString(snapshot, "main_event", "voice_main_event", "route_event",
-                "first_event_text", "event");
-        String eventManeuver = clusterManeuverFromEvent(mainEvent);
-        String rawManeuver = firstString(snapshot,
-                "maneuver", "maneuver_type", "maneuver_action",
-                "current_maneuver", "image_id", "imageId", "direction");
-        String voiceManeuver = maneuverFromVoiceText(firstString(snapshot,
-                "maneuver_text", "voice_hint", "voice_prompt"));
-        String maneuver = first(eventManeuver, rawManeuver, voiceManeuver);
-        String maneuverDistance = maneuverDistance(snapshot);
-        if (TextUtils.isEmpty(maneuverDistance) && !TextUtils.isEmpty(eventManeuver)) {
+        MainManeuverSnapshot selected = selectMainManeuver(snapshot);
+        String mainEvent = selected.mainEvent;
+        String maneuver = selected.maneuver;
+        String maneuverProvenance = selected.provenance;
+        String maneuverDistance = selected.distance;
+        String annotationManeuver = selected.annotationManeuver;
+        String annotationDistance = selected.annotationDistance;
+        String notificationManeuver = selected.notificationManeuver;
+        String notificationDistance = selected.notificationDistance;
+        String selectedRoundaboutExit = selected.roundaboutExit;
+        boolean semanticMicroPresent = hasSemanticMicroSignal(snapshot);
+        boolean mainDistanceExplicitlyUnknown =
+                YandexSnapshotSemantics.distanceMeters(maneuverDistance) <= 0L
+                        && semanticMicroPresent;
+        if (TextUtils.isEmpty(maneuverDistance) && semanticMicroPresent) {
             maneuverDistance = "0 м";
         }
         if (earlyFinishManeuver(maneuver, snapshot)) {
             AppLog.line(app, "Yandex Core Bridge: suppressed early finish maneuver"
                     + " remaining=" + routeRemainingMeters(snapshot)
                     + " maneuver=" + maneuverMeters(snapshot));
-        } else if (!TextUtils.isEmpty(maneuver) && !TextUtils.isEmpty(maneuverDistance)) {
+        } else if (YandexSnapshotSemantics.shouldEmitManeuver(
+                maneuver, maneuverDistance, semanticMicroPresent)) {
             Intent man = baseIntent(NavigationFeature.KIA_ACTION_MANEUVER, snapshot, freshness);
             man.putExtra("imageId", maneuver);
             man.putExtra("maneuver", maneuver);
             man.putExtra("direction", maneuver);
             man.putExtra("distance", maneuverDistance);
+            man.putExtra("maneuver_provenance", maneuverProvenance);
+            if (mainDistanceExplicitlyUnknown) {
+                man.putExtra("main_distance_explicitly_unknown", true);
+            }
+            putString(man, "annotation_maneuver", annotationManeuver);
+            putString(man, "annotation_maneuver_distance", annotationDistance);
+            putString(man, "notification_maneuver", notificationManeuver);
+            putString(man, "notification_maneuver_distance", notificationDistance);
             putString(man, "maneuver_text", firstString(snapshot, "maneuver_text", "voice_hint"));
             putString(man, "voice_hint", firstString(snapshot, "voice_hint", "maneuver_text"));
             putString(man, "street_after_maneuver", firstString(snapshot,
@@ -400,10 +509,12 @@ public final class YandexCoreBridgeClient {
             putString(man, "main_event", mainEvent);
             putString(man, "voice_main_event", firstString(snapshot, "voice_main_event"));
             putString(man, "voice_prompt", firstString(snapshot, "voice_prompt"));
-            putString(man, "exit_number", firstString(snapshot,
-                    "exit_number", "roundabout_exit_number"));
-            putString(man, "roundabout_exit", firstString(snapshot,
-                    "roundabout_exit", "roundabout_exit_number", "exit_number"));
+            putString(man, "exit_number", selectedRoundaboutExit);
+            putString(man, "roundabout_exit", selectedRoundaboutExit);
+            if (isRoundaboutManeuverValue(maneuver)) {
+                man.putExtra("roundabout_scope", "current");
+                man.putExtra("roundabout_provenance", maneuverProvenance);
+            }
             putString(man, "route_action", firstString(snapshot, "route_action", "routeAction"));
             putString(man, "highlighted_direction", firstString(snapshot,
                     "highlighted_direction", "highlightedDirection"));
@@ -491,6 +602,11 @@ public final class YandexCoreBridgeClient {
         intent.setPackage(app.getPackageName());
         intent.putExtra("source", YandexCoreBridgeContract.SOURCE);
         intent.putExtra("bridge_freshness_ms", freshness);
+        intent.putExtra("bridge_full_snapshot", true);
+        boolean hasMicro = !YandexSnapshotSemantics.MICRO_ABSENT_IDENTITY.equals(
+                microStateIdentity(snapshot));
+        intent.putExtra("micro_snapshot_present", hasMicro);
+        intent.putExtra("micro_clear", !hasMicro);
         putString(intent, "bridge_state", firstString(snapshot, "state", "route_state", "status"));
         putString(intent, "main_event", firstString(snapshot, "main_event", "voice_main_event", "route_event"));
         putString(intent, "voice_main_event", firstString(snapshot, "voice_main_event"));
@@ -546,7 +662,8 @@ public final class YandexCoreBridgeClient {
     private void putRoute(Intent intent, Bundle snapshot) {
         long remainingMeters = routeRemainingMeters(snapshot);
         long totalMeters = routeTotalMeters(snapshot);
-        long maneuverMeters = maneuverMeters(snapshot);
+        MainManeuverSnapshot selectedMain = selectMainManeuver(snapshot);
+        long maneuverMeters = YandexSnapshotSemantics.distanceMeters(selectedMain.distance);
         remainingMeters = correctedRemainingMeters(remainingMeters, totalMeters);
         remainingMeters = correctedRemainingByGuidance(remainingMeters, maneuverMeters);
         if (remainingMeters >= 0L && totalMeters >= 0L && totalMeters < remainingMeters) {
@@ -593,17 +710,24 @@ public final class YandexCoreBridgeClient {
         putString(intent, "main_event", firstString(snapshot, "main_event", "voice_main_event",
                 "route_event"));
         putString(intent, "voice_prompt", firstString(snapshot, "voice_prompt"));
-        putString(intent, "exit_number", firstString(snapshot,
-                "exit_number", "roundabout_exit_number"));
-        putString(intent, "roundabout_exit", firstString(snapshot,
-                "roundabout_exit", "roundabout_exit_number", "exit_number"));
+        if (isRoundaboutManeuverValue(selectedMain.maneuver)) {
+            putString(intent, "exit_number", selectedMain.roundaboutExit);
+            putString(intent, "roundabout_exit", selectedMain.roundaboutExit);
+            intent.putExtra("roundabout_scope", "current");
+        }
         putManeuverDistance(intent, snapshot);
         putLaneExtras(intent, snapshot);
     }
 
     private void putManeuverDistance(Intent intent, Bundle snapshot) {
-        long meters = maneuverMeters(snapshot);
-        String distance = maneuverDistance(snapshot);
+        MainManeuverSnapshot selected = selectMainManeuver(snapshot);
+        putString(intent, "current_maneuver", selected.maneuver);
+        putString(intent, "maneuver_provenance", selected.provenance);
+        putString(intent, "maneuver_distance_identity", selected.maneuver);
+        putString(intent, "maneuver_distance_provenance", selected.provenance);
+        long meters = YandexSnapshotSemantics.distanceMeters(selected.distance);
+        if (meters <= 0L) return;
+        String distance = selected.distance;
         putString(intent, "maneuver_distance", distance);
         putString(intent, "current_maneuver_distance", distance);
         putString(intent, "distance_to_maneuver", distance);
@@ -635,12 +759,16 @@ public final class YandexCoreBridgeClient {
                 "gray_road_options", "available_directions");
         String grayDirections = firstString(snapshot, "gray_road_options", "route_road_options",
                 "road_options");
-        String highlight = firstString(snapshot, "ignored_recommended_lanes",
-                "ignored_lane_maneuver", "recommended_lanes", "lane_highlight",
-                "lane_highlighted_direction");
+        String highlight = firstString(snapshot,
+                "lane_maneuver", "micro_maneuver", "ignored_lane_maneuver",
+                "lane_highlight", "lane_highlighted_direction",
+                "recommended_lanes", "ignored_recommended_lanes");
         boolean staleMainConflict = staleLaneGuidanceConflictsWithMain(snapshot, highlight,
                 laneDistance, laneMeters);
-        if (laneGuidanceConflicts(routeDirections, first(rawLaneItems, laneItems, highlight))
+        boolean positionedMicro = laneMeters > 0L
+                || YandexSnapshotSemantics.distanceMeters(laneDistance) > 0L;
+        if ((!positionedMicro
+                && laneGuidanceConflicts(routeDirections, first(rawLaneItems, laneItems, highlight)))
                 || staleMainConflict) {
             if (staleMainConflict) {
                 AppLog.line(app, "Yandex Core Bridge: ignored stale lane topology main="
@@ -698,7 +826,8 @@ public final class YandexCoreBridgeClient {
         long remainingMeters = routeRemainingMeters(snapshot);
         long totalMeters = routeTotalMeters(snapshot);
         remainingMeters = correctedRemainingMeters(remainingMeters, totalMeters);
-        long maneuverMeters = maneuverMeters(snapshot);
+        MainManeuverSnapshot selectedMain = selectMainManeuver(snapshot);
+        long maneuverMeters = YandexSnapshotSemantics.distanceMeters(selectedMain.distance);
         long travelDelta = travelDeltaMeters(snapshot, freshness);
         if (travelDelta > 0L) {
             if (remainingMeters >= 0L) remainingMeters = Math.max(0L, remainingMeters - travelDelta);
@@ -717,11 +846,7 @@ public final class YandexCoreBridgeClient {
                     "route_total_distance_meters");
         }
 
-        String maneuverKey = first(clusterManeuverFromEvent(firstString(snapshot,
-                        "main_event", "voice_main_event", "route_event")),
-                firstString(snapshot,
-                "maneuver", "maneuver_type",
-                "current_maneuver", "image_id", "imageId", "direction"));
+        String maneuverKey = selectedMain.maneuver;
         String roadKey = firstString(snapshot, "route_road_options", "road_options",
                 "available_directions");
         long correctedManeuver = correctedManeuverMeters(maneuverKey, roadKey,
@@ -975,17 +1100,182 @@ public final class YandexCoreBridgeClient {
     }
 
     private static boolean volatileKey(String key) {
-        String clean = lower(key);
-        return "seq".equals(clean)
-                || "sequence".equals(clean)
-                || "timestamp_ms".equals(clean)
-                || "timestampelapsedms".equals(clean)
-                || "timestamp_elapsed_ms".equals(clean)
-                || "elapsed_realtime_ms".equals(clean)
-                || "updated_at_elapsed_ms".equals(clean)
-                || "freshness_ms".equals(clean)
-                || "freshnessms".equals(clean)
-                || "bridge_freshness_ms".equals(clean);
+        return YandexSnapshotSemantics.isEnvelopeKey(key);
+    }
+
+    private static boolean hasMicroEnvelope(Bundle snapshot) {
+        if (snapshot == null || snapshot.isEmpty()) return false;
+        for (String key : snapshot.keySet()) {
+            if (YandexSnapshotSemantics.isMicroKey(key)) return true;
+        }
+        return false;
+    }
+
+    private static String microIdentity(Bundle snapshot) {
+        if (!hasMicroEnvelope(snapshot)) return "";
+        return YandexSnapshotSemantics.microIdentity(true,
+                firstString(snapshot,
+                        "lane_maneuver", "micro_maneuver", "ignored_lane_maneuver"),
+                firstString(snapshot,
+                        "lane_highlight", "lane_highlighted_direction",
+                        "highlighted_direction", "highlighted_directions",
+                        "recommended_lanes", "ignored_recommended_lanes"),
+                firstString(snapshot,
+                        "lane_topology_json", "lane_topology",
+                        "raw_lane_topology", "lane_items", "raw_lane_items"),
+                firstString(snapshot,
+                        "lane_sign_position", "lane_position", "upcoming_lane_position"),
+                firstString(snapshot,
+                        "direction_sign_items", "raw_direction_sign_items",
+                        "road_scheme_raw", "upcoming_direction_signs",
+                        "upcoming_lane_signs"),
+                firstString(snapshot,
+                        "route_road_options", "gray_road_options", "road_options"));
+    }
+
+    private static String microStateIdentity(Bundle snapshot) {
+        if (snapshot == null) return YandexSnapshotSemantics.MICRO_ABSENT_IDENTITY;
+        if (!hasSemanticMicroSignal(snapshot)) {
+            return YandexSnapshotSemantics.MICRO_ABSENT_IDENTITY;
+        }
+        String identity = microIdentity(snapshot);
+        if (TextUtils.isEmpty(identity) || "micro|none".equals(identity)) {
+            return "micro|distance_only";
+        }
+        return identity;
+    }
+
+    private static String coalescingIdentity(Bundle snapshot) {
+        if (snapshot == null) return "";
+        String state = lower(firstString(snapshot, "state", "route_state", "status"));
+        if (TextUtils.isEmpty(state)) {
+            state = bool(snapshot, "active", false)
+                    ? YandexCoreBridgeContract.STATE_ACTIVE : YandexCoreBridgeContract.STATE_OFF;
+        }
+        MainManeuverSnapshot selected = selectMainManeuver(snapshot);
+        return YandexSnapshotSemantics.coalescingIdentity(
+                state,
+                firstString(snapshot, "route_id", "routeId"),
+                selected.maneuver,
+                selected.provenance,
+                selected.mainEvent,
+                selected.roundaboutExit,
+                firstString(snapshot, "route_action", "routeAction"),
+                firstString(snapshot, "road_options", "route_road_options",
+                        "gray_road_options", "available_directions"),
+                microStateIdentity(snapshot));
+    }
+
+    private static boolean hasSemanticMicroSignal(Bundle snapshot) {
+        if (snapshot == null || snapshot.isEmpty()) return false;
+        long meters = firstLong(snapshot, -1L,
+                "lane_distance_meters", "micro_distance_meters",
+                "lane_sign_distance_meters", "upcoming_lane_distance_meters");
+        if (meters > 0L) return true;
+        String distance = firstString(snapshot,
+                "lane_distance", "micro_distance", "lane_sign_distance",
+                "upcoming_lane_distance");
+        if (YandexSnapshotSemantics.distanceMeters(distance) > 0L) return true;
+        return !TextUtils.isEmpty(firstString(snapshot,
+                "lane_maneuver", "micro_maneuver", "ignored_lane_maneuver",
+                "lane_highlight", "lane_highlighted_direction",
+                "highlighted_direction", "highlighted_directions",
+                "recommended_lanes", "ignored_recommended_lanes",
+                "lane_topology_json", "lane_topology", "raw_lane_topology",
+                "lane_items", "raw_lane_items",
+                "direction_sign_items", "raw_direction_sign_items",
+                "road_scheme_raw", "upcoming_direction_signs",
+                "upcoming_lane_signs"));
+    }
+
+    private static String candidateDistance(Bundle snapshot, String... prefixes) {
+        if (snapshot == null || prefixes == null) return "";
+        for (String prefix : prefixes) {
+            long meters = firstLong(snapshot, -1L,
+                    prefix + "_maneuver_distance_meters",
+                    prefix + "_distance_to_maneuver_meters",
+                    prefix + "_distance_meters");
+            String numeric = metersText(meters);
+            if (!TextUtils.isEmpty(numeric)) return numeric;
+            String text = firstString(snapshot,
+                    prefix + "_maneuver_distance",
+                    prefix + "_distance_to_maneuver",
+                    prefix + "_distance");
+            if (!TextUtils.isEmpty(text)) return text;
+        }
+        return "";
+    }
+
+    private static MainManeuverSnapshot selectMainManeuver(Bundle snapshot) {
+        String mainEvent = firstString(snapshot,
+                "main_event", "voice_main_event", "route_event",
+                "first_event_text", "event");
+        String eventManeuver = clusterManeuverFromEvent(mainEvent);
+        String annotationManeuver = firstString(snapshot,
+                "annotation_maneuver", "guide_maneuver",
+                "displayed_annotation_maneuver", "current_annotation_maneuver");
+        String rawManeuver = firstString(snapshot,
+                "maneuver", "maneuver_type", "maneuver_action",
+                "current_maneuver", "image_id", "imageId", "direction");
+        String notificationManeuver = firstString(snapshot,
+                "notification_maneuver", "notification_maneuver_action",
+                "notification_direction");
+        String voiceManeuver = maneuverFromVoiceText(firstString(snapshot,
+                "maneuver_text", "voice_hint", "voice_prompt"));
+        String maneuver = first(annotationManeuver, rawManeuver, eventManeuver,
+                notificationManeuver, voiceManeuver);
+        String provenance = !TextUtils.isEmpty(annotationManeuver) ? "annotation"
+                : !TextUtils.isEmpty(rawManeuver) ? "bridge_main"
+                : !TextUtils.isEmpty(eventManeuver) ? "route_event"
+                : !TextUtils.isEmpty(notificationManeuver) ? "notification"
+                : "voice";
+        String annotationDistance = candidateDistance(snapshot, "annotation", "guide",
+                "displayed_annotation", "current_annotation");
+        String notificationDistance = candidateDistance(snapshot, "notification");
+        String genericDistance = maneuverDistance(snapshot);
+        String distance = "annotation".equals(provenance)
+                ? first(annotationDistance,
+                sameManeuverValue(annotationManeuver, rawManeuver) ? genericDistance : "",
+                "0 м")
+                : "notification".equals(provenance)
+                ? first(notificationDistance, genericDistance)
+                : genericDistance;
+        if (TextUtils.isEmpty(distance) && !TextUtils.isEmpty(eventManeuver)) {
+            distance = "0 м";
+        }
+        return new MainManeuverSnapshot(mainEvent, maneuver, provenance, distance,
+                annotationManeuver, annotationDistance,
+                notificationManeuver, notificationDistance,
+                selectedRoundaboutExit(snapshot, provenance));
+    }
+
+    private static boolean isRoundaboutManeuverValue(String value) {
+        String text = lower(value);
+        return text.contains("roundabout") || text.contains("circular")
+                || text.contains("круг") || text.contains("кольц");
+    }
+
+    private static boolean sameManeuverValue(String left, String right) {
+        String first = lower(left).replace('-', '_');
+        String second = lower(right).replace('-', '_');
+        return !TextUtils.isEmpty(first) && first.equals(second);
+    }
+
+    private static String selectedRoundaboutExit(Bundle snapshot, String provenance) {
+        if ("annotation".equals(provenance)) {
+            return firstString(snapshot,
+                    "annotation_roundabout_exit", "annotation_roundabout_exit_number",
+                    "annotation_exit_number",
+                    "guide_roundabout_exit", "guide_roundabout_exit_number",
+                    "guide_exit_number");
+        }
+        if ("notification".equals(provenance)) {
+            return firstString(snapshot,
+                    "notification_roundabout_exit", "notification_roundabout_exit_number",
+                    "notification_exit_number",
+                    "roundabout_exit", "roundabout_exit_number", "exit_number");
+        }
+        return firstString(snapshot, "roundabout_exit", "roundabout_exit_number", "exit_number");
     }
 
     private void logMissingProvider() {
@@ -1265,20 +1555,7 @@ public final class YandexCoreBridgeClient {
     private static long distanceTextMeters(Object value) {
         if (value == null) return -1L;
         if (value instanceof Number) return Math.max(0L, ((Number) value).longValue());
-        String text = String.valueOf(value).trim();
-        if (TextUtils.isEmpty(text)) return -1L;
-        Matcher matcher = DISTANCE_NUMBER.matcher(text.replace(',', '.'));
-        if (!matcher.find()) return -1L;
-        double parsed;
-        try {
-            parsed = Double.parseDouble(matcher.group().replace(',', '.'));
-        } catch (Exception ignored) {
-            return -1L;
-        }
-        if (parsed < 0d) return -1L;
-        String lower = text.toLowerCase(Locale.US);
-        boolean km = lower.contains("км") || lower.contains("km");
-        return Math.round(km ? parsed * 1000d : parsed);
+        return YandexSnapshotSemantics.distanceMeters(String.valueOf(value));
     }
 
     private static long correctedRemainingMeters(long remainingMeters, long totalMeters) {

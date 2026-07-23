@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import kia.app.core.model.AdapterState;
 import kia.app.core.model.AmpState;
 import kia.app.core.model.CallState;
@@ -17,6 +18,7 @@ import kia.app.core.model.VehicleState;
 public final class StateStore {
     private static final String PREFS = "kia_state";
     private static final String NAV_PREFIX = "nav_";
+    private static final long NAV_TX_PERSIST_INTERVAL_MS = 2000L;
     private static final Handler UI_BROADCAST_HANDLER = new Handler(Looper.getMainLooper());
 
     private static AdapterState adapter = AdapterState.empty();
@@ -30,6 +32,7 @@ public final class StateStore {
     private static RctaState rcta = RctaState.empty();
     private static String lastLog = "";
     private static boolean pendingBroadcast;
+    private static long lastNavigationTxPersistAt;
 
     private StateStore() {
     }
@@ -116,6 +119,7 @@ public final class StateStore {
         }
         navigation = next;
         persistNavigation(context, navigation);
+        lastNavigationTxPersistAt = SystemClock.elapsedRealtime();
         changed(context);
     }
 
@@ -252,7 +256,11 @@ public final class StateStore {
         NavigationState current = navigation == null ? NavigationState.empty() : navigation;
         navigation = current.withClusterTxText(appendNavigationTxLine(current.clusterTx, line),
                 System.currentTimeMillis());
-        persistNavigation(context, navigation);
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastNavigationTxPersistAt >= NAV_TX_PERSIST_INTERVAL_MS) {
+            persistNavigation(context, navigation);
+            lastNavigationTxPersistAt = now;
+        }
         changed(context);
     }
 

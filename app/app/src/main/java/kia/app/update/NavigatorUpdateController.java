@@ -392,8 +392,7 @@ public final class NavigatorUpdateController {
     }
 
     private static boolean verifySha(File file, String expected) {
-        if (file == null || !file.exists()) return false;
-        if (TextUtils.isEmpty(expected)) return true;
+        if (file == null || !file.exists() || TextUtils.isEmpty(expected)) return false;
         try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[65536];

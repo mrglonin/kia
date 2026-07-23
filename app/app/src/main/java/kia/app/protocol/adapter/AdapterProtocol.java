@@ -740,6 +740,14 @@ public final class AdapterProtocol {
             case 14:
                 f[5] = 0x48;
                 break;
+            case 15:
+            case 16:
+            case 17:
+            case 18:
+                // TBT has one verified "leave roundabout" glyph (0x61), without an exit-number
+                // channel. Falling back to 0x09 rendered an unrelated/default maneuver.
+                f[5] = 0x61;
+                break;
             default:
                 f[5] = 0x09;
                 break;

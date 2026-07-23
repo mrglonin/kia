@@ -3,9 +3,14 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
+    <permission
+        android:name="kia.app.permission.NAV_BRIDGE"
+        android:protectionLevel="signature" />
+
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -129,6 +134,17 @@
             android:name=".navigation.capture.NavBroadcastReceiver"
             android:directBootAware="true"
             android:enabled="true"
+            android:exported="true"
+            android:permission="kia.app.permission.NAV_BRIDGE">
+            <intent-filter>
+                <action android:name="kia.yandex.v2.NAV_SNAPSHOT" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".navigation.capture.LegacyNavBroadcastReceiver"
+            android:directBootAware="true"
+            android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="kia.app.ACTION_MANEUVER_DATA" />
@@ -141,7 +157,6 @@
                 <action android:name="com.kia.navi.ACTION_NAVI_ON_DATA" />
                 <action android:name="com.kia.navi.ACTION_SPEED_DATA" />
                 <action android:name="com.kia.navi.ACTION_EXCEEDED_DATA" />
-                <action android:name="kia.yandex.v2.NAV_SNAPSHOT" />
                 <action android:name="com.yf.navinfo" />
                 <action android:name="com.teyes.MapAssistantService" />
                 <action android:name="android.action.MOBILE_NAVIGATION" />
@@ -166,7 +181,8 @@
         <receiver
             android:name=".qa.QaReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="kia.app.QA_SCENARIO" />
             </intent-filter>

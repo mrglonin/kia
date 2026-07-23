@@ -1,5 +1,6 @@
 package kia.app.rcta;
 
+import android.annotation.SuppressLint;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -181,6 +182,7 @@ public final class RctaOverlayController {
         return params;
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerReceiver() {
         if (receiverRegistered) return;
         receiver = new BroadcastReceiver() {
