@@ -2,6 +2,8 @@ package kia.app.protocol.adapter;
 
 import android.content.Context;
 
+import java.util.Locale;
+
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.transport.usb.UsbTransport;
@@ -37,30 +39,32 @@ public final class AdapterGateway {
         return transport.ready();
     }
 
-    public void send(AdapterCommand command) {
-        if (command == null || command.frame == null) return;
+    public AdapterTxOutcome send(AdapterCommand command) {
+        if (command == null || command.frame == null) return AdapterTxOutcome.BLOCKED;
         boolean importantMedia = isImportantMediaCommand(command.label);
         if (exclusiveUpdateMode && !command.firmwareUpdate) {
             if (!command.quiet || importantMedia) {
                 AppLog.line(app, "Adapter: blocked during firmware update " + command.label);
             }
-            return;
+            return AdapterTxOutcome.BLOCKED;
         }
+        AdapterTxOutcome outcome = transport.write(command.frame, command.quiet);
         if (command.label.startsWith("call ") || importantMedia || isNavigationCommand(command.label)) {
-            AppLog.line(app, "Adapter TX: " + command.label
-                    + " usb=" + transport.ready()
-                    + " " + AdapterProtocol.hex(command.frame));
+            String line = "Adapter TX " + outcome + ": " + command.label
+                    + " " + AdapterProtocol.hex(command.frame);
+            if (isNavigationCommand(command.label)) AppLog.navigation(app, line);
+            else AppLog.line(app, line);
         }
-        transport.write(command.frame, command.quiet);
+        return outcome;
     }
 
-    public void send(byte[] frame, boolean quiet) {
+    public AdapterTxOutcome send(byte[] frame, boolean quiet) {
         if (exclusiveUpdateMode && (frame == null || frame.length < 5
                 || (frame[4] & 0xff) != AdapterProtocol.CMD_FIRMWARE)) {
             if (!quiet) AppLog.line(app, "Adapter: blocked raw frame during firmware update");
-            return;
+            return AdapterTxOutcome.BLOCKED;
         }
-        transport.write(frame, quiet);
+        return transport.write(frame, quiet);
     }
 
     public void beginExclusiveUpdate() {
@@ -101,7 +105,7 @@ public final class AdapterGateway {
 
     private static boolean isImportantMediaCommand(String label) {
         if (label == null) return false;
-        String lower = label.toLowerCase();
+        String lower = label.toLowerCase(Locale.ROOT);
         return lower.contains("media off")
                 || lower.contains("media text")
                 || lower.contains("source")
@@ -110,7 +114,7 @@ public final class AdapterGateway {
 
     private static boolean isNavigationCommand(String label) {
         if (label == null) return false;
-        String lower = label.toLowerCase();
+        String lower = label.toLowerCase(Locale.ROOT);
         return lower.startsWith("nav ");
     }
 

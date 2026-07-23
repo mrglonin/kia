@@ -2,6 +2,8 @@ package kia.app.update;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Base64;
 
@@ -22,6 +24,7 @@ import java.util.concurrent.Executors;
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.model.UpdateState;
+import kia.app.navigation.domain.NavigationFeature;
 import kia.app.protocol.adapter.AdapterCommand;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
@@ -33,6 +36,7 @@ public final class FirmwareUpdateController {
             "https://api.github.com/repos/mrglonin/kia/releases/latest";
     private static final BundledFirmware[] BUNDLED_FIRMWARES = new BundledFirmware[0];
     private static final int MAX_FIRMWARE_SIZE = 114688;
+    private static final long TRANSPORT_RECOVERY_DELAY_MS = 2500L;
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor();
     private static FirmwareUpdateController instance;
 
@@ -134,7 +138,7 @@ public final class FirmwareUpdateController {
                 AppLog.line(app, "Firmware bundled update: " + e.getClass().getSimpleName() + " " + e.getMessage());
             } finally {
                 busy = false;
-                AdapterGateway.get(app).endExclusiveUpdate();
+                endExclusiveUpdateAndResync();
             }
         });
     }
@@ -171,7 +175,7 @@ public final class FirmwareUpdateController {
                 AppLog.line(app, "Firmware file update: " + e.getClass().getSimpleName() + " " + e.getMessage());
             } finally {
                 busy = false;
-                AdapterGateway.get(app).endExclusiveUpdate();
+                endExclusiveUpdateAndResync();
             }
         });
     }
@@ -230,9 +234,22 @@ public final class FirmwareUpdateController {
                 AppLog.line(app, "Firmware update: " + e.getClass().getSimpleName() + " " + e.getMessage());
             } finally {
                 busy = false;
-                AdapterGateway.get(app).endExclusiveUpdate();
+                endExclusiveUpdateAndResync();
             }
         });
+    }
+
+    private void endExclusiveUpdateAndResync() {
+        AdapterGateway gateway = AdapterGateway.get(app);
+        boolean transportWasExclusive = gateway.exclusiveUpdateMode();
+        gateway.endExclusiveUpdate();
+        if (!transportWasExclusive) return;
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (gateway.exclusiveUpdateMode()) return;
+            gateway.start();
+            NavigationFeature.get(app)
+                    .resendAfterTransportRecovery("adapter firmware update");
+        }, TRANSPORT_RECOVERY_DELAY_MS);
     }
 
     private byte[] download(ReleaseInfo source) throws Exception {

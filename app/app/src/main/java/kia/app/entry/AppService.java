@@ -1,20 +1,24 @@
 package kia.app.entry;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.Manifest;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.graphics.BitmapFactory;
+import android.location.LocationManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.SystemClock;
 
 import kia.app.R;
 import kia.app.core.AppLog;
@@ -26,7 +30,7 @@ import kia.app.media.capture.MediaCaptureManager;
 import kia.app.media.domain.CallFeature;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.navigation.capture.DgisDashboardClient;
-import kia.app.navigation.capture.NavBroadcastReceiver;
+import kia.app.navigation.capture.LegacyNavBroadcastReceiver;
 import kia.app.navigation.capture.YandexCoreBridgeClient;
 import kia.app.navigation.compass.CompassMonitor;
 import kia.app.navigation.domain.NavigationFeature;
@@ -52,11 +56,14 @@ public final class AppService extends Service {
     private NavigationOverlayController navigationOverlay;
     private MediaOverlayController mediaOverlay;
     private RctaOverlayController rctaOverlay;
-    private NavBroadcastReceiver navReceiver;
+    private LegacyNavBroadcastReceiver navReceiver;
     private BluetoothCallReceiver bluetoothCallReceiver;
+    private BroadcastReceiver locationProviderReceiver;
     private PowerManager.WakeLock serviceWakeLock;
     private boolean navReceiverRegistered;
     private boolean bluetoothCallReceiverRegistered;
+    private boolean locationProviderReceiverRegistered;
+    private long lastLocationProviderRefreshAt;
 
     public static void start(Context context) {
         Intent intent = new Intent(context, AppService.class);
@@ -74,6 +81,7 @@ public final class AppService extends Service {
         AppSettings.applyDefaults(this);
         StateStore.restoreNavigation(this);
         startForegroundCompat(SERVICE_TEXT);
+        registerLocationProviderReceiver();
         acquireServiceWakeLock();
         gateway = AdapterGateway.get(this);
         gateway.start();
@@ -157,6 +165,7 @@ public final class AppService extends Service {
         if (rctaOverlay != null) rctaOverlay.stop();
         unregisterNavReceiver();
         unregisterBluetoothCallReceiver();
+        unregisterLocationProviderReceiver();
         releaseServiceWakeLock();
         TpmsController.get(this).stopPolling();
         if (gateway != null) gateway.stop();
@@ -176,12 +185,17 @@ public final class AppService extends Service {
             try {
                 startForeground(NOTIFICATION_ID, note, types);
             } catch (Exception e) {
-                AppLog.line(this, "Service: foreground fallback " + e.getClass().getSimpleName());
+                AppLog.line(this, "Service: foreground fallback "
+                        + e.getClass().getSimpleName() + " " + safeMessage(e));
                 try {
-                    startForeground(NOTIFICATION_ID, note, 0);
+                    startForeground(
+                            NOTIFICATION_ID,
+                            note,
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    );
                 } catch (Exception fallback) {
                     AppLog.line(this, "Service: foreground failed "
-                            + fallback.getClass().getSimpleName());
+                            + fallback.getClass().getSimpleName() + " " + safeMessage(fallback));
                 }
             }
         } else {
@@ -219,27 +233,87 @@ public final class AppService extends Service {
 
     private int foregroundTypes() {
         if (Build.VERSION.SDK_INT < 29) return 0;
-        int types = connectedDeviceForegroundAllowed()
-                ? ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                : 0;
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            types |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
-        }
+        return foregroundTypeMask(locationForegroundAllowed());
+    }
+
+    static int foregroundTypeMask(boolean locationAllowed) {
+        int types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE;
+        if (locationAllowed) types |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
         return types;
     }
 
-    private boolean connectedDeviceForegroundAllowed() {
-        return Build.VERSION.SDK_INT < 31
-                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    private boolean locationForegroundAllowed() {
+        boolean foregroundLocation =
+                checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                        == PackageManager.PERMISSION_GRANTED
+                        || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                        == PackageManager.PERMISSION_GRANTED;
+        if (!foregroundLocation) return false;
+        return checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
     }
 
+    private static String safeMessage(Exception error) {
+        String message = error.getMessage();
+        if (message == null) return "";
+        message = message.replace('\n', ' ').replace('\r', ' ').trim();
+        return message.length() <= 180 ? message : message.substring(0, 180);
+    }
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private void registerLocationProviderReceiver() {
+        if (locationProviderReceiverRegistered) return;
+        try {
+            locationProviderReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent == null
+                            || !LocationManager.PROVIDERS_CHANGED_ACTION.equals(intent.getAction())) {
+                        return;
+                    }
+                    long now = SystemClock.elapsedRealtime();
+                    if (now - lastLocationProviderRefreshAt < 750L) return;
+                    lastLocationProviderRefreshAt = now;
+                    startForegroundCompat(SERVICE_TEXT);
+                    if (compassMonitor != null && AppSettings.compassEnabled(AppService.this)) {
+                        compassMonitor.start();
+                    }
+                    AppLog.line(AppService.this,
+                            "Service: foreground types refreshed after location provider change");
+                }
+            };
+            IntentFilter filter = new IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION);
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(locationProviderReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(locationProviderReceiver, filter);
+            }
+            locationProviderReceiverRegistered = true;
+        } catch (Exception e) {
+            locationProviderReceiver = null;
+            locationProviderReceiverRegistered = false;
+            AppLog.line(this, "Service: location provider receiver failed "
+                    + e.getClass().getSimpleName());
+        }
+    }
+
+    private void unregisterLocationProviderReceiver() {
+        if (!locationProviderReceiverRegistered) return;
+        try {
+            unregisterReceiver(locationProviderReceiver);
+        } catch (Exception ignored) {
+        }
+        locationProviderReceiverRegistered = false;
+        locationProviderReceiver = null;
+    }
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerNavReceiver() {
         if (navReceiverRegistered) return;
         try {
-            navReceiver = new NavBroadcastReceiver();
+            navReceiver = new LegacyNavBroadcastReceiver();
             IntentFilter filter = new IntentFilter();
-            NavBroadcastReceiver.addActions(filter);
+            LegacyNavBroadcastReceiver.addActions(filter);
             if (Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(navReceiver, filter, Context.RECEIVER_EXPORTED);
             } else {
@@ -290,6 +364,7 @@ public final class AppService extends Service {
         serviceWakeLock = null;
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerBluetoothCallReceiver() {
         if (bluetoothCallReceiverRegistered) return;
         try {
