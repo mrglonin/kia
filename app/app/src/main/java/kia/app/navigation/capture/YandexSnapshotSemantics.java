@@ -105,6 +105,31 @@ final class YandexSnapshotSemantics {
                 || semanticMicroPresent);
     }
 
+    /**
+     * The Yandex bridge attaches annotation exit metadata to generic keys. Keep an
+     * explicitly prefixed value authoritative, then accept that producer contract.
+     */
+    static String roundaboutExitForProvenance(String provenance,
+                                              String annotationExit,
+                                              String notificationExit,
+                                              String genericExit) {
+        if ("annotation".equals(provenance)) {
+            return firstNonEmpty(annotationExit, genericExit);
+        }
+        if ("notification".equals(provenance)) {
+            return firstNonEmpty(notificationExit, genericExit);
+        }
+        return firstNonEmpty(genericExit);
+    }
+
+    private static String firstNonEmpty(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) return value.trim();
+        }
+        return "";
+    }
+
     private static String normalize(String value) {
         if (value == null) return "";
         return value.trim().toLowerCase(Locale.US)
