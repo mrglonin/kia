@@ -262,7 +262,7 @@ public final class AdapterProtocol {
             frame[8] = 0;
             applyTbtIcon(frame, imageId);
         } else if (applyExactIcon(frame, imageId)) {
-            // Exact cluster mappings found on the real KIA cluster; keep them outside TBT mode.
+            // Exact composite mappings verified on the real KIA cluster.
         } else {
             applyClassicIcon(frame, imageId);
         }
@@ -744,9 +744,9 @@ public final class AdapterProtocol {
             case 16:
             case 17:
             case 18:
-                // TBT has one verified "leave roundabout" glyph (0x61), without an exit-number
-                // channel. Falling back to 0x09 rendered an unrelated/default maneuver.
-                f[5] = 0x61;
+                // The one-byte TBT glyph cannot carry the selected exit. Use the verified
+                // composite cluster frame so the gray circle keeps its yellow exit branch.
+                applyExactIcon(f, id);
                 break;
             default:
                 f[5] = 0x09;

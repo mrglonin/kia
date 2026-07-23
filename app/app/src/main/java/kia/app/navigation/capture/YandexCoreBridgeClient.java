@@ -1262,20 +1262,19 @@ public final class YandexCoreBridgeClient {
     }
 
     private static String selectedRoundaboutExit(Bundle snapshot, String provenance) {
-        if ("annotation".equals(provenance)) {
-            return firstString(snapshot,
-                    "annotation_roundabout_exit", "annotation_roundabout_exit_number",
-                    "annotation_exit_number",
-                    "guide_roundabout_exit", "guide_roundabout_exit_number",
-                    "guide_exit_number");
-        }
-        if ("notification".equals(provenance)) {
-            return firstString(snapshot,
-                    "notification_roundabout_exit", "notification_roundabout_exit_number",
-                    "notification_exit_number",
-                    "roundabout_exit", "roundabout_exit_number", "exit_number");
-        }
-        return firstString(snapshot, "roundabout_exit", "roundabout_exit_number", "exit_number");
+        String annotationExit = firstString(snapshot,
+                "annotation_roundabout_exit", "annotation_roundabout_exit_number",
+                "annotation_exit_number",
+                "guide_roundabout_exit", "guide_roundabout_exit_number",
+                "guide_exit_number");
+        String notificationExit = firstString(snapshot,
+                "notification_roundabout_exit", "notification_roundabout_exit_number",
+                "notification_exit_number");
+        String genericExit = firstString(snapshot,
+                "roundabout_exit", "roundabout_exit_number",
+                "maneuver_exit_number", "exit_number");
+        return YandexSnapshotSemantics.roundaboutExitForProvenance(
+                provenance, annotationExit, notificationExit, genericExit);
     }
 
     private void logMissingProvider() {

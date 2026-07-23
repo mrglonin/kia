@@ -1,5 +1,16 @@
 # Changelog
 
+## v23.01 / 355 - 2026-07-23
+
+- KIA app `23.01 / 355`: `updates/kia_355.apk`.
+- Исправлен номерной манёвр кругового движения: KIA теперь принимает `roundabout_exit_number` / `maneuver_exit_number`, которые уже передаёт displayed annotation из Yandex Navigator Kia mod.
+- В режиме TBT съезды 1/2/3/4 больше не схлопываются в общий код `61 00 00 00`: приборка получает проверенные составные кадры `20 08 11 0C/00/24/18` с серым кругом и выбранной жёлтой веткой. Общий манёвр выхода с кругового остаётся `61 00 00 00`.
+- Арбитраж main/micro, дистанции, hold кругового, gray-road и остальные манёвры не изменялись.
+- Yandex Navigator Kia mod не изменён: он уже корректно извлекает номер съезда, исправлено несовпадение consumer-контракта на стороне KIA.
+- OTA KIA переведён на GitHub Release asset `v23.01-355`; установленный Yandex mod `7.10-kia.20260723` переустанавливать не требуется.
+- Проверено: `51` unit-тест без failures/errors/skips, `lintRelease` — `0 errors`, release build, zipalign и APK signature verification успешны.
+- KIA APK: `5849071` байт, SHA-256 `3637ffb75fda89470f64a853c92a94e4cb79a2fee59ff467c6332b2f6b82e8de`; сертификат SHA-256 `72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7` совпадает с `23.00`.
+
 ## v23.00 / 354 - 2026-07-23
 
 - KIA app `23.00 / 354`: `updates/kia_354.apk`.

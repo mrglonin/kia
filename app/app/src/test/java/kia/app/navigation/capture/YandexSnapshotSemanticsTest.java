@@ -78,6 +78,24 @@ public class YandexSnapshotSemanticsTest {
     }
 
     @Test
+    public void annotationAcceptsGenericExitMetadataFromYandexBridge() {
+        assertEquals("3", YandexSnapshotSemantics.roundaboutExitForProvenance(
+                "annotation", "", "", "3"));
+    }
+
+    @Test
+    public void annotationPrefixedExitRemainsAuthoritative() {
+        assertEquals("2", YandexSnapshotSemantics.roundaboutExitForProvenance(
+                "annotation", "2", "", "4"));
+    }
+
+    @Test
+    public void notificationDoesNotReuseAnnotationExit() {
+        assertEquals("4", YandexSnapshotSemantics.roundaboutExitForProvenance(
+                "notification", "2", "4", "3"));
+    }
+
+    @Test
     public void coalescingIdentityPreservesRouteAndManeuverTransitions() {
         String first = YandexSnapshotSemantics.coalescingIdentity(
                 "active", "route-a", "turn_right", "annotation",
