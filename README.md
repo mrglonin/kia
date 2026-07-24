@@ -2,22 +2,22 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-[![Скачать KIA 23.01 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.01%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.01-355/kia_355.apk)
+[![Скачать KIA 23.02 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.02%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.02-356/kia_356.apk)
 
-- APK KIA: [kia_355.apk](https://github.com/mrglonin/kia/releases/download/v23.01-355/kia_355.apk)
+- APK KIA: [kia_356.apk](https://github.com/mrglonin/kia/releases/download/v23.02-356/kia_356.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-arm7-kia-mod.apk](https://github.com/mrglonin/kia/releases/download/v23.00-354/yandex_navi-7_10-arm7-kia-mod.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.01-355`](https://github.com/mrglonin/kia/releases/tag/v23.01-355)
-- Текущий публичный релиз: `23.01` / `355`
+- GitHub Release: [`v23.02-356`](https://github.com/mrglonin/kia/releases/tag/v23.02-356)
+- Текущий публичный релиз: `23.02` / `356`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.01` / `355` | `updates/kia_355.apk`, 5.6 MB | `3637ffb75fda89470f64a853c92a94e4cb79a2fee59ff467c6332b2f6b82e8de` |
+| KIA app | `23.02` / `356` | `updates/kia_356.apk`, 5.6 MB | `9277f39c2f7dcd1eacf112e6ee20b94dc3423a1a3b61413c3e1db58f459ae7ab` |
 | Yandex Navigator Kia mod | `7.10-kia.20260723` / `71011062` | `updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk`, 76 MB | `07f4979ee2df95b62ce8c1a44f8ecc6a9892b9481951ab780962fe06508f8be7` |
 
-В `23.00` выбор стрелки был переведён на реальный порядок манёвров: ближайший micro/lane-манёвр показывается раньше удалённого кругового. В `23.01` исправлено отображение выбранной жёлтой ветки для 1/2/3/4 съезда с кругового. При обновлении с `23.00` достаточно установить только KIA `23.01`; Yandex mod `7.10-kia.20260723` менять не требуется.
+В `23.00` выбор стрелки был переведён на реальный порядок манёвров: ближайший micro/lane-манёвр показывается раньше удалённого кругового. В `23.01` исправлено отображение выбранной жёлтой ветки для 1/2/3/4 съезда с кругового. В `23.02` микроманёвр управляет только жёлтым знаком и серой дорогой, а дистанция и прогресс приборки непрерывно относятся к основному манёвру; transient `0` удерживает последний безопасный кадр. При обновлении достаточно установить только KIA `23.02`; Yandex mod `7.10-kia.20260723` менять не требуется.
 
 ## Что работает
 
@@ -60,17 +60,17 @@
 ADB:
 
 ```bash
-adb install -r updates/kia_355.apk
+adb install -r updates/kia_356.apk
 adb install -r updates/yandex/yandex_navi-7_10-arm7-kia-mod.apk
 ```
 
 На магнитоле:
 
-1. Установить `kia_355.apk`.
+1. Установить `kia_356.apk`.
 2. Выдать runtime permissions: уведомления, геолокация, Bluetooth, audio/media.
 3. Включить специальные права: поверх окон, изменение системных настроек, доступ к уведомлениям, игнор оптимизации батареи.
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
-5. Установить Yandex Navigator mod, если интеграция через Kia bridge настраивается впервые. При обновлении KIA `23.00` до `23.01` переустанавливать уже имеющийся Yandex mod `7.10-kia.20260723` не нужно.
+5. Установить Yandex Navigator mod, если интеграция через Kia bridge настраивается впервые. При обновлении KIA до `23.02` переустанавливать уже имеющийся Yandex mod `7.10-kia.20260723` не нужно.
 
 ## Сборка
 
@@ -91,11 +91,12 @@ Release-сборка подписывается публичным debug-keystor
 
 ```bash
 ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
-$ADB -s emulator-5554 install -r updates/kia_355.apk
+$ADB -s emulator-5554 install -r updates/kia_356.apk
 $ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario nav_stale_lane_conflict_sample
+$ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario nav_micro_main_counter_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario rcta_both
 ```
 

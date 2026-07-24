@@ -34,4 +34,16 @@ public final class AdapterProtocolNavigationTest {
         assertEquals(0x00, frame[8] & 0xff);
         assertTrue(AdapterProtocol.validChecksum(frame));
     }
+
+    @Test
+    public void microIconCanCarryMainDistanceAndProgressAsOneCounter() {
+        byte[] frame = AdapterProtocol.maneuver(
+                "context_ra_turn_right", 990f, false, false, 3);
+
+        assertEquals(0x03, frame[9] & 0xff);
+        assertEquals(0xde, frame[10] & 0xff);
+        assertEquals(0x00, frame[11] & 0xff);
+        assertEquals(0x30, frame[12] & 0xf0);
+        assertTrue(AdapterProtocol.validChecksum(frame));
+    }
 }
