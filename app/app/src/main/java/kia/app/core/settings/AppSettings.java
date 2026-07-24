@@ -53,6 +53,10 @@ public final class AppSettings {
     private static final String KEY_RCTA_ARROW_COUNT = "rcta_arrow_count";
     private static final String KEY_OTHER_MEDIA_SOURCE_MODE = "other_media_source_mode";
     private static final String KEY_MEDIA_TEXT_MODE = "media_text_mode";
+    private static final String KEY_MEDIA_ANDROID_SOURCE_DELAY_MS = "media_android_source_delay_ms";
+    private static final String KEY_MEDIA_UART_SOURCE_DELAY_MS = "media_uart_source_delay_ms";
+    private static final String KEY_MEDIA_ARTIST_DELAY_MS = "media_artist_delay_ms";
+    private static final String KEY_MEDIA_SOURCE_REASSERT = "media_source_reassert";
     private static final String KEY_CALL_SOURCE_MODE = "call_source_mode";
     private static final String KEY_CANBUS_TEMP_SOURCE = "canbus_temp_source";
     private static final String KEY_FIRMWARE_SOURCE = "firmware_source";
@@ -100,7 +104,14 @@ public final class AppSettings {
     public static final int RCTA_ARROW_COUNT_MIN = 3;
     public static final int RCTA_ARROW_COUNT_MAX = 6;
     public static final int RCTA_ARROW_COUNT_DEFAULT = RCTA_ARROW_COUNT_MIN;
-    private static final int SCHEMA = 47;
+    private static final int SCHEMA = 48;
+    public static final int MEDIA_SOURCE_DELAY_MIN_MS = 0;
+    public static final int MEDIA_SOURCE_DELAY_MAX_MS = 3000;
+    public static final int MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS = 300;
+    public static final int MEDIA_UART_SOURCE_DELAY_DEFAULT_MS = 1000;
+    public static final int MEDIA_ARTIST_DELAY_MIN_MS = 0;
+    public static final int MEDIA_ARTIST_DELAY_MAX_MS = 8000;
+    public static final int MEDIA_ARTIST_DELAY_DEFAULT_MS = 2500;
     private static final int DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS = 0;
     private static final int DEFAULT_NAV_MANEUVER_TEXT_SECONDS = 0;
     private static final int DEFAULT_NAV_MICRO_HOLD_SECONDS = 5;
@@ -164,6 +175,10 @@ public final class AppSettings {
                     .putInt(KEY_RCTA_ARROW_COUNT, RCTA_ARROW_COUNT_DEFAULT)
                     .putInt(KEY_OTHER_MEDIA_SOURCE_MODE, OTHER_SOURCE_ANDROID)
                     .putInt(KEY_MEDIA_TEXT_MODE, MEDIA_TEXT_ARTIST_THEN_TRACK)
+                    .putInt(KEY_MEDIA_ANDROID_SOURCE_DELAY_MS, MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS)
+                    .putInt(KEY_MEDIA_UART_SOURCE_DELAY_MS, MEDIA_UART_SOURCE_DELAY_DEFAULT_MS)
+                    .putInt(KEY_MEDIA_ARTIST_DELAY_MS, MEDIA_ARTIST_DELAY_DEFAULT_MS)
+                    .putBoolean(KEY_MEDIA_SOURCE_REASSERT, true)
                     .putInt(KEY_CALL_SOURCE_MODE, CALL_SOURCE_BLUETOOTH)
                     .putInt(KEY_CANBUS_TEMP_SOURCE, CANBUS_TEMP_OUTSIDE)
                     .putInt(KEY_FIRMWARE_SOURCE, FIRMWARE_SOURCE_LATEST);
@@ -205,6 +220,18 @@ public final class AppSettings {
             }
             if (schema < 12 || !prefs.contains(KEY_MEDIA_TEXT_MODE)) {
                 edit.putInt(KEY_MEDIA_TEXT_MODE, MEDIA_TEXT_ARTIST_THEN_TRACK);
+            }
+            if (schema < 48 || !prefs.contains(KEY_MEDIA_ANDROID_SOURCE_DELAY_MS)) {
+                edit.putInt(KEY_MEDIA_ANDROID_SOURCE_DELAY_MS, MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS);
+            }
+            if (schema < 48 || !prefs.contains(KEY_MEDIA_UART_SOURCE_DELAY_MS)) {
+                edit.putInt(KEY_MEDIA_UART_SOURCE_DELAY_MS, MEDIA_UART_SOURCE_DELAY_DEFAULT_MS);
+            }
+            if (schema < 48 || !prefs.contains(KEY_MEDIA_ARTIST_DELAY_MS)) {
+                edit.putInt(KEY_MEDIA_ARTIST_DELAY_MS, MEDIA_ARTIST_DELAY_DEFAULT_MS);
+            }
+            if (schema < 48 || !prefs.contains(KEY_MEDIA_SOURCE_REASSERT)) {
+                edit.putBoolean(KEY_MEDIA_SOURCE_REASSERT, true);
             }
             if (schema < 37 || !prefs.contains(KEY_MEDIA_PROFILE)) {
                 edit.putInt(KEY_MEDIA_PROFILE,
@@ -793,6 +820,44 @@ public final class AppSettings {
 
     public static String mediaTextModeLabel(Context context) {
         return mediaTextMode(context) == MEDIA_TEXT_TRACK_ONLY ? "Только трек" : "Автор + трек";
+    }
+
+    public static int mediaSourceDelayMs(Context context) {
+        return mediaSourceDelayMs(context, mediaProfile(context));
+    }
+
+    public static int mediaSourceDelayMs(Context context, int profile) {
+        String key = profile == MEDIA_PROFILE_UART_REAL
+                ? KEY_MEDIA_UART_SOURCE_DELAY_MS : KEY_MEDIA_ANDROID_SOURCE_DELAY_MS;
+        int fallback = profile == MEDIA_PROFILE_UART_REAL
+                ? MEDIA_UART_SOURCE_DELAY_DEFAULT_MS : MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS;
+        return clamp(prefs(context).getInt(key, fallback),
+                MEDIA_SOURCE_DELAY_MIN_MS, MEDIA_SOURCE_DELAY_MAX_MS);
+    }
+
+    public static void setMediaSourceDelayMs(Context context, int profile, int value) {
+        String key = profile == MEDIA_PROFILE_UART_REAL
+                ? KEY_MEDIA_UART_SOURCE_DELAY_MS : KEY_MEDIA_ANDROID_SOURCE_DELAY_MS;
+        prefs(context).edit().putInt(key,
+                clamp(value, MEDIA_SOURCE_DELAY_MIN_MS, MEDIA_SOURCE_DELAY_MAX_MS)).apply();
+    }
+
+    public static int mediaArtistDelayMs(Context context) {
+        return clamp(prefs(context).getInt(KEY_MEDIA_ARTIST_DELAY_MS, MEDIA_ARTIST_DELAY_DEFAULT_MS),
+                MEDIA_ARTIST_DELAY_MIN_MS, MEDIA_ARTIST_DELAY_MAX_MS);
+    }
+
+    public static void setMediaArtistDelayMs(Context context, int value) {
+        prefs(context).edit().putInt(KEY_MEDIA_ARTIST_DELAY_MS,
+                clamp(value, MEDIA_ARTIST_DELAY_MIN_MS, MEDIA_ARTIST_DELAY_MAX_MS)).apply();
+    }
+
+    public static boolean mediaSourceReassertEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_MEDIA_SOURCE_REASSERT, true);
+    }
+
+    public static void setMediaSourceReassertEnabled(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_MEDIA_SOURCE_REASSERT, value).apply();
     }
 
     public static String mediaProfileLabel(Context context) {

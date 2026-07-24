@@ -12,6 +12,7 @@ final class NavigationClusterTxController {
     private final NavigationClusterSender sender;
     private final VisualSink visualSink;
     private NavigationTxKey lastManeuverKey;
+    private NavigationTxKey lastMainManeuverKey;
     private String lastCustomKey = "";
     private String lastCustomVisual = "";
 
@@ -34,31 +35,65 @@ final class NavigationClusterTxController {
     }
 
     void sendManeuver(String imageId, float distance, boolean km, int progressBucket, boolean force) {
+        sendManeuver(imageId, distance, km, progressBucket, force, true);
+    }
+
+    void sendManeuver(String imageId, float distance, boolean km, int progressBucket,
+                      boolean force, boolean rememberAsMain) {
         NavigationTxKey key = maneuverKey(imageId, "", distance, km, progressBucket);
-        if (!force && key.equals(lastManeuverKey)) return;
-        send(key);
+        if (!force && key.equals(lastManeuverKey)) {
+            if (rememberAsMain) lastMainManeuverKey = key;
+            return;
+        }
+        send(key, rememberAsMain);
     }
 
     void sendManeuverWithGrayRoad(String imageId, String grayRoadId, float distance,
                                   boolean km, int progressBucket, boolean force) {
+        sendManeuverWithGrayRoad(imageId, grayRoadId, distance, km,
+                progressBucket, force, true);
+    }
+
+    void sendManeuverWithGrayRoad(String imageId, String grayRoadId, float distance,
+                                  boolean km, int progressBucket, boolean force,
+                                  boolean rememberAsMain) {
         NavigationTxKey key = maneuverKey(imageId, grayRoadId, distance, km, progressBucket);
-        if (!force && key.equals(lastManeuverKey)) return;
-        send(key);
+        if (!force && key.equals(lastManeuverKey)) {
+            if (rememberAsMain) lastMainManeuverKey = key;
+            return;
+        }
+        send(key, rememberAsMain);
     }
 
     boolean resendLastManeuver() {
         if (lastManeuverKey == null) return false;
-        send(lastManeuverKey);
+        send(lastManeuverKey, lastManeuverKey.equals(lastMainManeuverKey));
+        return true;
+    }
+
+    void rememberMainManeuver(String imageId, float distance, boolean km, int progressBucket) {
+        NavigationTxKey key = maneuverKey(imageId, "", distance, km, progressBucket);
+        lastMainManeuverKey = updatedMainManeuverKey(lastMainManeuverKey, key, true);
+    }
+
+    NavigationTxKey lastMainManeuverKey() {
+        return lastMainManeuverKey;
+    }
+
+    boolean resendLastMainManeuver() {
+        if (lastMainManeuverKey == null) return false;
+        send(lastMainManeuverKey, true);
         return true;
     }
 
     void clear() {
         lastManeuverKey = null;
+        lastMainManeuverKey = null;
         lastCustomKey = "";
         lastCustomVisual = "";
     }
 
-    private void send(NavigationTxKey key) {
+    private void send(NavigationTxKey key, boolean rememberAsMain) {
         if (key.grayRoad.isEmpty()) {
             visualSink.onClusterVisual(clusterVisualText(
                     key.maneuver, key.progress, key.distance, key.km));
@@ -71,8 +106,16 @@ final class NavigationClusterTxController {
                     key.distance, key.km, key.progress);
         }
         lastManeuverKey = key;
+        lastMainManeuverKey = updatedMainManeuverKey(
+                lastMainManeuverKey, key, rememberAsMain);
         lastCustomKey = "";
         lastCustomVisual = "";
+    }
+
+    static NavigationTxKey updatedMainManeuverKey(NavigationTxKey currentMain,
+                                                   NavigationTxKey candidate,
+                                                   boolean rememberAsMain) {
+        return rememberAsMain ? candidate : currentMain;
     }
 
     static String clusterVisualText(String imageId, int progressBucket, float distance, boolean km) {

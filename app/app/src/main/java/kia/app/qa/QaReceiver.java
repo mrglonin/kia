@@ -16,6 +16,7 @@ import kia.app.core.model.TpmsState;
 import kia.app.media.capture.MediaCaptureManager;
 import kia.app.media.cluster.MediaClusterSender;
 import kia.app.media.domain.CallFeature;
+import kia.app.media.domain.MediaFeature;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.core.settings.AppSettings;
 import kia.app.entry.AppService;
@@ -154,6 +155,21 @@ public final class QaReceiver extends BroadcastReceiver {
             feature.handle(qaNavLaneIntent(0));
             AppLog.line(context, "QA nav micro post-pass sample sent: hold="
                     + AppSettings.navMicroHoldSeconds(context));
+        } else if ("nav_micro_main_counter_sample".equals(scenario)) {
+            AppSettings.setNavMicroManeuvers(context, true);
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setActive(false, "qa_nav_micro_main_counter_reset");
+            feature.setActive(true, "qa_nav_micro_main_counter");
+            feature.handle(qaNavCounterMainIntent(1000));
+            feature.handle(qaNavCounterLaneIntent(1000, 150));
+            feature.handle(qaNavCounterLaneIntent(990, 140));
+            feature.handle(qaNavCounterLaneIntent(980, 130));
+            feature.handle(qaNavCounterLaneIntent(0, 120));
+            feature.handle(qaNavCounterLaneIntent(970, 110));
+            feature.handle(qaNavCounterLaneIntent(960, 0));
+            AppLog.line(context, "QA nav micro main counter sample sent:"
+                    + " main=1000,990,980,hold,970,960"
+                    + " micro=150,140,130,120,110,0");
         } else if ("nav_micro_post_pass_refresh_sample".equals(scenario)) {
             int seconds = intent.getIntExtra("seconds", AppSettings.navMicroHoldSeconds(context));
             AppSettings.setNavMicroManeuvers(context, true);
@@ -356,7 +372,7 @@ public final class QaReceiver extends BroadcastReceiver {
     private static void sendMediaSource(Context context, String source, String packageName) {
         MediaState state = new MediaState(source, packageName, "", "", -1L, false,
                 System.currentTimeMillis());
-        new MediaClusterSender(context).sendSourceOnly(state);
+        mediaSender(context).sendSourceOnly(state);
         AppLog.line(context, "QA media source: " + source + " / " + packageName);
     }
 
@@ -364,13 +380,20 @@ public final class QaReceiver extends BroadcastReceiver {
                                       String artist, String title) {
         MediaState state = new MediaState(source, packageName, artist, title, -1L, true,
                 System.currentTimeMillis());
-        new MediaClusterSender(context).send(state);
+        mediaSender(context).send(state);
         AppLog.line(context, "QA media text: " + source + " / " + packageName
                 + " / " + artist + " / " + title);
     }
 
+    private static MediaClusterSender mediaSender(Context context) {
+        return AppSettings.universalMediaProfile(context)
+                ? MediaClusterSender.get(context)
+                : new MediaClusterSender(context);
+    }
+
     private static void setMediaProfile(Context context, int profile) {
         AppSettings.setMediaProfile(context, profile);
+        MediaFeature.get(context).onProfileChanged();
         AppService.start(context);
         AppLog.line(context, "QA media profile: " + AppSettings.mediaProfileLabel(context));
         MediaCaptureManager.scanOnce(context);
@@ -425,6 +448,31 @@ public final class QaReceiver extends BroadcastReceiver {
         intent.putExtra("allowed_directions", "straight,left");
         intent.putExtra("lane_topology", "straight,left highlight=STRAIGHT_AHEAD");
         return intent;
+    }
+
+    private static Intent qaNavCounterMainIntent(int mainMeters) {
+        Intent intent = qaNavMainIntent();
+        intent.putExtra("route_id", "qa_micro_main_counter");
+        putQaMainDistance(intent, mainMeters);
+        return intent;
+    }
+
+    private static Intent qaNavCounterLaneIntent(int mainMeters, int laneMeters) {
+        Intent intent = qaNavLaneIntent(laneMeters);
+        intent.putExtra("route_id", "qa_micro_main_counter");
+        putQaMainDistance(intent, mainMeters);
+        return intent;
+    }
+
+    private static void putQaMainDistance(Intent intent, int meters) {
+        String distance = meters + " m";
+        intent.putExtra("distance", distance);
+        intent.putExtra("maneuver_distance", distance);
+        intent.putExtra("current_maneuver_distance", distance);
+        intent.putExtra("distance_to_maneuver", distance);
+        intent.putExtra("maneuver_distance_meters", meters);
+        intent.putExtra("current_maneuver_distance_meters", meters);
+        intent.putExtra("distance_to_maneuver_meters", meters);
     }
 
     private static Intent qaNavOldRouteIntent() {

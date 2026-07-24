@@ -269,6 +269,23 @@ final class SpdRadioServiceClient {
         String stationName(String teyesLocalName) {
             return firstNonEmpty(teyesLocalName, listName, freqInfo == null ? "" : freqInfo.ps, rdsPs, rdsRt);
         }
+
+        String stationNameForUniversal() {
+            // RDS RT is programme/song text and changes while listening. It must not be learned
+            // as the persistent station name. TEYES keeps the legacy method above unchanged.
+            return selectUniversalStationName(
+                    listName, freqInfo == null ? "" : freqInfo.ps, rdsPs, rdsRt);
+        }
+    }
+
+    static String selectUniversalStationName(String listName, String frequencyPs,
+                                             String rdsPs, String ignoredRdsRt) {
+        String[] candidates = {listName, frequencyPs, rdsPs};
+        for (String candidate : candidates) {
+            String value = clean(candidate);
+            if (!value.isEmpty()) return value;
+        }
+        return "";
     }
 
     private static final class RadioFreqInfo {

@@ -27,6 +27,7 @@ import kia.app.core.settings.AppSettings;
 import kia.app.diagnostics.HealthMonitor;
 import kia.app.media.capture.BluetoothCallReceiver;
 import kia.app.media.capture.MediaCaptureManager;
+import kia.app.media.cluster.MediaClusterSender;
 import kia.app.media.domain.CallFeature;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.navigation.capture.DgisDashboardClient;
@@ -157,6 +158,7 @@ public final class AppService extends Service {
     public void onDestroy() {
         if (healthMonitor != null) healthMonitor.stop();
         if (mediaCapture != null) mediaCapture.stop();
+        MediaClusterSender.get(this).stopSynchronizedPath();
         if (dgisDashboard != null) dgisDashboard.stop();
         if (yandexCoreBridge != null) yandexCoreBridge.stop();
         if (compassMonitor != null) compassMonitor.stop();
@@ -397,6 +399,7 @@ public final class AppService extends Service {
 
     private void syncMediaCapture() {
         if (mediaCapture == null) return;
+        MediaClusterSender.get(this).onProfileChanged();
         if (AppSettings.mediaEnabled(this)) {
             mediaCapture.start();
         } else {

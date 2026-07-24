@@ -873,7 +873,9 @@ public final class MainActivity extends Activity {
                 action("Текущая", currentHint, frequency.isEmpty() ? COLOR_MUTED : COLOR_ACCENT_BLUE,
                         this::showCurrentRadioStationDialog),
                 action("Список", "все сохранённые частоты", COLOR_ACCENT_BLUE,
-                        this::showRadioStationListDialog));
+                        this::showRadioStationListDialog),
+                action("Добавить", "частота и своё название", COLOR_ACCENT_BLUE,
+                        this::showAddRadioStationBandDialog));
         return panel;
     }
 
@@ -2504,6 +2506,37 @@ public final class MainActivity extends Activity {
                 action("Только трек", "без исполнителя", mediaTextModeColor(AppSettings.MEDIA_TEXT_TRACK_ONLY),
                         () -> setMediaTextMode(AppSettings.MEDIA_TEXT_TRACK_ONLY)));
 
+        if (AppSettings.universalMediaProfile(this)) {
+            panel.addView(settingsDivider());
+            addSettingsSubHeader(panel, "Синхронизация источника",
+                    profile == AppSettings.MEDIA_PROFILE_UART_REAL
+                            ? "пауза после реального UART source перед текстом"
+                            : "пауза после переключения штатного media source");
+            addActionGridColumns(panel, 3,
+                    mediaSourceDelayAction(0),
+                    mediaSourceDelayAction(300),
+                    mediaSourceDelayAction(600),
+                    mediaSourceDelayAction(1000),
+                    mediaSourceDelayAction(1500),
+                    mediaSourceDelayAction(2000));
+
+            panel.addView(settingsDivider());
+            addSettingsSubHeader(panel, "Исполнитель перед треком",
+                    "время первой строки; 0 сразу показывает название");
+            addActionGridColumns(panel, 2,
+                    mediaArtistDelayAction(0),
+                    mediaArtistDelayAction(2500),
+                    mediaArtistDelayAction(5000),
+                    mediaArtistDelayAction(8000));
+            addActionGrid(panel,
+                    action("Контрольный повтор",
+                            AppSettings.mediaSourceReassertEnabled(this)
+                                    ? "один повтор после смены source"
+                                    : "выключен",
+                            choiceColor(AppSettings.mediaSourceReassertEnabled(this)),
+                            this::toggleMediaSourceReassert));
+        }
+
         return panel;
     }
 
@@ -2535,67 +2568,140 @@ public final class MainActivity extends Activity {
 
     private void showRadioStationListDialog() {
         List<RadioStationStore.Entry> entries = RadioStationStore.entries(this);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle("Радиостанции");
         if (entries.isEmpty()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Радиостанции")
-                    .setMessage("Станции появятся автоматически после включения радио.")
-                    .setPositiveButton("OK", null)
-                    .show();
-            return;
+            builder.setMessage("Список пока пуст. Станцию можно добавить вручную "
+                    + "или включить радио для автоматического определения.");
+        } else {
+            String[] labels = new String[entries.size()];
+            for (int i = 0; i < entries.size(); i++) {
+                RadioStationStore.Entry entry = entries.get(i);
+                labels[i] = entry.band + " " + entry.frequency + " -> " + entry.name
+                        + (entry.manual ? "  · ручная" : "  · авто");
+            }
+            builder.setItems(labels, (dialog, which) -> {
+                RadioStationStore.Entry entry = entries.get(which);
+                showRadioStationEditDialog(entry.band, entry.frequency, entry.name);
+            });
         }
-        String[] labels = new String[entries.size()];
-        for (int i = 0; i < entries.size(); i++) {
-            RadioStationStore.Entry entry = entries.get(i);
-            labels[i] = entry.band + " " + entry.frequency + " -> " + entry.name;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle("Радиостанции")
-                .setItems(labels, (dialog, which) -> {
-                    RadioStationStore.Entry entry = entries.get(which);
-                    showRadioStationEditDialog(entry.band, entry.frequency, entry.name);
-                })
+        builder
+                .setPositiveButton("Добавить", (dialog, which) -> showAddRadioStationBandDialog())
                 .setNegativeButton("Закрыть", null)
                 .show();
     }
 
-    private void showRadioStationEditDialog(String band, String frequency, String currentName) {
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        input.setText(currentName == null ? "" : currentName);
-        input.setSelectAllOnFocus(true);
-        int pad = dp(18);
-        input.setPadding(pad, dp(8), pad, dp(8));
+    private void showAddRadioStationBandDialog() {
+        String[] bands = {"FM", "AM"};
         new AlertDialog.Builder(this)
-                .setTitle(band + " " + frequency)
-                .setView(input)
-                .setPositiveButton("Сохранить", (dialog, which) -> {
-                    RadioStationStore.setStationName(this, band, frequency, input.getText().toString());
-                    AppLog.line(this, "Radio station saved: " + band + " " + frequency);
-                    resendRadioStationName(band, frequency, "radio station saved");
-                    renderTab();
-                    refresh();
-                })
-                .setNeutralButton("Сбросить", (dialog, which) -> {
-                    RadioStationStore.clearStationName(this, band, frequency);
-                    AppLog.line(this, "Radio station reset: " + band + " " + frequency);
-                    resendRadioStationName(band, frequency, "radio station reset");
-                    renderTab();
-                    refresh();
-                })
+                .setTitle("Диапазон станции")
+                .setItems(bands, (dialog, which) -> showAddRadioStationDialog(bands[which]))
                 .setNegativeButton("Отмена", null)
                 .show();
     }
 
-    private void resendRadioStationName(String band, String frequency, String reason) {
+    private void showAddRadioStationDialog(String band) {
+        String cleanBand = "AM".equalsIgnoreCase(band) ? "AM" : "FM";
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(18);
+        form.setPadding(pad, dp(8), pad, 0);
+
+        EditText frequencyInput = new EditText(this);
+        frequencyInput.setSingleLine(true);
+        frequencyInput.setHint("FM".equals(cleanBand) ? "Частота, например 101.0" : "Частота, например 1584");
+        frequencyInput.setInputType(InputType.TYPE_CLASS_NUMBER
+                | ("FM".equals(cleanBand) ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
+        frequencyInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(7)});
+        form.addView(frequencyInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        EditText nameInput = new EditText(this);
+        nameInput.setSingleLine(true);
+        nameInput.setHint("Название станции");
+        nameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        nameInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(64)});
+        form.addView(nameInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Новая " + cleanBand + " станция")
+                .setView(form)
+                .setPositiveButton("Сохранить", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    String normalized = RadioStationStore.normalizeFrequencyInput(
+                            cleanBand, frequencyInput.getText().toString());
+                    if (normalized.isEmpty()) {
+                        frequencyInput.setError("Проверьте частоту");
+                        return;
+                    }
+                    if (!RadioStationStore.saveManualStation(this, cleanBand, normalized,
+                            nameInput.getText().toString())) {
+                        nameInput.setError("Введите название, а не только частоту");
+                        return;
+                    }
+                    AppLog.line(this, "Radio station added: " + cleanBand + " " + normalized);
+                    resendRadioStationName(cleanBand, normalized);
+                    dialog.dismiss();
+                    renderTab();
+                    refresh();
+                }));
+        dialog.show();
+    }
+
+    private void showRadioStationEditDialog(String band, String frequency, String currentName) {
+        MediaState currentMedia = StateStore.media();
+        boolean currentStation = band.equalsIgnoreCase(
+                RadioStationStore.currentBand(currentMedia))
+                && frequency.equals(RadioStationStore.currentFrequency(currentMedia));
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(64)});
+        input.setText(currentName == null ? "" : currentName);
+        input.setSelectAllOnFocus(true);
+        int pad = dp(18);
+        input.setPadding(pad, dp(8), pad, dp(8));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(band + " " + frequency)
+                .setView(input)
+                .setPositiveButton("Сохранить", null)
+                .setNeutralButton(currentStation ? "Авто" : "Удалить", (ignored, which) -> {
+                    RadioStationStore.clearStationName(this, band, frequency);
+                    String action = currentStation ? "reset to auto" : "deleted";
+                    AppLog.line(this, "Radio station " + action + ": " + band + " " + frequency);
+                    resendRadioStationName(band, frequency);
+                    renderTab();
+                    refresh();
+                })
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    if (!RadioStationStore.saveManualStation(this, band, frequency,
+                            input.getText().toString())) {
+                        input.setError("Введите название, а не только частоту");
+                        return;
+                    }
+                    AppLog.line(this, "Radio station saved: " + band + " " + frequency);
+                    resendRadioStationName(band, frequency);
+                    dialog.dismiss();
+                    renderTab();
+                    refresh();
+                }));
+        dialog.show();
+    }
+
+    private void resendRadioStationName(String band, String frequency) {
         MediaState media = StateStore.media();
-        if (frequency.equals(RadioStationStore.currentFrequency(media))) {
-            String station = RadioStationStore.resolve(this, band, frequency, "");
-            MediaFeature.get(this).report(media.source, media.packageName, media.artist, station,
-                    media.durationMs, media.playing);
-        } else {
-            MediaFeature.get(this).resendCurrent(reason);
-        }
+        if (!band.equalsIgnoreCase(RadioStationStore.currentBand(media))
+                || !frequency.equals(RadioStationStore.currentFrequency(media))) return;
+        String station = RadioStationStore.resolveUniversal(this, band, frequency, "");
+        MediaFeature.get(this).report(media.source, media.packageName, media.artist, station,
+                media.durationMs, media.playing);
     }
 
     private LinearLayout mediaCallPanel() {
@@ -3465,7 +3571,7 @@ public final class MainActivity extends Activity {
         AppSettings.setMediaProfile(this, profile);
         AppService.start(this);
         AppLog.line(this, "Media profile: " + AppSettings.mediaProfileLabel(this));
-        MediaFeature.get(this).resendCurrent("media profile " + AppSettings.mediaProfileLabel(this));
+        MediaFeature.get(this).onProfileChanged();
         renderTab();
         refresh();
     }
@@ -3515,6 +3621,53 @@ public final class MainActivity extends Activity {
         refresh();
     }
 
+    private View mediaSourceDelayAction(int delayMs) {
+        String title = delayMs == 0 ? "Без паузы"
+                : (delayMs < 1000 ? delayMs + " мс" : formatSeconds(delayMs) + " с");
+        boolean selected = AppSettings.mediaSourceDelayMs(this) == delayMs;
+        return action(title, selected ? "выбрано" : "после source",
+                choiceColor(selected), () -> setMediaSourceDelayMs(delayMs));
+    }
+
+    private void setMediaSourceDelayMs(int delayMs) {
+        int profile = AppSettings.mediaProfile(this);
+        AppSettings.setMediaSourceDelayMs(this, profile, delayMs);
+        AppLog.line(this, "Media source delay: " + delayMs + " ms / "
+                + AppSettings.mediaProfileLabel(this));
+        MediaFeature.get(this).resendCurrent("media source delay " + delayMs + "ms");
+        renderTab();
+        refresh();
+    }
+
+    private View mediaArtistDelayAction(int delayMs) {
+        String title = delayMs == 0 ? "Сразу трек" : formatSeconds(delayMs) + " с";
+        boolean selected = AppSettings.mediaArtistDelayMs(this) == delayMs;
+        return action(title, selected ? "выбрано" : "показывать автора",
+                choiceColor(selected), () -> setMediaArtistDelayMs(delayMs));
+    }
+
+    private void setMediaArtistDelayMs(int delayMs) {
+        AppSettings.setMediaArtistDelayMs(this, delayMs);
+        AppLog.line(this, "Media artist delay: " + delayMs + " ms");
+        MediaFeature.get(this).resendCurrent("media artist delay " + delayMs + "ms");
+        renderTab();
+        refresh();
+    }
+
+    private void toggleMediaSourceReassert() {
+        boolean enabled = !AppSettings.mediaSourceReassertEnabled(this);
+        AppSettings.setMediaSourceReassertEnabled(this, enabled);
+        AppLog.line(this, "Media source reassert: " + enabled);
+        MediaFeature.get(this).resendCurrent("media source reassert " + enabled);
+        renderTab();
+        refresh();
+    }
+
+    private static String formatSeconds(int delayMs) {
+        if (delayMs % 1000 == 0) return String.valueOf(delayMs / 1000);
+        return String.format(Locale.US, "%.1f", delayMs / 1000f);
+    }
+
     private View mediaProfileAction(int profile, String title, String hint) {
         boolean selected = AppSettings.mediaProfile(this) == profile;
         return action(title, hint, choiceColor(selected), selected, () -> setMediaProfile(profile));
@@ -3560,6 +3713,11 @@ public final class MainActivity extends Activity {
         out.append("\nПрофиль: ").append(AppSettings.mediaProfileLabel(this));
         out.append("\nРежим other: ").append(AppSettings.otherMediaSourceLabel(this));
         out.append("\nТекст панели: ").append(AppSettings.mediaTextModeLabel(this));
+        if (AppSettings.universalMediaProfile(this)) {
+            out.append("\nSource delay: ").append(AppSettings.mediaSourceDelayMs(this)).append(" мс");
+            out.append(" | автор: ").append(AppSettings.mediaArtistDelayMs(this)).append(" мс");
+            out.append(" | повтор: ").append(yesNo(AppSettings.mediaSourceReassertEnabled(this)));
+        }
         return out.toString();
     }
 
@@ -3571,6 +3729,11 @@ public final class MainActivity extends Activity {
         out.append("\ncapture=").append(mediaCaptureModeText());
         out.append("\ntextId=").append(mediaTextCommandDebug(media));
         out.append(" other=").append(AppSettings.otherMediaSourceLabel(this));
+        if (AppSettings.universalMediaProfile(this)) {
+            out.append("\ndelay=").append(AppSettings.mediaSourceDelayMs(this));
+            out.append(" artistDelay=").append(AppSettings.mediaArtistDelayMs(this));
+            out.append(" reassert=").append(AppSettings.mediaSourceReassertEnabled(this));
+        }
         out.append("\nsource=").append(emptyDash(media.source));
         out.append("\npackage=").append(emptyDash(media.packageName));
         out.append("\nartist=").append(emptyDash(media.artist));

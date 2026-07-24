@@ -89,7 +89,6 @@ public final class NavigationFeature {
     private static final float GPS_BEARING_MIN_SPEED_MPS = 1.4f;
     private static final float GPS_COURSE_MIN_DISTANCE_METERS = 2.5f;
     private static final float GPS_COURSE_MAX_ACCURACY_METERS = 35f;
-    private static final int MICRO_TX_PROGRESS_BUCKET = 9;
     private static final long FINISH_COMPASS_SUPPRESS_MS = 0L;
     private static final float DGIS_MICRO_DISTANCE_METERS = 160f;
     private static final long YANDEX_WATCHDOG_STALE_MS = 25000L;
@@ -115,7 +114,6 @@ public final class NavigationFeature {
     private int pendingInactiveGeneration;
     private int routeLoadingFallbackGeneration;
     private int routeReroutingGeneration;
-    private int microRestoreGeneration;
     private int yandexWatchdogGeneration;
     private int lastSentSpeedLimit = -1;
     private float maneuverProgressBaseMeters;
@@ -134,6 +132,9 @@ public final class NavigationFeature {
     private String lastRoundaboutExitKey = "";
     private String lastNavigationDecisionKey = "";
     private String lastTxMicroGuardKey = "";
+    private String lastMicroTxHoldKey = "";
+    private String lastMicroTxLogKey = "";
+    private String pendingMicroRestoreSource = "";
     private String activeLaneHint = "";
     private String activeLaneSource = "";
     private String activeEventHint = "";
@@ -228,6 +229,37 @@ public final class NavigationFeature {
                         first(lastFinishDirectionReason, "finish_direction_animation"),
                         false);
                 scheduleFinishDirectionAnimation();
+            }
+        }
+    };
+
+    private final Runnable microRestoreTask = new Runnable() {
+        @Override
+        public void run() {
+            synchronized (NavigationFeature.this) {
+                long now = System.currentTimeMillis();
+                if (!state.active || state.finishReached
+                        || TextUtils.isEmpty(activeMicroManeuver)) {
+                    return;
+                }
+                if (microHintUntil > now) {
+                    scheduleMicroRestore(pendingMicroRestoreSource);
+                    return;
+                }
+                String expiredMicro = activeMicroManeuver;
+                String restoreSource = first(pendingMicroRestoreSource, activeMicroSource,
+                        "micro_expired");
+                clearMicroHintHold();
+                clearLaneDistanceHold();
+                state = state.withNavigationDebug(state.mainManeuverId, state.routeActionId,
+                        "", "", "expired",
+                        state.grayRoadId, state.grayRoadScheme, now);
+                publishNavigationState();
+                restoreMainVisualAfterMicroEnd("expiry:" + restoreSource, false);
+                AppLog.navigation(app, "NAV_MICRO_EXPIRED"
+                        + " route=" + first(activeRouteId, "-")
+                        + " micro=" + clean(expiredMicro)
+                        + " source=" + clean(restoreSource));
             }
         }
     };
@@ -392,9 +424,10 @@ public final class NavigationFeature {
             }
             startRouteReroutingHold(source);
         }
+        boolean fullSnapshotMicroCleared = false;
         if (bool(intent, "bridge_full_snapshot", false)
                 && bool(intent, "micro_clear", false)) {
-            clearMicroForFullBridgeSnapshot(intent, source);
+            fullSnapshotMicroCleared = clearMicroForFullBridgeSnapshot(intent, source);
         }
         if (ACTION_MANEUVER.equals(action) || KIA_ACTION_MANEUVER.equals(action)) {
             handleManeuver(intent);
@@ -418,9 +451,14 @@ public final class NavigationFeature {
             sendConfiguredText();
             if (state.active) AppLog.line(app, "Navigation exceeded=" + exceeded);
         }
+        if (fullSnapshotMicroCleared
+                && !incomingRouteIdChangesActiveRoute(intent)
+                && !shouldTransmitActiveMicroToCluster()) {
+            restoreMainVisualAfterMicroEnd("full_snapshot:" + clean(source), false);
+        }
     }
 
-    private void clearMicroForFullBridgeSnapshot(Intent intent, String source) {
+    private boolean clearMicroForFullBridgeSnapshot(Intent intent, String source) {
         boolean hadMicro = !TextUtils.isEmpty(activeMicroManeuver)
                 || !TextUtils.isEmpty(activeMicroDistance)
                 || !TextUtils.isEmpty(state.microManeuverId)
@@ -428,7 +466,7 @@ public final class NavigationFeature {
         clearMicroHintHold();
         clearLaneDistanceHold();
         lastTxMicroGuardKey = "";
-        if (!hadMicro) return;
+        if (!hadMicro) return false;
         long now = System.currentTimeMillis();
         state = state.withNavigationDebug(state.mainManeuverId, state.routeActionId,
                 "", "", "cleared_by_full_snapshot",
@@ -438,6 +476,7 @@ public final class NavigationFeature {
                 + " route=" + first(routeIdFromIntent(intent), activeRouteId, "-")
                 + " seq=" + first(text(intent, "seq"), "-")
                 + " source=" + clean(source));
+        return true;
     }
 
     public synchronized void handleTeyes(Intent intent) {
@@ -804,7 +843,6 @@ public final class NavigationFeature {
             cancelFinishHold();
             routeLoadingFallbackGeneration++;
             routeReroutingGeneration++;
-            microRestoreGeneration++;
             clearFinalSegmentFinishDirection("off " + cleanSource);
             waitingForRoute = false;
             routeStartedAt = 0L;
@@ -837,7 +875,6 @@ public final class NavigationFeature {
             finishCompassSuppressUntil = 0L;
             routeLoadingFallbackGeneration++;
             routeReroutingGeneration++;
-            microRestoreGeneration++;
             clearFinalSegmentFinishDirection("active " + clean(source));
             waitingForRoute = true;
             routeStartedAt = now;
@@ -1994,7 +2031,6 @@ public final class NavigationFeature {
                         inferredForwardMicro, microDistanceSource)));
                 boolean sendingMicro = !postPassMicroHolding && microTxSource && microAllowed;
                 boolean providerMicroTx = sendingMicro && providerLaneMicro;
-                boolean microReplacesDistanceProgress = sendingMicro;
                 boolean routeActionIsMain = shouldPromoteRouteRoadActionAsMain(routeRoadOnly,
                         visibleRouteActionManeuver, displayManeuver, maneuverDistance,
                         routeRoadActionRejectedAsMain, intent);
@@ -2067,15 +2103,20 @@ public final class NavigationFeature {
                 if (TextUtils.isEmpty(laneMainManeuver)) {
                     laneMainManeuver = first(state.maneuver, visibleRouteActionManeuver, cleanManeuver);
                 }
-                String routeManeuverForTx = first(priorityLaneManeuver, laneMainManeuver,
+                String routeManeuverCandidate = first(priorityLaneManeuver, laneMainManeuver,
                         state.maneuver, visibleRouteActionManeuver, cleanManeuver);
-                String routeDistanceForTx = currentMainTxDistance();
+                MicroTxDistancePolicy.MainSnapshot routeMainTx =
+                        MicroTxDistancePolicy.selectMainSnapshot(
+                                routeManeuverCandidate, mainDistance,
+                                state.maneuver, state.maneuverDistance);
+                String routeManeuverForTx = routeMainTx.maneuver;
+                String routeDistanceForTx = routeMainTx.distance;
                 int routeProgressForTx = currentMainTxProgress(routeManeuverForTx, routeDistanceForTx);
                 boolean keepActiveMicroOnRouteRoadGray = routeRoadOnly
                         && !sendingMicro
                         && !lanePriorityActive
                         && shouldTransmitActiveMicroToCluster();
-                boolean activeMicroReplacesDistanceProgress = keepActiveMicroOnRouteRoadGray;
+                boolean resolvedMicroTx = sendingMicro || keepActiveMicroOnRouteRoadGray;
                 String laneManeuver = lanePriorityActive
                         ? priorityLaneManeuver
                         : sendingMicro
@@ -2083,11 +2124,7 @@ public final class NavigationFeature {
                         : keepActiveMicroOnRouteRoadGray
                         ? activeMicroManeuver
                         : laneMainManeuver;
-                String laneSendDistance = microReplacesDistanceProgress
-                        ? microDistance
-                        : activeMicroReplacesDistanceProgress
-                        ? activeMicroDistanceToPublish()
-                        : routeDistanceForTx;
+                String laneSendDistance = routeDistanceForTx;
                 String grayDecisionReason = sendingMicro ? grayDecision.reason
                         : keepActiveMicroOnRouteRoadGray ? "active_micro_before_main"
                         : lanePriorityActive ? grayDecision.reason
@@ -2125,24 +2162,14 @@ public final class NavigationFeature {
                             + laneManeuver + " cluster=" + currentClusterYellow
                             + " source=" + source);
                 }
-                boolean txByMicroArrowOnly = false;
-                String txLaneDistance = laneSendDistance;
-                int laneTxProgressBucket = (microReplacesDistanceProgress
-                        || activeMicroReplacesDistanceProgress)
-                        ? MICRO_TX_PROGRESS_BUCKET
-                        : routeProgressForTx;
-                if (!TextUtils.isEmpty(laneManeuver) && canMergeGrayRoad(laneManeuver)) {
-                    if (txByMicroArrowOnly) {
-                        if (routeRoadOnly && TextUtils.isEmpty(nonZeroDistance(txLaneDistance))) {
-                            AppLog.line(app, "Navigation lane micro tx held without distance: "
-                                    + laneManeuver + " source=" + source);
-                        } else {
-                            sendManeuverIfChanged(laneManeuver, distanceValue(txLaneDistance),
-                                    isKm(txLaneDistance),
-                                    laneTxProgressBucket,
-                                    forceLaneTx);
-                        }
-                    } else if (routeRoadOnly && TextUtils.isEmpty(nonZeroDistance(laneSendDistance))) {
+                int laneTxProgressBucket = routeProgressForTx;
+                if (resolvedMicroTx) {
+                    sendResolvedMicroVisual(laneManeuver,
+                            canMergeGrayRoad(laneManeuver) ? grayRoadForTx : "",
+                            routeManeuverForTx, laneSendDistance, laneTxProgressBucket,
+                            forceLaneTx, source + ":lane_gray");
+                } else if (!TextUtils.isEmpty(laneManeuver) && canMergeGrayRoad(laneManeuver)) {
+                    if (routeRoadOnly && TextUtils.isEmpty(nonZeroDistance(laneSendDistance))) {
                         AppLog.line(app, "Navigation lane gray road held without distance: "
                                 + laneManeuver + " gray=" + grayRoad + " source=" + source);
                     } else {
@@ -2171,7 +2198,7 @@ public final class NavigationFeature {
                     }
                 }
                 if (providerMicroTx && !TextUtils.isEmpty(microManeuver)) {
-                    AppLog.line(app, "Navigation provider micro TX with micro distance/progress: "
+                    AppLog.line(app, "Navigation provider micro TX with main distance/progress: "
                             + clean(microManeuver)
                             + " mainDistance=" + clean(routeDistanceForTx)
                             + " laneDistance=" + clean(microDistance)
@@ -2226,33 +2253,33 @@ public final class NavigationFeature {
                         microWithoutGrayCanSend ? microManeuver : first(state.maneuver, cleanManeuver),
                         noGrayReason);
             }
+            String mainCandidateForTx = first(displayManeuver, state.maneuver, cleanManeuver);
+            MicroTxDistancePolicy.MainSnapshot noGrayMainTx =
+                    MicroTxDistancePolicy.selectMainSnapshot(
+                            mainCandidateForTx, first(mainDistance, maneuverDistance),
+                            state.maneuver, state.maneuverDistance);
+            String mainForTx = noGrayMainTx.maneuver;
+            String mainDistanceForTx = noGrayMainTx.distance;
             if (microWithoutGrayCanSend) {
                 lastRouteGuidanceAt = now;
                 cancelPendingInactive("lane micro " + source);
-                String microTxDistance = nonZeroDistance(microDistance);
-                if (TextUtils.isEmpty(microTxDistance)) {
-                    AppLog.line(app, "Navigation lane micro held without route distance: "
-                            + clean(microManeuver) + " laneDistance=" + clean(microDistance)
-                            + " source=" + source);
-                } else {
-                    boolean forceMicroTx = clusterYellowDiffersFrom(microManeuver,
-                            currentClusterYellowManeuver());
-                    int microTxProgress = MICRO_TX_PROGRESS_BUCKET;
-                    sendManeuverIfChanged(microManeuver, distanceValue(microTxDistance),
-                            isKm(microTxDistance), microTxProgress, forceMicroTx);
+                boolean forceMicroTx = clusterYellowDiffersFrom(microManeuver,
+                        currentClusterYellowManeuver());
+                boolean sentMicro = sendResolvedMicroVisual(microManeuver, "",
+                        mainForTx, mainDistanceForTx,
+                        currentMainTxProgress(mainForTx, mainDistanceForTx),
+                        forceMicroTx, source + ":lane_no_gray");
+                if (sentMicro) {
                     AppLog.line(app, (providerMicroWithoutGray
                             ? "Navigation provider micro TX without gray road: "
                             : "Navigation lane micro TX without gray road: ")
                             + clean(microManeuver) + " mainDistance=" + clean(mainDistance)
                             + " laneDistance=" + clean(microDistance)
-                            + " txDistance=" + clean(microTxDistance)
+                            + " txDistance=" + clean(mainDistanceForTx)
                             + " heldGray=" + first(heldGrayRoad, "-")
                             + " source=" + source);
                 }
             } else {
-                String mainForTx = first(displayManeuver, state.maneuver, cleanManeuver);
-                String mainDistanceForTx = first(nonZeroDistance(mainDistance),
-                        nonZeroDistance(maneuverDistance), nonZeroDistance(state.maneuverDistance));
                 if (isUsableManeuver(mainForTx)
                         && (!routeRoadOnly || !TextUtils.isEmpty(mainDistanceForTx))) {
                     sendManeuverIfChanged(mainForTx, distanceValue(mainDistanceForTx),
@@ -2274,7 +2301,6 @@ public final class NavigationFeature {
             return;
         }
         if (direct) lastDirectManeuverAt = now;
-        microRestoreGeneration++;
         lastRouteGuidanceAt = now;
         waitingForRoute = false;
         routeStartedAt = 0L;
@@ -2446,12 +2472,12 @@ public final class NavigationFeature {
         int txProgressBucket;
         if (sendHighlightedMicro) {
             txManeuver = highlightedMicroManeuver;
-            txDistance = highlightedMicroDistance;
-            txProgressBucket = MICRO_TX_PROGRESS_BUCKET;
+            txDistance = displayDistance;
+            txProgressBucket = progressBucket;
         } else if (sendActiveMicro) {
             txManeuver = activeMicroManeuver;
-            txDistance = activeMicroDistanceToPublish();
-            txProgressBucket = MICRO_TX_PROGRESS_BUCKET;
+            txDistance = displayDistance;
+            txProgressBucket = progressBucket;
         } else {
             txManeuver = displayManeuver;
             txDistance = displayDistance;
@@ -2473,10 +2499,14 @@ public final class NavigationFeature {
             if (routeRoadStandaloneWithoutDistance) {
                 AppLog.line(app, "Navigation route-road standalone held from TX: "
                         + displayManeuver + " source=" + source);
+            } else if (isMicroTx) {
+                sendResolvedMicroVisual(txManeuver, "", displayManeuver,
+                        txDistanceForTx, txProgressForTx, forceRouteSnapshot,
+                        source + ":highlighted_or_held");
             } else if (!TextUtils.isEmpty(fallbackGrayRoad) && !isMicroTx) {
-                    sendManeuverWithGrayRoadIfChanged(txManeuver, fallbackGrayRoad,
-                            distanceValue(txDistance), isKm(txDistance), txProgressBucket,
-                            forceRouteSnapshot);
+                sendManeuverWithGrayRoadIfChanged(txManeuver, fallbackGrayRoad,
+                        distanceValue(txDistance), isKm(txDistance), txProgressBucket,
+                        forceRouteSnapshot);
             } else {
                 sendManeuverIfChanged(txManeuver, distanceValue(txDistanceForTx),
                         isKm(txDistanceForTx), txProgressForTx,
@@ -2487,7 +2517,7 @@ public final class NavigationFeature {
             AppLog.line(app, "Navigation micro TX from lane highlight: "
                     + clean(highlightedMicroManeuver)
                     + " over main=" + clean(displayManeuver)
-                    + " txDistance=micro txProgress=micro"
+                    + " txDistance=main txProgress=main"
                     + " gray=" + first(grayRoadLabel(fallbackGrayRoad), "-")
                     + " source=" + source);
         }
@@ -3394,19 +3424,11 @@ public final class NavigationFeature {
     }
 
     private void scheduleMicroRestore(String source) {
-        int generation = ++microRestoreGeneration;
-        long delayMs = Math.max(5, AppSettings.navMicroHoldSeconds(app)) * 1000L;
-        handler.postDelayed(() -> {
-            synchronized (NavigationFeature.this) {
-                if (generation != microRestoreGeneration) return;
-                if (!state.active || state.finishReached) return;
-                if (NavigationModeSettings.isTbt(app) || NavigationModeSettings.isFinishDirection(app)) return;
-                if (shouldTransmitActiveMicroToCluster()) {
-                    scheduleMicroRestore(source);
-                    return;
-                }
-            }
-        }, delayMs);
+        pendingMicroRestoreSource = clean(source);
+        handler.removeCallbacks(microRestoreTask);
+        long delayMs = Math.max(250L,
+                microHintUntil - System.currentTimeMillis() + 25L);
+        handler.postDelayed(microRestoreTask, delayMs);
     }
 
     private boolean microDistanceAllowed(String distanceText) {
@@ -3516,60 +3538,110 @@ public final class NavigationFeature {
         return true;
     }
 
-    private void resendActiveMicroToCluster() {
-        resendActiveMicroToCluster(false);
+    private boolean resendActiveMicroToCluster() {
+        return resendActiveMicroToCluster(false);
     }
 
-    private void resendActiveMicroToCluster(boolean forceResend) {
-        if (!shouldTransmitActiveMicroToCluster()) return;
-        transmitActiveMicroToCluster(forceResend);
+    private boolean resendActiveMicroToCluster(boolean forceResend) {
+        if (!shouldTransmitActiveMicroToCluster()) return false;
+        return transmitActiveMicroToCluster(forceResend, "", "", -1);
     }
 
-    private void transmitActiveMicroToCluster(boolean forceResend) {
+    private boolean transmitActiveMicroToCluster(boolean forceResend,
+                                                 String preferredMainManeuver,
+                                                 String preferredMainDistance,
+                                                 int preferredMainProgress) {
         String laneDistance = activeMicroDistanceToPublish();
-        String txDistance = nonZeroDistance(laneDistance);
-        if (TextUtils.isEmpty(txDistance)) {
-            AppLog.line(app, "Navigation active micro held without route distance: "
-                    + clean(activeMicroManeuver)
-                    + " laneDistance=" + clean(laneDistance));
-            return;
-        }
         long now = System.currentTimeMillis();
         boolean providerMicro = providerVisualLaneSource(activeMicroSource);
-        int txProgress = MICRO_TX_PROGRESS_BUCKET;
         String grayRoad = activeGrayRoadForLaneTx(activeMicroManeuver, now);
         grayRoad = stableGrayRoadForLaneTx(grayRoad, activeMicroManeuver, now);
         boolean force = forceResend
                 || clusterYellowDiffersFrom(activeMicroManeuver, currentClusterYellowManeuver());
-        if (!TextUtils.isEmpty(grayRoad)) {
-            sendManeuverWithGrayRoadIfChanged(activeMicroManeuver, grayRoad,
-                    distanceValue(txDistance), isKm(txDistance), txProgress, force);
-        } else {
-            sendManeuverIfChanged(activeMicroManeuver, distanceValue(txDistance), isKm(txDistance),
-                    txProgress, force);
-        }
+        boolean sent = sendResolvedMicroVisual(activeMicroManeuver, grayRoad,
+                preferredMainManeuver, preferredMainDistance, preferredMainProgress,
+                force, first(activeMicroSource, "active_micro"));
         AppLog.line(app, (providerMicro
                 ? "Navigation active provider micro TX: "
                 : "Navigation active micro TX: ") + clean(activeMicroManeuver)
-                + " mainDistance=" + clean(currentMainTxDistance())
+                + " mainDistance=" + clean(first(preferredMainDistance,
+                state.maneuverDistance))
                 + " laneDistance=" + clean(laneDistance)
-                + " txDistance=" + clean(txDistance)
+                + " txDistance=main"
+                + " sent=" + sent
                 + " gray=" + first(grayRoad, "-"));
+        return sent;
+    }
+
+    private boolean sendResolvedMicroVisual(String microManeuver, String grayRoad,
+                                            String preferredMainManeuver,
+                                            String preferredMainDistance,
+                                            int preferredMainProgress,
+                                            boolean force, String source) {
+        MicroTxDistancePolicy.MainSnapshot selectedMain =
+                MicroTxDistancePolicy.selectMainSnapshot(
+                        preferredMainManeuver, preferredMainDistance,
+                        state.maneuver, state.maneuverDistance);
+        String selectedMainDistance = selectedMain.distance;
+        String selectedMainManeuver = selectedMain.maneuver;
+        if (!isUsableManeuver(microManeuver)
+                || !isUsableManeuver(selectedMainManeuver)
+                || TextUtils.isEmpty(selectedMainDistance)) {
+            String holdKey = clean(activeRouteId) + "|" + clean(selectedMainManeuver)
+                    + "|" + clean(microManeuver);
+            if (!holdKey.equals(lastMicroTxHoldKey)) {
+                lastMicroTxHoldKey = holdKey;
+                AppLog.navigation(app, "NAV_MICRO_TX_HOLD"
+                        + " reason=main_distance_unknown"
+                        + " route=" + first(activeRouteId, "-")
+                        + " main=" + first(clean(selectedMainManeuver), "-")
+                        + " micro=" + first(clean(microManeuver), "-")
+                        + " source=" + clean(source));
+            }
+            return false;
+        }
+        lastMicroTxHoldKey = "";
+        int mainProgress = selectedMain.preferred && preferredMainProgress >= 0
+                ? normalizeProgressBucket(preferredMainProgress)
+                : currentMainTxProgress(selectedMainManeuver, selectedMainDistance);
+        clusterTx.rememberMainManeuver(selectedMainManeuver,
+                distanceValue(selectedMainDistance), isKm(selectedMainDistance), mainProgress);
+        String compatibleGrayRoad = canMergeGrayRoad(microManeuver) ? clean(grayRoad) : "";
+        if (!TextUtils.isEmpty(compatibleGrayRoad)) {
+            sendManeuverWithGrayRoadIfChanged(microManeuver, compatibleGrayRoad,
+                    distanceValue(selectedMainDistance), isKm(selectedMainDistance),
+                    mainProgress, force, true);
+        } else {
+            sendManeuverIfChanged(microManeuver, distanceValue(selectedMainDistance),
+                    isKm(selectedMainDistance), mainProgress, force, true);
+        }
+        String txLogKey = clean(activeRouteId) + "|" + clean(selectedMainManeuver)
+                + "@" + clean(selectedMainDistance) + "|" + clean(microManeuver)
+                + "|" + compatibleGrayRoad + "|" + mainProgress;
+        if (!txLogKey.equals(lastMicroTxLogKey)) {
+            lastMicroTxLogKey = txLogKey;
+            AppLog.navigation(app, "NAV_MICRO_TX"
+                    + " route=" + first(activeRouteId, "-")
+                    + " main=" + clean(selectedMainManeuver)
+                    + " mainDistance=" + clean(selectedMainDistance)
+                    + " micro=" + clean(microManeuver)
+                    + " microDistance=" + first(clean(activeMicroDistanceToPublish()), "-")
+                    + " progress=" + mainProgress
+                    + " gray=" + first(compatibleGrayRoad, "-")
+                    + " source=" + clean(source));
+        }
+        return true;
     }
 
     private boolean maneuverTxBlockedByEarlierActiveMicro(String candidateManeuver,
                                                           float candidateDistance,
-                                                          boolean candidateKm) {
+                                                          boolean candidateKm,
+                                                          int candidateProgress) {
         String candidate = clean(candidateManeuver);
         if (isFinishManeuver(candidate)) return false;
         if (!activeMicroTxEligibleWithoutSpatial()) return false;
         String mainDistance = clusterDistanceText(candidateDistance, candidateKm);
         String microDistance = activeMicroDistanceToPublish();
-        if (candidate.equals(clean(activeMicroManeuver))
-                && sameMicroAndMainDistance(distanceMeters(mainDistance),
-                distanceMeters(microDistance))) {
-            return false;
-        }
         ManeuverArbiter.Decision decision = NavigationManeuverPolicy.decide(
                 candidate, mainDistance, activeMicroManeuver, microDistance, true,
                 sameManeuverFamily(candidate, activeMicroManeuver));
@@ -3586,7 +3658,7 @@ public final class NavigationFeature {
                     + " microDistance=" + clean(microDistance)
                     + " reason=" + decision.reason);
         }
-        transmitActiveMicroToCluster(false);
+        transmitActiveMicroToCluster(false, candidate, mainDistance, candidateProgress);
         return true;
     }
 
@@ -3601,6 +3673,37 @@ public final class NavigationFeature {
                     + " source=" + clean(source));
         }
         clearMicroHintHold();
+        return true;
+    }
+
+    private boolean restoreMainVisualAfterMicroEnd(String reason, boolean force) {
+        String mainManeuver = clean(state.maneuver);
+        String mainDistance = nonZeroDistance(state.maneuverDistance);
+        if (!state.active || state.finishReached || routeWaiting() || state.loading()
+                || routeReroutingActive(System.currentTimeMillis())
+                || !isUsableManeuver(mainManeuver)
+                || TextUtils.isEmpty(mainDistance)) {
+            String holdReason = !state.active ? "inactive"
+                    : state.finishReached ? "finish"
+                    : routeReroutingActive(System.currentTimeMillis()) ? "rerouting"
+                    : routeWaiting() || state.loading() ? "route_not_ready"
+                    : !isUsableManeuver(mainManeuver) ? "main_unknown"
+                    : "main_distance_unknown";
+            AppLog.navigation(app, "NAV_MICRO_RESTORE_HOLD"
+                    + " reason=" + holdReason
+                    + " route=" + first(activeRouteId, "-")
+                    + " main=" + first(mainManeuver, "-")
+                    + " source=" + clean(reason));
+            return false;
+        }
+        int progress = currentMainTxProgress(mainManeuver, mainDistance);
+        sendManeuverWithFallbackGray(mainManeuver, mainDistance, progress, force);
+        AppLog.navigation(app, "NAV_MICRO_RESTORE"
+                + " route=" + first(activeRouteId, "-")
+                + " main=" + mainManeuver
+                + " mainDistance=" + mainDistance
+                + " progress=" + progress
+                + " source=" + clean(reason));
         return true;
     }
 
@@ -3889,6 +3992,7 @@ public final class NavigationFeature {
 
     private void applyLaneDistanceOnly(Intent intent, String distance, String source,
                                        String sourceLower, long now) {
+        boolean hadActiveMicro = !TextUtils.isEmpty(activeMicroManeuver);
         boolean lanePassed = handleLaneDistancePassed(distance, now, source);
         String cleanDistance = lanePassed ? "" : nonZeroDistance(distance);
         if (!TextUtils.isEmpty(cleanDistance)) {
@@ -4013,6 +4117,7 @@ public final class NavigationFeature {
             activeMicroStatus = microDecisionStatus(microManeuver, shownDistance,
                     true, activeMicroSource);
             microHintUntil = now + laneHoldMs();
+            scheduleMicroRestore(activeMicroSource);
             microDistance = activeMicroDebugDistanceToPublish();
             microStatus = activeMicroStatus;
         }
@@ -4022,8 +4127,13 @@ public final class NavigationFeature {
                         microManeuver, microDistance, microStatus,
                         heldGrayRoad, grayRoadSchemeText(heldGrayRoad, intent, sourceLower), now);
         publishNavigationState();
+        boolean microSent = false;
         if (!TextUtils.isEmpty(microManeuver) && shouldTransmitActiveMicroToCluster()) {
-            resendActiveMicroToCluster();
+            microSent = resendActiveMicroToCluster();
+        }
+        if (!microSent && (lanePassed || hadActiveMicro)) {
+            restoreMainVisualAfterMicroEnd((lanePassed ? "lane_passed:" : "lane_clear:")
+                    + clean(source), false);
         }
         AppLog.line(app, "Navigation lane distance only: distance="
                 + first(shownDistance, "-")
@@ -4157,9 +4267,14 @@ public final class NavigationFeature {
         activeMicroTxAllowed = txAllowed && !TextUtils.isEmpty(cleanDistance);
         activeMicroPostPassUntil = 0L;
         microHintUntil = now + laneHoldMs();
+        scheduleMicroRestore(source);
     }
 
     private void clearMicroHintHold() {
+        handler.removeCallbacks(microRestoreTask);
+        pendingMicroRestoreSource = "";
+        lastMicroTxHoldKey = "";
+        lastMicroTxLogKey = "";
         activeMicroManeuver = "";
         activeMicroDebugDistance = "";
         activeMicroDistance = "";
@@ -4225,16 +4340,7 @@ public final class NavigationFeature {
     }
 
     private String currentMainTxDistance() {
-        String distance = nonZeroDistance(state.maneuverDistance);
-        if (!TextUtils.isEmpty(distance)) return distance;
-        String frame = currentClusterManeuverFrame();
-        String frameManeuver = clusterYellowManeuverFromFrame(frame);
-        if (!TextUtils.isEmpty(state.maneuver)
-                && !TextUtils.isEmpty(frameManeuver)
-                && !sameManeuverFamily(state.maneuver, frameManeuver)) {
-            return "";
-        }
-        return nonZeroDistance(clusterFrameDistanceText(frame));
+        return nonZeroDistance(state.maneuverDistance);
     }
 
     private int currentMainTxProgress(String maneuver, String distanceText) {
@@ -4688,7 +4794,9 @@ public final class NavigationFeature {
             }
             long microHoldMs = Math.max(LANE_HINT_OVERLAY_HOLD_MS,
                     AppSettings.navMicroHoldSeconds(app) * 1000L);
-            if (!TextUtils.isEmpty(stored.microManeuverId)) {
+            long storedMicroUntil = stored.updatedAt > 0L
+                    ? stored.updatedAt + microHoldMs : 0L;
+            if (!TextUtils.isEmpty(stored.microManeuverId) && storedMicroUntil > now) {
                 activeMicroManeuver = stored.microManeuverId;
                 activeMicroDistance = validMicroDistance(stored.microDistance,
                         stored.maneuverDistance, stored.microManeuverId,
@@ -4697,10 +4805,19 @@ public final class NavigationFeature {
                 activeMicroStatus = stored.microStatus;
                 activeMicroSource = stored.source;
                 activeMicroTxAllowed = microDistanceAllowed(activeMicroDistance);
-                microHintUntil = now + microHoldMs;
-            } else if (!TextUtils.isEmpty(stored.microDistance)) {
+                microHintUntil = storedMicroUntil;
+                scheduleMicroRestore(stored.source);
+            } else if (!TextUtils.isEmpty(stored.microDistance) && storedMicroUntil > now) {
                 activeLaneDistance = stored.microDistance;
-                laneDistanceUntil = now + microHoldMs;
+                laneDistanceUntil = storedMicroUntil;
+            } else if (!TextUtils.isEmpty(stored.microManeuverId)
+                    || !TextUtils.isEmpty(stored.microDistance)) {
+                clearMicroHintHold();
+                clearLaneDistanceHold();
+                state = state.withNavigationDebug(stored.mainManeuverId,
+                        stored.routeActionId, "", "", "expired",
+                        stored.grayRoadId, stored.grayRoadScheme, now);
+                StateStore.setNavigation(app, state);
             }
             AppLog.line(app, "Navigation route state synced for mode switch: " + state.summary());
         }
@@ -4812,11 +4929,18 @@ public final class NavigationFeature {
 
     private void sendManeuverIfChanged(String imageId, float distance, boolean km, int progressBucket,
                                        boolean force) {
+        sendManeuverIfChanged(imageId, distance, km, progressBucket, force, false);
+    }
+
+    private void sendManeuverIfChanged(String imageId, float distance, boolean km, int progressBucket,
+                                       boolean force, boolean resolvedMicro) {
         String cleanImageId = clean(imageId);
         progressBucket = normalizeProgressBucket(progressBucket);
         if (!navigationTxAllowed(cleanImageId)) return;
         if (maneuverTxBlockedByRerouting(cleanImageId)) return;
-        if (maneuverTxBlockedByEarlierActiveMicro(cleanImageId, distance, km)) return;
+        if (!resolvedMicro
+                && maneuverTxBlockedByEarlierActiveMicro(cleanImageId, distance, km,
+                progressBucket)) return;
         if (finishDirectionShouldOverride() && !isFinishManeuver(cleanImageId)) {
             if (!sendDirectionToFinishIfNeeded(force)) {
                 sendFinishDirectionPlaceholder(force);
@@ -4826,10 +4950,11 @@ public final class NavigationFeature {
         if (canMergeGrayRoad(cleanImageId) && !TextUtils.isEmpty(activeGrayRoadId)
                 && grayRoadUntil > System.currentTimeMillis()) {
             sendManeuverWithGrayRoadIfChanged(cleanImageId, activeGrayRoadId,
-                    distance, km, progressBucket, force);
+                    distance, km, progressBucket, force, resolvedMicro);
             return;
         }
-        clusterTx.sendManeuver(imageId, distance, km, progressBucket, force);
+        clusterTx.sendManeuver(imageId, distance, km, progressBucket, force,
+                !resolvedMicro);
     }
 
     private void sendManeuverWithGrayRoadIfChanged(String imageId, String grayRoadId, float distance,
@@ -4839,11 +4964,20 @@ public final class NavigationFeature {
 
     private void sendManeuverWithGrayRoadIfChanged(String imageId, String grayRoadId, float distance,
                                                    boolean km, int progressBucket, boolean force) {
+        sendManeuverWithGrayRoadIfChanged(imageId, grayRoadId, distance, km,
+                progressBucket, force, false);
+    }
+
+    private void sendManeuverWithGrayRoadIfChanged(String imageId, String grayRoadId, float distance,
+                                                   boolean km, int progressBucket, boolean force,
+                                                   boolean resolvedMicro) {
         String cleanImageId = clean(imageId);
         progressBucket = normalizeProgressBucket(progressBucket);
         if (!navigationTxAllowed(cleanImageId)) return;
         if (maneuverTxBlockedByRerouting(cleanImageId)) return;
-        if (maneuverTxBlockedByEarlierActiveMicro(cleanImageId, distance, km)) return;
+        if (!resolvedMicro
+                && maneuverTxBlockedByEarlierActiveMicro(cleanImageId, distance, km,
+                progressBucket)) return;
         if (finishDirectionShouldOverride() && !isFinishManeuver(cleanImageId)) {
             boolean sentFinishDirection = sendDirectionToFinishIfNeeded(force);
             AppLog.line(app, "Navigation gray fallback blocked by finish direction: maneuver="
@@ -4855,7 +4989,8 @@ public final class NavigationFeature {
         if (isPriorityEventManeuver(cleanImageId) && !TextUtils.isEmpty(cleanGrayRoad)) {
             AppLog.line(app, "Navigation priority maneuver TX without gray road: "
                     + cleanImageId + " gray=" + cleanGrayRoad);
-            sendManeuverIfChanged(cleanImageId, distance, km, progressBucket, force);
+            sendManeuverIfChanged(cleanImageId, distance, km, progressBucket, force,
+                    resolvedMicro);
             return;
         }
         if (grayRoadIncompatibleWithManeuver(cleanImageId, cleanGrayRoad)) {
@@ -4863,10 +4998,12 @@ public final class NavigationFeature {
                     + cleanImageId + " gray=" + cleanGrayRoad);
             clearGrayRoadHold();
             clearLearnedRoadOptions();
-            sendManeuverIfChanged(cleanImageId, distance, km, progressBucket, force);
+            sendManeuverIfChanged(cleanImageId, distance, km, progressBucket, force,
+                    resolvedMicro);
             return;
         }
-        clusterTx.sendManeuverWithGrayRoad(imageId, grayRoadId, distance, km, progressBucket, force);
+        clusterTx.sendManeuverWithGrayRoad(imageId, grayRoadId, distance, km,
+                progressBucket, force, !resolvedMicro);
     }
 
     private boolean navigationTxAllowed(String imageId) {
@@ -5446,15 +5583,34 @@ public final class NavigationFeature {
             return;
         }
         if (shouldTransmitActiveMicroToCluster()) {
-            resendActiveMicroToCluster(true);
-            return;
+            if (resendActiveMicroToCluster(true)) return;
         }
-        if (clusterTx.resendLastManeuver()) return;
         if (!TextUtils.isEmpty(state.maneuver)) {
-            String distance = first(state.maneuverDistance, state.distance);
-            sendManeuverWithFallbackGray(state.maneuver, distance,
-                    maneuverProgressBucket(state.maneuver, first(state.nextStreet, state.currentStreet), distance),
-                    true);
+            String distance = nonZeroDistance(state.maneuverDistance);
+            if (!TextUtils.isEmpty(distance)) {
+                sendManeuverWithFallbackGray(state.maneuver, distance,
+                        maneuverProgressBucket(state.maneuver,
+                                first(state.nextStreet, state.currentStreet), distance),
+                        true);
+                return;
+            }
+            NavigationTxKey lastMain = clusterTx.lastMainManeuverKey();
+            if (lastMain != null
+                    && lastMain.distance > 0f
+                    && sameManeuverFamily(state.maneuver, lastMain.maneuver)
+                    && clusterTx.resendLastMainManeuver()) {
+                AppLog.navigation(app, "NAV_RESEND_LAST_MAIN"
+                        + " route=" + first(activeRouteId, "-")
+                        + " main=" + clean(lastMain.maneuver)
+                        + " distance=" + lastMain.distance
+                        + (lastMain.km ? "km" : "m")
+                        + " reason=transient_main_distance_unknown");
+                return;
+            }
+            AppLog.navigation(app, "NAV_RESEND_HOLD"
+                    + " reason=main_distance_unknown"
+                    + " route=" + first(activeRouteId, "-")
+                    + " main=" + clean(state.maneuver));
             return;
         }
         sendConfiguredText();

@@ -29,4 +29,16 @@ public class NavigationTxKeyTest {
         assertNotEquals(base, new NavigationTxKey(
                 "context_ra_turn_right", "context_ra_gray_right", 80f, false, 9));
     }
+
+    @Test
+    public void sameMicroVisualStillChangesKeyForEachMainDistanceStep() {
+        NavigationTxKey oneKilometer = NavigationClusterTxController.maneuverKey(
+                "context_ra_turn_right", "context_ra_gray_straight_right",
+                1000f, false, 3);
+        NavigationTxKey nineHundredNinetyMeters = NavigationClusterTxController.maneuverKey(
+                "context_ra_turn_right", "context_ra_gray_straight_right",
+                990f, false, 3);
+
+        assertNotEquals(oneKilometer, nineHundredNinetyMeters);
+    }
 }

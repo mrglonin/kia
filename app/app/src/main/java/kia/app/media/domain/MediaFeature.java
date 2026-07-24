@@ -8,6 +8,7 @@ import kia.app.core.StateStore;
 import kia.app.core.model.MediaState;
 import kia.app.core.settings.AppSettings;
 import kia.app.media.cluster.MediaClusterSender;
+import kia.app.media.cluster.MediaTxPolicy;
 
 public final class MediaFeature {
     private static MediaFeature instance;
@@ -18,7 +19,7 @@ public final class MediaFeature {
 
     private MediaFeature(Context context) {
         this.app = context.getApplicationContext();
-        this.clusterSender = new MediaClusterSender(app);
+        this.clusterSender = MediaClusterSender.get(app);
     }
 
     public static synchronized MediaFeature get(Context context) {
@@ -36,8 +37,13 @@ public final class MediaFeature {
         String cleanSource = firstNonEmpty(source, labelFromPackage(packageName));
         String cleanArtist = clean(artist);
         String cleanTitle = clean(title);
-        if (isRadioSource(cleanSource, packageName) && !TextUtils.isEmpty(cleanArtist)) {
-            cleanTitle = RadioStationStore.resolve(app, cleanSource, cleanArtist, cleanTitle);
+        boolean radioSource = AppSettings.universalMediaProfile(app)
+                ? MediaTxPolicy.isPhysicalRadioSource(cleanSource, packageName)
+                : isRadioSource(cleanSource, packageName);
+        if (radioSource && !TextUtils.isEmpty(cleanArtist)) {
+            cleanTitle = AppSettings.universalMediaProfile(app)
+                    ? RadioStationStore.resolveUniversal(app, cleanSource, cleanArtist, cleanTitle)
+                    : RadioStationStore.resolve(app, cleanSource, cleanArtist, cleanTitle);
         }
         if (TextUtils.isEmpty(cleanSource) && TextUtils.isEmpty(cleanArtist) && TextUtils.isEmpty(cleanTitle)) return;
 
@@ -47,14 +53,15 @@ public final class MediaFeature {
         StateStore.setMedia(app, state);
 
         String key = cleanSource + "|" + packageName + "|" + cleanArtist + "|" + cleanTitle + "|" + playing;
-        if (!TextUtils.equals(key, lastKey)) {
+        boolean changed = !TextUtils.equals(key, lastKey);
+        if (changed) {
             lastKey = key;
-            if (StateStore.call().active) {
-                AppLog.line(app, "Media RX held by call: " + state.summary());
-            } else {
-                clusterSender.send(state);
-                AppLog.line(app, "Media RX: " + state.summary());
-            }
+        }
+        if (StateStore.call().active) {
+            if (changed) AppLog.line(app, "Media RX held by call: " + state.summary());
+        } else if (changed || AppSettings.universalMediaProfile(app)) {
+            clusterSender.send(state);
+            if (changed) AppLog.line(app, "Media RX: " + state.summary());
         }
     }
 
@@ -69,14 +76,15 @@ public final class MediaFeature {
         MediaState state = new MediaState(source, packageName, "", "", stableDurationMs, false, System.currentTimeMillis());
         StateStore.setMedia(app, state);
         String key = source + "|" + packageName + "|source|false";
-        if (!TextUtils.equals(key, lastKey)) {
+        boolean changed = !TextUtils.equals(key, lastKey);
+        if (changed) {
             lastKey = key;
-            if (StateStore.call().active) {
-                AppLog.line(app, "Media RX source held by call: " + state.summary());
-            } else {
-                clusterSender.sendSourceOnly(state);
-                AppLog.line(app, "Media RX source: " + state.summary());
-            }
+        }
+        if (StateStore.call().active) {
+            if (changed) AppLog.line(app, "Media RX source held by call: " + state.summary());
+        } else if (changed || AppSettings.universalMediaProfile(app)) {
+            clusterSender.sendSourceOnly(state);
+            if (changed) AppLog.line(app, "Media RX source: " + state.summary());
         }
     }
 
@@ -90,14 +98,15 @@ public final class MediaFeature {
                 System.currentTimeMillis());
         StateStore.setMedia(app, state);
         String key = cleanSource + "|" + packageName + "|radio-search|" + cleanFrequency;
-        if (!TextUtils.equals(key, lastKey)) {
+        boolean changed = !TextUtils.equals(key, lastKey);
+        if (changed) {
             lastKey = key;
-            if (StateStore.call().active) {
-                AppLog.line(app, "Media RX radio search held by call: " + state.summary());
-            } else {
-                clusterSender.sendRadioSearch(state);
-                AppLog.line(app, "Media RX radio search: " + state.summary());
-            }
+        }
+        if (StateStore.call().active) {
+            if (changed) AppLog.line(app, "Media RX radio search held by call: " + state.summary());
+        } else if (changed || AppSettings.universalMediaProfile(app)) {
+            clusterSender.sendRadioSearch(state);
+            if (changed) AppLog.line(app, "Media RX radio search: " + state.summary());
         }
     }
 
@@ -107,6 +116,9 @@ public final class MediaFeature {
         MediaState state = new MediaState(current.source, packageName, current.artist, current.title,
                 current.durationMs, false, System.currentTimeMillis());
         StateStore.setMedia(app, state);
+        if (AppSettings.universalMediaProfile(app)) {
+            clusterSender.onIdle(state);
+        }
         String key = state.source + "|" + packageName + "|idle|" + reason;
         if (!TextUtils.equals(key, lastKey)) {
             lastKey = key;
@@ -127,15 +139,40 @@ public final class MediaFeature {
                     + " | " + clean(reason));
             return;
         }
-        clusterSender.send(current);
+        clusterSender.forceResend(current);
         AppLog.line(app, "Media resend: " + current.summary() + " | " + clean(reason));
     }
 
     public synchronized void handleRealMediaStatus(byte[] frame) {
         if (!AppSettings.uartRealMediaProfile(app)) return;
-        RealMediaStatus status = parseRealMediaStatus(frame);
-        if (status == null || TextUtils.isEmpty(status.frequency)) return;
-        report(status.source, "uart.real", status.frequency, "", -1L, true);
+        RealMediaSourceStatus status = RealMediaSourceStatus.parse(frame);
+        if (status == null) return;
+        boolean changed = clusterSender.onRealSource(status);
+        if (!changed) return;
+        AppLog.line(app, "Media real source: " + status.source
+                + (TextUtils.isEmpty(status.frequency) ? "" : " " + status.frequency));
+        if (status.radio() && !TextUtils.isEmpty(status.frequency)) {
+            report(status.source, "uart.real", status.frequency, "", -1L, true);
+        }
+    }
+
+    public synchronized boolean hasRealRadioSource() {
+        return clusterSender.hasRealRadioSource();
+    }
+
+    public synchronized boolean hasRealSource() {
+        return clusterSender.hasRealSource();
+    }
+
+    public synchronized String realRadioFrequency() {
+        return clusterSender.realRadioFrequency();
+    }
+
+    public synchronized void onProfileChanged() {
+        lastKey = "";
+        clusterSender.onProfileChanged();
+        // StateStore still belongs to the previous capture for a short moment. The newly selected
+        // capture starts immediately and supplies an authoritative fresh state instead.
     }
 
     private String labelFromPackage(String packageName) {
@@ -177,44 +214,4 @@ public final class MediaFeature {
         return out.replaceAll("\\s+", " ");
     }
 
-    private static RealMediaStatus parseRealMediaStatus(byte[] frame) {
-        if (frame == null || frame.length < 8) return null;
-        int source;
-        int first;
-        int second;
-        if (u8(frame, 5) == 0xFD && frame.length >= 13) {
-            source = u8(frame, 8);
-            first = u8(frame, 10);
-            second = u8(frame, 11);
-        } else {
-            source = u8(frame, 5);
-            first = u8(frame, 6);
-            second = u8(frame, 7);
-        }
-        if (source == 0x02) {
-            if (first <= 0) return null;
-            int decimal = Math.max(0, Math.min(9, second / 10));
-            return new RealMediaStatus("FM", first + "." + decimal);
-        }
-        if (source == 0x09) {
-            int khz = (first << 8) | second;
-            if (khz <= 0) return null;
-            return new RealMediaStatus("AM", String.valueOf(khz));
-        }
-        return null;
-    }
-
-    private static int u8(byte[] frame, int index) {
-        return index >= 0 && index < frame.length ? frame[index] & 0xff : 0;
-    }
-
-    private static final class RealMediaStatus {
-        final String source;
-        final String frequency;
-
-        RealMediaStatus(String source, String frequency) {
-            this.source = source;
-            this.frequency = frequency;
-        }
-    }
 }

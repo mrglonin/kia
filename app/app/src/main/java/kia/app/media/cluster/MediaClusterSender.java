@@ -9,6 +9,7 @@ import kia.app.core.StateStore;
 import kia.app.core.settings.AppSettings;
 import kia.app.core.model.CallState;
 import kia.app.core.model.MediaState;
+import kia.app.media.domain.RealMediaSourceStatus;
 import kia.app.protocol.adapter.AdapterCommand;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
@@ -16,19 +17,35 @@ import kia.app.protocol.adapter.MediaSourceKind;
 
 public final class MediaClusterSender {
     private static final long TRACK_SWAP_DELAY_MS = 2500L;
+    private static MediaClusterSender instance;
 
     private final Context app;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final UniversalMediaTxCoordinator universalCoordinator;
     private String lastMediaKey = "";
     private String lastSourceKey = "";
     private Runnable pendingTrackText;
+    private int routedProfile = -1;
 
     public MediaClusterSender(Context context) {
         this.app = context.getApplicationContext();
+        this.universalCoordinator = new UniversalMediaTxCoordinator(app);
+    }
+
+    public static synchronized MediaClusterSender get(Context context) {
+        if (instance == null) instance = new MediaClusterSender(context);
+        return instance;
     }
 
     public synchronized void send(MediaState state) {
         if (state == null) return;
+        int profile = AppSettings.mediaProfile(app);
+        observeRoutedProfile(profile);
+        if (MediaTxPolicy.usesSynchronizedTx(profile)) {
+            universalCoordinator.submit(state);
+            return;
+        }
+        universalCoordinator.onProfileChanged(profile);
         MediaSourceKind kind = effectiveKind(state);
         AdapterGateway gateway = AdapterGateway.get(app);
         boolean radioLike = isRadioKind(kind);
@@ -90,6 +107,13 @@ public final class MediaClusterSender {
 
     public synchronized void sendSourceOnly(MediaState state) {
         if (state == null) return;
+        int profile = AppSettings.mediaProfile(app);
+        observeRoutedProfile(profile);
+        if (MediaTxPolicy.usesSynchronizedTx(profile)) {
+            universalCoordinator.submitSourceOnly(state);
+            return;
+        }
+        universalCoordinator.onProfileChanged(profile);
         MediaSourceKind kind = effectiveKind(state);
         String source = TextUtils.isEmpty(state.source) ? kind.defaultLabel() : state.source;
         String sourceKey = sourceKey(kind, source);
@@ -124,6 +148,13 @@ public final class MediaClusterSender {
 
     public synchronized void sendRadioSearch(MediaState state) {
         if (state == null) return;
+        int profile = AppSettings.mediaProfile(app);
+        observeRoutedProfile(profile);
+        if (MediaTxPolicy.usesSynchronizedTx(profile)) {
+            universalCoordinator.submitRadioSearch(state);
+            return;
+        }
+        universalCoordinator.onProfileChanged(profile);
         MediaSourceKind kind = effectiveKind(state);
         if (!radioLikeSource(kind)) return;
         String source = TextUtils.isEmpty(state.source) ? kind.defaultLabel() : state.source;
@@ -162,6 +193,9 @@ public final class MediaClusterSender {
 
     public synchronized void sendCall(CallState call) {
         if (call == null || !call.active) return;
+        observeRoutedProfile(AppSettings.mediaProfile(app));
+        universalCoordinator.suspendForCall();
+        if (MediaTxPolicy.usesSynchronizedTx(AppSettings.mediaProfile(app))) return;
         cancelPendingTrackText();
         AdapterGateway gateway = AdapterGateway.get(app);
         int callSource = AppSettings.callSourceMode(app);
@@ -189,11 +223,60 @@ public final class MediaClusterSender {
     }
 
     public synchronized void clearCall(CallState previous) {
+        observeRoutedProfile(AppSettings.mediaProfile(app));
+        universalCoordinator.suspendForCall();
+        if (MediaTxPolicy.usesSynchronizedTx(AppSettings.mediaProfile(app))) return;
         cancelPendingTrackText();
         lastMediaKey = "";
         lastSourceKey = "";
         AdapterGateway.get(app).send(loud("Звонок: завершение, media off",
                 AdapterProtocol.mediaOffStatus()));
+    }
+
+    public synchronized boolean onRealSource(RealMediaSourceStatus status) {
+        return universalCoordinator.onRealSource(status);
+    }
+
+    public synchronized boolean hasRealRadioSource() {
+        return universalCoordinator.hasRealRadioSource();
+    }
+
+    public synchronized boolean hasRealSource() {
+        return universalCoordinator.hasRealSource();
+    }
+
+    public synchronized String realRadioFrequency() {
+        return universalCoordinator.realRadioFrequency();
+    }
+
+    public synchronized void onIdle(MediaState state) {
+        universalCoordinator.onIdle(state);
+    }
+
+    public synchronized void onProfileChanged() {
+        int profile = AppSettings.mediaProfile(app);
+        observeRoutedProfile(profile);
+        universalCoordinator.onProfileChanged(profile);
+    }
+
+    public synchronized void suspendForCall() {
+        universalCoordinator.suspendForCall();
+    }
+
+    public synchronized void resumeAfterCall(MediaState current) {
+        universalCoordinator.resumeAfterCall(current);
+    }
+
+    public synchronized void forceResend(MediaState current) {
+        if (MediaTxPolicy.usesSynchronizedTx(AppSettings.mediaProfile(app))) {
+            universalCoordinator.forceResend(current);
+        } else {
+            send(current);
+        }
+    }
+
+    public synchronized void stopSynchronizedPath() {
+        universalCoordinator.stop();
     }
 
     private void sendTextSequence(AdapterGateway gateway, int command, String mediaKey,
@@ -218,6 +301,14 @@ public final class MediaClusterSender {
         if (pendingTrackText == null) return;
         handler.removeCallbacks(pendingTrackText);
         pendingTrackText = null;
+    }
+
+    private void observeRoutedProfile(int profile) {
+        if (routedProfile == profile) return;
+        cancelPendingTrackText();
+        lastMediaKey = "";
+        lastSourceKey = "";
+        routedProfile = profile;
     }
 
     private void rememberSource(String sourceKey) {

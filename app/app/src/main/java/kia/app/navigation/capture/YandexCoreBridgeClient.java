@@ -89,6 +89,8 @@ public final class YandexCoreBridgeClient {
     private String lastSpeedSignature = "";
     private long lastSpeedSnapshotSentAt;
     private String lastManeuverDistanceKey = "";
+    private String lastManeuverProjectionLogKey = "";
+    private long lastManeuverProjectionLogAt;
     private long lastManeuverDistanceMeters = -1L;
     private long lastManeuverRouteRemainingMeters = -1L;
     private long lastLiveRouteMetricsAt = -1L;
@@ -135,6 +137,7 @@ public final class YandexCoreBridgeClient {
 
     public synchronized void start() {
         if (running) return;
+        resetBridgeSessionState();
         running = true;
         thread = new HandlerThread("KiaYandexCoreBridge");
         thread.start();
@@ -157,6 +160,7 @@ public final class YandexCoreBridgeClient {
             lastBroadcastApplyAt = -1L;
             lastAppliedCoalescingIdentity = "";
         }
+        resetBridgeSessionState();
         AppLog.line(app, "Yandex Core Bridge: client stopped");
     }
 
@@ -846,22 +850,23 @@ public final class YandexCoreBridgeClient {
                     "route_total_distance_meters");
         }
 
-        String maneuverKey = selectedMain.maneuver;
-        String roadKey = firstString(snapshot, "route_road_options", "road_options",
-                "available_directions");
-        long correctedManeuver = correctedManeuverMeters(maneuverKey, roadKey,
-                maneuverMeters, remainingMeters);
-        putMeters(snapshot, correctedManeuver, "maneuver_distance_meters",
-                "current_maneuver_distance_meters", "distance_to_maneuver_meters");
+        String maneuverKey = mainManeuverDistanceIdentity(snapshot, selectedMain);
+        boolean semanticMicroPresent = hasSemanticMicroSignal(snapshot);
+        long correctedManeuver = correctedManeuverMeters(maneuverKey,
+                maneuverMeters, remainingMeters, semanticMicroPresent);
+        putMeters(snapshot, correctedManeuver,
+                YandexMainDistanceContinuityPolicy.synchronizedDistanceMeterKeys(
+                        selectedMain.provenance));
     }
 
-    private long correctedManeuverMeters(String maneuver, String road, long meters,
-                                         long routeRemainingMeters) {
-        if (meters < 0L || TextUtils.isEmpty(maneuver)) {
+    private long correctedManeuverMeters(String maneuverIdentity, long meters,
+                                         long routeRemainingMeters,
+                                         boolean semanticMicroPresent) {
+        if (meters < 0L || TextUtils.isEmpty(maneuverIdentity)) {
             resetManeuverDistanceGuard();
             return meters;
         }
-        String key = lower(maneuver) + "|" + lower(road);
+        String key = lower(maneuverIdentity);
         if (!key.equals(lastManeuverDistanceKey) || lastManeuverDistanceMeters < 0L) {
             rememberManeuverDistance(key, meters, routeRemainingMeters);
             return meters;
@@ -873,12 +878,30 @@ public final class YandexCoreBridgeClient {
         boolean routeGrew = routeRemainingKnown
                 && routeRemainingMeters > lastManeuverRouteRemainingMeters + REROUTE_ROUTE_GROWTH_METERS;
         if (routeGrew) {
+            long previousRouteRemaining = lastManeuverRouteRemainingMeters;
             rememberManeuverDistance(key, meters, routeRemainingMeters);
             AppLog.line(app, "Yandex Core Bridge: maneuver guard reset by route growth"
-                    + " lastRoute=" + lastManeuverRouteRemainingMeters
+                    + " lastRoute=" + previousRouteRemaining
                     + " route=" + routeRemainingMeters
                     + " meters=" + meters);
             return meters;
+        }
+        YandexMainDistanceContinuityPolicy.ZeroContinuity zeroContinuity =
+                YandexMainDistanceContinuityPolicy.resolveTransientZero(
+                lastManeuverDistanceKey, key,
+                lastManeuverDistanceMeters, meters,
+                lastManeuverRouteRemainingMeters, routeRemainingMeters,
+                semanticMicroPresent, MANEUVER_ROUTE_DELTA_MAX_METERS,
+                REROUTE_ROUTE_GROWTH_METERS, MANEUVER_ZERO_METERS);
+        if (zeroContinuity.handled) {
+            long previousManeuverMeters = lastManeuverDistanceMeters;
+            rememberManeuverDistance(key, zeroContinuity.stateMeters,
+                    zeroContinuity.stateRouteRemaining);
+            logManeuverProjection(key, zeroContinuity.mode,
+                    previousManeuverMeters, meters,
+                    zeroContinuity.stateMeters, zeroContinuity.outputMeters,
+                    routeRemainingMeters);
+            return zeroContinuity.outputMeters;
         }
         if (lastManeuverDistanceMeters <= MANEUVER_ZERO_METERS && meters > MANEUVER_ZERO_METERS) {
             rememberManeuverDistance(key, meters, routeRemainingMeters);
@@ -915,14 +938,57 @@ public final class YandexCoreBridgeClient {
         return meters;
     }
 
+    private static String mainManeuverDistanceIdentity(Bundle snapshot,
+                                                       MainManeuverSnapshot selected) {
+        if (snapshot == null || selected == null || TextUtils.isEmpty(selected.maneuver)) {
+            return "";
+        }
+        String routeId = firstString(snapshot, "route_id", "routeId",
+                "route_uuid", "routeUuid");
+        if (TextUtils.isEmpty(routeId)) return "";
+        return YandexMainDistanceContinuityPolicy.identity(
+                routeId, selected.provenance, selected.maneuver);
+    }
+
     private void rememberManeuverDistance(String key, long meters, long routeRemainingMeters) {
         lastManeuverDistanceKey = key;
         lastManeuverDistanceMeters = meters;
         lastManeuverRouteRemainingMeters = routeRemainingMeters;
     }
 
+    private void logManeuverProjection(String identity, String mode,
+                                       long previousMeters, long incomingMeters,
+                                       long stateMeters, long outputMeters,
+                                       long routeRemainingMeters) {
+        long now = SystemClock.elapsedRealtime();
+        String key = lower(identity) + "|" + lower(mode);
+        if (key.equals(lastManeuverProjectionLogKey)
+                && now - lastManeuverProjectionLogAt < 5000L) {
+            return;
+        }
+        lastManeuverProjectionLogKey = key;
+        lastManeuverProjectionLogAt = now;
+        AppLog.line(app, "Yandex Core Bridge: maneuver continuity"
+                + " mode=" + (mode == null ? "" : mode.trim())
+                + " previous=" + previousMeters
+                + " incoming=" + incomingMeters
+                + " state=" + stateMeters
+                + " tx=" + (outputMeters <= MANEUVER_ZERO_METERS
+                ? "hold" : String.valueOf(outputMeters))
+                + " route=" + routeRemainingMeters);
+    }
+
     private void resetDistanceGuards() {
         resetManeuverDistanceGuard();
+    }
+
+    private void resetBridgeSessionState() {
+        resetRouteGuards();
+        lastState = "";
+        lastSignature = "";
+        lastSpeedSignature = "";
+        lastSpeedSnapshotSentAt = 0L;
+        lastBroadcastSnapshotAt = -1L;
     }
 
     private void resetRouteGuards() {
@@ -932,6 +998,8 @@ public final class YandexCoreBridgeClient {
 
     private void resetManeuverDistanceGuard() {
         lastManeuverDistanceKey = "";
+        lastManeuverProjectionLogKey = "";
+        lastManeuverProjectionLogAt = 0L;
         lastManeuverDistanceMeters = -1L;
         lastManeuverRouteRemainingMeters = -1L;
     }
@@ -1233,13 +1301,9 @@ public final class YandexCoreBridgeClient {
                 "displayed_annotation", "current_annotation");
         String notificationDistance = candidateDistance(snapshot, "notification");
         String genericDistance = maneuverDistance(snapshot);
-        String distance = "annotation".equals(provenance)
-                ? first(annotationDistance,
-                sameManeuverValue(annotationManeuver, rawManeuver) ? genericDistance : "",
-                "0 м")
-                : "notification".equals(provenance)
-                ? first(notificationDistance, genericDistance)
-                : genericDistance;
+        String distance = YandexMainDistanceContinuityPolicy.selectDistanceForProvenance(
+                provenance, sameManeuverValue(annotationManeuver, rawManeuver),
+                annotationDistance, notificationDistance, genericDistance);
         if (TextUtils.isEmpty(distance) && !TextUtils.isEmpty(eventManeuver)) {
             distance = "0 м";
         }
