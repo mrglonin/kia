@@ -39,6 +39,10 @@ public final class AdapterGateway {
         return transport.ready();
     }
 
+    public long connectionEpoch() {
+        return transport.connectionEpoch();
+    }
+
     public AdapterTxOutcome send(AdapterCommand command) {
         if (command == null || command.frame == null) return AdapterTxOutcome.BLOCKED;
         boolean importantMedia = isImportantMediaCommand(command.label);

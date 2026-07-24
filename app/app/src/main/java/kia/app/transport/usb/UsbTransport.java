@@ -50,6 +50,7 @@ public final class UsbTransport {
     private UsbSerialPort port;
     private Thread readThread;
     private volatile boolean readRunning;
+    private long connectionEpoch;
     private long lastQuietConnectAt;
     private long lastBadChecksumAt;
 
@@ -61,6 +62,10 @@ public final class UsbTransport {
 
     public synchronized boolean ready() {
         return port != null;
+    }
+
+    public synchronized long connectionEpoch() {
+        return connectionEpoch;
     }
 
     public synchronized void connect() {
@@ -95,6 +100,7 @@ public final class UsbTransport {
             port = driver.getPorts().get(0);
             port.open(connection);
             port.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            connectionEpoch++;
             setUsb(true, "USB: подключено " + device.getDeviceName() + " 115200 8N1");
             startReader();
             flushQueue();

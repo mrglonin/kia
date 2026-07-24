@@ -16,6 +16,7 @@ import kia.app.core.model.TpmsState;
 import kia.app.media.capture.MediaCaptureManager;
 import kia.app.media.cluster.MediaClusterSender;
 import kia.app.media.domain.CallFeature;
+import kia.app.media.domain.MediaFeature;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.core.settings.AppSettings;
 import kia.app.entry.AppService;
@@ -371,7 +372,7 @@ public final class QaReceiver extends BroadcastReceiver {
     private static void sendMediaSource(Context context, String source, String packageName) {
         MediaState state = new MediaState(source, packageName, "", "", -1L, false,
                 System.currentTimeMillis());
-        new MediaClusterSender(context).sendSourceOnly(state);
+        mediaSender(context).sendSourceOnly(state);
         AppLog.line(context, "QA media source: " + source + " / " + packageName);
     }
 
@@ -379,13 +380,20 @@ public final class QaReceiver extends BroadcastReceiver {
                                       String artist, String title) {
         MediaState state = new MediaState(source, packageName, artist, title, -1L, true,
                 System.currentTimeMillis());
-        new MediaClusterSender(context).send(state);
+        mediaSender(context).send(state);
         AppLog.line(context, "QA media text: " + source + " / " + packageName
                 + " / " + artist + " / " + title);
     }
 
+    private static MediaClusterSender mediaSender(Context context) {
+        return AppSettings.universalMediaProfile(context)
+                ? MediaClusterSender.get(context)
+                : new MediaClusterSender(context);
+    }
+
     private static void setMediaProfile(Context context, int profile) {
         AppSettings.setMediaProfile(context, profile);
+        MediaFeature.get(context).onProfileChanged();
         AppService.start(context);
         AppLog.line(context, "QA media profile: " + AppSettings.mediaProfileLabel(context));
         MediaCaptureManager.scanOnce(context);

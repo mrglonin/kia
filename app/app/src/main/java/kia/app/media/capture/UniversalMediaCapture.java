@@ -48,14 +48,31 @@ final class UniversalMediaCapture {
 
     boolean scanNow() {
         if (!AppSettings.universalMediaProfile(app)) return false;
+        MediaFeature mediaFeature = MediaFeature.get(app);
+        boolean uartHasRealSource = AppSettings.uartRealMediaProfile(app)
+                && mediaFeature.hasRealSource();
+        if (uartHasRealSource && mediaFeature.hasRealRadioSource()) {
+            SpdRadioServiceClient.Snapshot radio = radioMedia.readSnapshot();
+            if (radio != null && radio.hasFrequency() && radio.isCurrent()
+                    && matchesRealRadioFrequency(radio.source(),
+                    mediaFeature.realRadioFrequency(), radio.frequencyText())) {
+                reportRadio(radio);
+            }
+            // The head unit's real FM/AM source remains authoritative until another 0x7A source
+            // arrives. A stale Android PLAYING session must not overwrite it on the next poll.
+            return true;
+        }
+
+        if (!uartHasRealSource) {
+            SpdRadioServiceClient.Snapshot radio = radioMedia.readSnapshot();
+            if (radio != null && radio.hasFrequency() && radio.isCurrent()) {
+                reportRadio(radio);
+                return true;
+            }
+        }
         AndroidMediaSessionClient.Snapshot session = androidMedia.readUniversalSnapshot();
         if (session != null && session.isPlaying()) {
             reportAndroidMediaSession(session);
-            return true;
-        }
-        SpdRadioServiceClient.Snapshot radio = radioMedia.readSnapshot();
-        if (radio != null && radio.hasFrequency() && radio.isCurrent()) {
-            reportRadio(radio);
             return true;
         }
         if (session != null) {
@@ -64,6 +81,13 @@ final class UniversalMediaCapture {
         }
         MediaFeature.get(app).reportIdle("", "universal media empty");
         return false;
+    }
+
+    static boolean matchesRealRadioFrequency(String source, String realFrequency,
+                                             String snapshotFrequency) {
+        String expected = RadioStationStore.normalizeFrequencyInput(source, realFrequency);
+        String actual = RadioStationStore.normalizeFrequencyInput(source, snapshotFrequency);
+        return expected.isEmpty() || expected.equals(actual);
     }
 
     private void reportAndroidMediaSession(AndroidMediaSessionClient.Snapshot snapshot) {
@@ -76,7 +100,8 @@ final class UniversalMediaCapture {
         String frequency = radio.frequencyText();
         if (TextUtils.isEmpty(frequency)) return;
         String source = radio.source();
-        String station = RadioStationStore.resolve(app, source, frequency, radio.stationName(""));
+        String station = RadioStationStore.resolveUniversal(app, source, frequency,
+                radio.stationNameForUniversal());
         MediaFeature.get(app).report(source, SpdRadioServiceClient.PACKAGE,
                 frequency, station, -1L, radio.isPlaying());
     }

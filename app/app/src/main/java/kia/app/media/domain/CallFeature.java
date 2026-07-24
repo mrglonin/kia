@@ -20,6 +20,7 @@ public final class CallFeature {
     private final Context app;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final MediaClusterSender clusterSender;
+    private final MediaClusterSender synchronizedMediaSender;
     private String pendingEndReason = "";
     private final Runnable ticker = new Runnable() {
         @Override
@@ -36,7 +37,10 @@ public final class CallFeature {
 
     private CallFeature(Context context) {
         this.app = context.getApplicationContext();
+        // Keep the proven TEYES call sender isolated exactly as before. Only Android/UART share
+        // the synchronized media coordinator so delayed metadata can be cancelled during calls.
         this.clusterSender = new MediaClusterSender(app);
+        this.synchronizedMediaSender = MediaClusterSender.get(app);
     }
 
     public static synchronized CallFeature get(Context context) {
@@ -52,6 +56,7 @@ public final class CallFeature {
         long startedAt = current.active ? current.startedAt : System.currentTimeMillis();
         CallState next = CallState.active(name, phone, firstNonEmpty(source, "Bluetooth audio"), startedAt);
         StateStore.setCall(app, next);
+        synchronizedMediaSender.suspendForCall();
         clusterSender.sendCall(next);
         scheduleTick();
         AppLog.line(app, "Call RX active: " + next.displayName() + " | " + next.subtitle());
@@ -107,10 +112,14 @@ public final class CallFeature {
     }
 
     public synchronized void stop() {
+        boolean wasActive = StateStore.call().active;
         handler.removeCallbacks(ticker);
         handler.removeCallbacks(endHold);
         pendingEndReason = "";
         StateStore.setCall(app, CallState.empty());
+        if (wasActive && AppSettings.universalMediaProfile(app)) {
+            MediaFeature.get(app).resendCurrent("call feature disabled");
+        }
         AppLog.line(app, "Call RX disabled");
     }
 
