@@ -170,6 +170,69 @@ public final class QaReceiver extends BroadcastReceiver {
             AppLog.line(context, "QA nav micro main counter sample sent:"
                     + " main=1000,990,980,hold,970,960"
                     + " micro=150,140,130,120,110,0");
+        } else if ("nav_main_preview_sample".equals(scenario)) {
+            boolean previousStraight = AppSettings.navStraightUntilMain(context);
+            int previousReveal = AppSettings.navMainRevealDistanceMeters(context);
+            int previousMicroMax = AppSettings.navMicroMaxDistanceMeters(context);
+            boolean previousMicro = AppSettings.navMicroManeuvers(context);
+            AppSettings.setNavStraightUntilMain(context, true);
+            AppSettings.setNavMainRevealDistanceMeters(context,
+                    intent.getIntExtra("reveal", 300));
+            AppSettings.setNavMicroMaxDistanceMeters(context, 500);
+            AppSettings.setNavMicroManeuvers(context, true);
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setOutputMode(NavigationOutputMode.NORMAL);
+            feature.setActive(false, "qa_nav_main_preview_reset");
+            feature.setActive(true, "qa_nav_main_preview");
+            feature.handle(qaNavPreviewMainIntent(2000));
+            feature.handle(qaNavPreviewLaneIntent(500, 150));
+            feature.handle(qaNavPreviewMainIntent(0));
+            feature.resendAfterTransportRecovery("qa_main_preview_transient_zero");
+            feature.handle(qaNavPreviewLaneIntent(450, 0));
+            feature.handle(qaNavPreviewMainIntent(300));
+            feature.handle(qaNavPreviewMainIntent(320));
+            feature.handle(qaNavPreviewMainIntent(0));
+            AppSettings.setNavStraightUntilMain(context, previousStraight);
+            AppSettings.setNavMainRevealDistanceMeters(context, previousReveal);
+            AppSettings.setNavMicroMaxDistanceMeters(context, previousMicroMax);
+            AppSettings.setNavMicroManeuvers(context, previousMicro);
+            AppLog.line(context, "QA nav main preview sample sent:"
+                    + " main=2000 forward, micro@500/150, transient0+resend,"
+                    + " restore@450,"
+                    + " actual=300, latch=320, hold=0");
+        } else if ("nav_speed_limit_clear_sample".equals(scenario)) {
+            Context appContext = context.getApplicationContext();
+            NavigationFeature feature = NavigationFeature.get(appContext);
+            feature.setActive(false, "qa_nav_speed_limit_reset");
+            feature.setActive(true, "yandex_core_bridge");
+            feature.handle(qaNavSpeedIntent(80, false));
+            feature.handle(qaNavSpeedIntent(0, true));
+            new Handler(Looper.getMainLooper()).postDelayed(() ->
+                    AppLog.line(appContext, "QA nav speed clear state: "
+                            + StateStore.navigation().summary()), 1800L);
+            AppLog.line(context, "QA nav speed limit one-shot clear scheduled");
+        } else if ("nav_roundabout_exit_continuity_sample".equals(scenario)) {
+            int exit = Math.max(1, Math.min(4, intent.getIntExtra("exit", 2)));
+            boolean tbt = intent.getBooleanExtra("tbt", false);
+            boolean finishCompassAuto = AppSettings.navFinishCompassAuto(context);
+            AppSettings.setNavMicroManeuvers(context, true);
+            AppSettings.setNavFinishCompassAuto(context, false);
+            NavigationFeature feature = NavigationFeature.get(context);
+            feature.setOutputMode(tbt ? NavigationOutputMode.TBT : NavigationOutputMode.NORMAL);
+            feature.setActive(false, "qa_nav_roundabout_exit_reset");
+            feature.setActive(true, "qa_nav_roundabout_exit");
+            feature.handle(qaNavRoundaboutMainIntent(1000));
+            feature.handle(qaNavRoundaboutLaneIntent(exit, 990, 150));
+            feature.handle(qaNavRoundaboutMainIntent(985));
+            feature.handle(qaNavRoundaboutEtaIntent(980));
+            feature.handle(qaNavRoundaboutLaneIntent(exit, 0, 120));
+            feature.handle(qaNavRoundaboutLaneIntent(exit, 970, 0));
+            AppSettings.setNavFinishCompassAuto(context, finishCompassAuto);
+            AppLog.line(context, "QA nav roundabout exit continuity sample sent:"
+                    + " mode=" + (tbt ? "TBT" : "NORMAL")
+                    + " exit=" + exit
+                    + " main=1000,990,generic985,980,hold,970"
+                    + " micro=150,120,0");
         } else if ("nav_micro_post_pass_refresh_sample".equals(scenario)) {
             int seconds = intent.getIntExtra("seconds", AppSettings.navMicroHoldSeconds(context));
             AppSettings.setNavMicroManeuvers(context, true);
@@ -464,6 +527,33 @@ public final class QaReceiver extends BroadcastReceiver {
         return intent;
     }
 
+    private static Intent qaNavPreviewMainIntent(int mainMeters) {
+        Intent intent = qaNavCounterMainIntent(mainMeters);
+        intent.putExtra("route_id", "qa_main_preview");
+        intent.putExtra("next_street", "Preview road");
+        return intent;
+    }
+
+    private static Intent qaNavPreviewLaneIntent(int mainMeters, int laneMeters) {
+        Intent intent = qaNavCounterLaneIntent(mainMeters, laneMeters);
+        intent.putExtra("route_id", "qa_main_preview");
+        intent.putExtra("next_street", "Preview road");
+        return intent;
+    }
+
+    private static Intent qaNavSpeedIntent(int limit, boolean clear) {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_SPEED);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("current_speed", "60");
+        intent.putExtra("road_speed_limit_present", true);
+        if (limit > 0) {
+            intent.putExtra("road_speed_limit", String.valueOf(limit));
+            intent.putExtra("speed_limit", String.valueOf(limit));
+        }
+        if (clear) intent.putExtra("speed_limit_clear", true);
+        return intent;
+    }
+
     private static void putQaMainDistance(Intent intent, int meters) {
         String distance = meters + " m";
         intent.putExtra("distance", distance);
@@ -473,6 +563,49 @@ public final class QaReceiver extends BroadcastReceiver {
         intent.putExtra("maneuver_distance_meters", meters);
         intent.putExtra("current_maneuver_distance_meters", meters);
         intent.putExtra("distance_to_maneuver_meters", meters);
+    }
+
+    private static Intent qaNavRoundaboutMainIntent(int mainMeters) {
+        Intent intent = new Intent(NavigationFeature.KIA_ACTION_MANEUVER);
+        intent.putExtra("source", "yandex_core_bridge");
+        intent.putExtra("active", true);
+        intent.putExtra("route_id", "qa_circle_refinement");
+        intent.putExtra("maneuver", "ROUNDABOUT");
+        intent.putExtra("direction", "ROUNDABOUT");
+        intent.putExtra("maneuver_text", "roundabout");
+        intent.putExtra("route_distance", "5.0 km");
+        intent.putExtra("route_remaining", "5.0 km");
+        intent.putExtra("remaining_distance", "5.0 km");
+        intent.putExtra("route_time", "12 min");
+        intent.putExtra("arrival_time", "11:30");
+        putQaMainDistance(intent, mainMeters);
+        return intent;
+    }
+
+    private static Intent qaNavRoundaboutLaneIntent(int exit, int mainMeters, int laneMeters) {
+        Intent intent = qaNavRoundaboutMainIntent(mainMeters);
+        intent.putExtra("exit_number", exit);
+        intent.putExtra("roundabout_exit_number", exit);
+        intent.putExtra("lane_guidance", true);
+        intent.putExtra("lane_maneuver", "RIGHT");
+        intent.putExtra("highlighted_direction", "RIGHT");
+        intent.putExtra("highlighted_directions", "RIGHT");
+        intent.putExtra("lane_highlight", "RIGHT");
+        intent.putExtra("recommended_lanes", "RIGHT");
+        intent.putExtra("lane_distance", laneMeters + " m");
+        intent.putExtra("lane_distance_meters", laneMeters);
+        intent.putExtra("micro_distance", laneMeters + " m");
+        intent.putExtra("micro_distance_meters", laneMeters);
+        return intent;
+    }
+
+    private static Intent qaNavRoundaboutEtaIntent(int mainMeters) {
+        Intent intent = qaNavRoundaboutMainIntent(mainMeters);
+        intent.setAction(NavigationFeature.KIA_ACTION_ETA);
+        intent.putExtra("maneuver_distance_identity", "ROUNDABOUT");
+        intent.putExtra("main_maneuver_identity", "ROUNDABOUT");
+        intent.putExtra("maneuver_distance_provenance", "annotation");
+        return intent;
     }
 
     private static Intent qaNavOldRouteIntent() {

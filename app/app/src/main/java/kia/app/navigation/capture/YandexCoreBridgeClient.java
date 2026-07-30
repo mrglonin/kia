@@ -33,6 +33,7 @@ public final class YandexCoreBridgeClient {
     private static final long FINISH_MAX_REMAINING_METERS = 35L;
     private static final long FINISH_PREVIOUS_REMAINING_METERS = 80L;
     private static final long FINISH_RECENT_ROUTE_MS = 45000L;
+    private static final long BACKGROUND_SUSPENSION_ROUTE_EVIDENCE_MS = 45000L;
     private static final long FINISH_MIN_ROUTE_ALIVE_MS = 3000L;
     private static final long ROUTE_REMAINING_MANEUVER_CONFLICT_METERS = 30L;
     private static final long MANEUVER_ROUTE_DELTA_MAX_METERS = 350L;
@@ -104,6 +105,7 @@ public final class YandexCoreBridgeClient {
     private boolean broadcastApplyPosted;
     private long lastBroadcastApplyAt = -1L;
     private String lastAppliedCoalescingIdentity = "";
+    private String lastBackgroundSuspensionIdentity = "";
 
     private final Runnable poller = new Runnable() {
         @Override
@@ -363,9 +365,36 @@ public final class YandexCoreBridgeClient {
             state = bool(snapshot, "active", false)
                     ? YandexCoreBridgeContract.STATE_ACTIVE : YandexCoreBridgeContract.STATE_OFF;
         }
+        String callback = firstString(snapshot, "last_callback", "callback",
+                "event_type", "bridge_reason", "reason");
         long seq = longValue(snapshot, "seq", "sequence", -1L);
         long timestampElapsed = longValue(snapshot, "timestamp_elapsed_ms", "elapsed_realtime_ms", -1L);
         long freshness = freshnessMs(snapshot, timestampElapsed);
+        boolean routePresentKnown = snapshot != null && snapshot.containsKey("route_present");
+        boolean routePresent = bool(snapshot, "route_present", false);
+        long nowElapsed = SystemClock.elapsedRealtime();
+        boolean recentLiveRoute = lastLiveRouteMetricsAt > 0L
+                && nowElapsed - lastLiveRouteMetricsAt
+                <= BACKGROUND_SUSPENSION_ROUTE_EVIDENCE_MS;
+        if (YandexBridgeLifecyclePolicy.shouldPreserveActiveRoute(
+                state, callback, recentLiveRoute, hasRouteMetrics(snapshot),
+                routePresentKnown, routePresent)) {
+            String suspensionIdentity = lower(callback) + "|" + seq + "|"
+                    + timestampElapsed + "|"
+                    + firstString(snapshot, "route_id", "routeId");
+            if (!suspensionIdentity.equals(lastBackgroundSuspensionIdentity)) {
+                lastBackgroundSuspensionIdentity = suspensionIdentity;
+                NavigationFeature.get(app).onYandexBackgroundGuidanceSuspended(
+                        callback, routePresentKnown && routePresent);
+                AppLog.line(app, "Yandex Core Bridge: held route during background suspension"
+                        + " callback=" + callback
+                        + " routePresent="
+                        + (routePresentKnown ? String.valueOf(routePresent) : "unknown")
+                        + " freshness=" + freshness);
+            }
+            return snapshotResult(ACTIVE_POLL_MS, true);
+        }
+        lastBackgroundSuspensionIdentity = "";
         boolean routeLive = routeLive(state);
         if (routeLive && freshness > MAX_ACTIVE_FRESHNESS_MS) {
             AppLog.line(app, "Yandex Core Bridge: stale snapshot ignored freshness=" + freshness);
@@ -552,13 +581,17 @@ public final class YandexCoreBridgeClient {
 
     private boolean sendSpeedSnapshot(Bundle snapshot, long freshness) {
         long speed = longValue(snapshot, "current_speed_kmh", "speed_kmh", -1L);
-        long limit = longValue(snapshot, "speed_limit_kmh", "speed_limit", -1L);
+        long limit = longValue(snapshot,
+                "speed_limit_kmh", "speed_limit", "road_speed_limit", -1L);
+        boolean hasRoadLimit = containsAnyKey(snapshot,
+                "speed_limit_kmh", "speed_limit", "road_speed_limit");
         boolean hasExceeded = snapshot != null
                 && (snapshot.containsKey("speed_exceeded") || snapshot.containsKey("exceeded"));
-        if (speed < 0 && limit <= 0 && !hasExceeded) return false;
+        if (speed < 0 && limit <= 0 && !hasExceeded && !hasRoadLimit) return false;
 
         boolean exceeded = bool(snapshot, "speed_exceeded", bool(snapshot, "exceeded", false));
-        String signature = speed + "|" + limit + "|" + (hasExceeded ? String.valueOf(exceeded) : "-");
+        String signature = speed + "|" + limit + "|" + hasRoadLimit + "|"
+                + (hasExceeded ? String.valueOf(exceeded) : "-");
         long now = SystemClock.elapsedRealtime();
         if (signature.equals(lastSpeedSignature)
                 && now - lastSpeedSnapshotSentAt < SPEED_SNAPSHOT_MIN_MS) {
@@ -569,10 +602,13 @@ public final class YandexCoreBridgeClient {
 
         Intent speedIntent = baseIntent(NavigationFeature.KIA_ACTION_SPEED, snapshot, freshness);
         if (speed >= 0) speedIntent.putExtra("current_speed", String.valueOf(speed));
+        speedIntent.putExtra("road_speed_limit_present", hasRoadLimit);
         if (limit > 0) {
             speedIntent.putExtra("speed_limit", String.valueOf(limit));
             speedIntent.putExtra("road_speed_limit", String.valueOf(limit));
             speedIntent.putExtra("speed_limit_source", "guide");
+        } else if (hasRoadLimit) {
+            speedIntent.putExtra("speed_limit_clear", true);
         }
         putString(speedIntent, "camera_speed_limit", firstString(snapshot,
                 "camera_speed_limit", "first_camera_speed_limit_kmh"));
@@ -612,6 +648,15 @@ public final class YandexCoreBridgeClient {
         intent.putExtra("micro_snapshot_present", hasMicro);
         intent.putExtra("micro_clear", !hasMicro);
         putString(intent, "bridge_state", firstString(snapshot, "state", "route_state", "status"));
+        putString(intent, "bridge_original_state", firstString(snapshot, "bridge_original_state"));
+        putString(intent, "last_callback", firstString(snapshot, "last_callback", "callback",
+                "event_type", "bridge_reason", "reason"));
+        if (bool(snapshot, "background_guidance_suspended", false)) {
+            intent.putExtra("background_guidance_suspended", true);
+        }
+        putBooleanIfPresent(intent, snapshot, "route_present");
+        putBooleanIfPresent(intent, snapshot, "process_alive");
+        putBooleanIfPresent(intent, snapshot, "guidance_resumed");
         putString(intent, "main_event", firstString(snapshot, "main_event", "voice_main_event", "route_event"));
         putString(intent, "voice_main_event", firstString(snapshot, "voice_main_event"));
         putString(intent, "voice_prompt", firstString(snapshot, "voice_prompt"));
@@ -764,9 +809,10 @@ public final class YandexCoreBridgeClient {
         String grayDirections = firstString(snapshot, "gray_road_options", "route_road_options",
                 "road_options");
         String highlight = firstString(snapshot,
-                "lane_maneuver", "micro_maneuver", "ignored_lane_maneuver",
-                "lane_highlight", "lane_highlighted_direction",
-                "recommended_lanes", "ignored_recommended_lanes");
+                "lane_highlighted_direction", "highlighted_direction",
+                "highlighted_directions", "lane_highlight",
+                "recommended_lanes", "ignored_recommended_lanes",
+                "micro_maneuver", "lane_maneuver", "ignored_lane_maneuver");
         boolean staleMainConflict = staleLaneGuidanceConflictsWithMain(snapshot, highlight,
                 laneDistance, laneMeters);
         boolean positionedMicro = laneMeters > 0L
@@ -799,6 +845,7 @@ public final class YandexCoreBridgeClient {
         putString(intent, "ignored_lane_maneuver", highlight);
         putString(intent, "recommended_lanes", highlight);
         putString(intent, "lane_highlight", highlight);
+        putString(intent, "lane_highlighted_direction", highlight);
         putString(intent, "highlighted_direction", highlight);
         putString(intent, "highlighted_directions", highlight);
         putString(intent, "lane_maneuver", highlight);
@@ -1458,7 +1505,8 @@ public final class YandexCoreBridgeClient {
                 "ignored_lane_items", "ignored_raw_lane_items", "ignored_allowed_directions",
                 "lane_items", "raw_lane_items", "allowed_directions",
                 "ignored_recommended_lanes", "ignored_lane_maneuver", "recommended_lanes",
-                "lane_highlight", "highlighted_direction", "highlighted_directions",
+                "lane_highlight", "lane_highlighted_direction",
+                "highlighted_direction", "highlighted_directions",
                 "lane_maneuver", "lane_topology", "lane_topology_json", "road_scheme_raw",
                 "direction_sign_items", "route_road_options", "gray_road_options"
         };
@@ -1570,6 +1618,22 @@ public final class YandexCoreBridgeClient {
         if ("1".equals(text) || "true".equals(text) || "yes".equals(text) || "on".equals(text)) return true;
         if ("0".equals(text) || "false".equals(text) || "no".equals(text) || "off".equals(text)) return false;
         return fallback;
+    }
+
+    private static boolean containsAnyKey(Bundle bundle, String... keys) {
+        if (bundle == null || keys == null) return false;
+        for (String key : keys) {
+            if (!TextUtils.isEmpty(key) && bundle.containsKey(key)) return true;
+        }
+        return false;
+    }
+
+    private static void putBooleanIfPresent(Intent intent, Bundle bundle, String key) {
+        if (intent == null || bundle == null || TextUtils.isEmpty(key)
+                || !bundle.containsKey(key)) {
+            return;
+        }
+        intent.putExtra(key, bool(bundle, key, false));
     }
 
     private static long longValue(Bundle bundle, String key1, String key2, long fallback) {

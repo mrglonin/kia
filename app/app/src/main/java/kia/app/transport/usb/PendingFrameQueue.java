@@ -26,7 +26,9 @@ final class PendingFrameQueue {
         if (frame == null || frame.length == 0) return;
         if (isNavigationFrame(frame)) {
             if (isNavigationOff(frame)) {
+                byte[] terminalSpeedClear = latestSpeedLimitClear();
                 invalidateNavigation();
+                if (terminalSpeedClear != null) frames.offerLast(terminalSpeedClear);
             } else {
                 removeSemantic(frame);
             }
@@ -71,6 +73,14 @@ final class PendingFrameQueue {
         }
     }
 
+    private byte[] latestSpeedLimitClear() {
+        byte[] latest = null;
+        for (byte[] queued : frames) {
+            if (isSpeedLimitClear(queued)) latest = queued;
+        }
+        return latest;
+    }
+
     private void removeSemantic(byte[] incoming) {
         int command = command(incoming);
         Iterator<byte[]> iterator = frames.iterator();
@@ -94,6 +104,12 @@ final class PendingFrameQueue {
         return command(frame) == AdapterProtocol.CMD_NAV_ON
                 && frame.length > 5
                 && (frame[5] & 0xff) == 0;
+    }
+
+    static boolean isSpeedLimitClear(byte[] frame) {
+        return command(frame) == AdapterProtocol.CMD_SPEED_LIMIT
+                && frame.length > 6
+                && (frame[6] & 0xff) == 0;
     }
 
     private static int command(byte[] frame) {

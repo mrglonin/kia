@@ -34,6 +34,8 @@ public final class AppSettings {
     private static final String KEY_NAV_MICRO_MANEUVERS = "nav_micro_maneuvers";
     private static final String KEY_NAV_MICRO_HOLD_SECONDS = "nav_micro_hold_seconds";
     private static final String KEY_NAV_MICRO_MAX_DISTANCE_METERS = "nav_micro_max_distance_meters";
+    private static final String KEY_NAV_STRAIGHT_UNTIL_MAIN = "nav_straight_until_main";
+    private static final String KEY_NAV_MAIN_REVEAL_DISTANCE_METERS = "nav_main_reveal_distance_meters";
     private static final String KEY_NAV_DEBUG_VISIBLE = "nav_debug_visible";
     private static final String KEY_RUNTIME_PERMISSIONS_REQUESTED = "runtime_permissions_requested";
     private static final String KEY_AMP = "amp_enabled";
@@ -104,7 +106,7 @@ public final class AppSettings {
     public static final int RCTA_ARROW_COUNT_MIN = 3;
     public static final int RCTA_ARROW_COUNT_MAX = 6;
     public static final int RCTA_ARROW_COUNT_DEFAULT = RCTA_ARROW_COUNT_MIN;
-    private static final int SCHEMA = 48;
+    private static final int SCHEMA = 49;
     public static final int MEDIA_SOURCE_DELAY_MIN_MS = 0;
     public static final int MEDIA_SOURCE_DELAY_MAX_MS = 3000;
     public static final int MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS = 300;
@@ -115,8 +117,10 @@ public final class AppSettings {
     private static final int DEFAULT_NAV_FINISH_DIRECTION_LEAD_METERS = 0;
     private static final int DEFAULT_NAV_MANEUVER_TEXT_SECONDS = 0;
     private static final int DEFAULT_NAV_MICRO_HOLD_SECONDS = 5;
+    private static final int MIN_NAV_MICRO_MAX_DISTANCE_METERS = 100;
     private static final int DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS = 150;
-    private static final int MAX_NAV_MICRO_MAX_DISTANCE_METERS = 250;
+    private static final int MAX_NAV_MICRO_MAX_DISTANCE_METERS = 500;
+    private static final int DEFAULT_NAV_MAIN_REVEAL_DISTANCE_METERS = 300;
     private static final int DEFAULT_SAS_RATIO = 18;
     private static final int DEFAULT_TPMS_LOW_PRESSURE = 220;
     private static final int DEFAULT_TPMS_HIGH_PRESSURE = 280;
@@ -157,6 +161,9 @@ public final class AppSettings {
                     .putBoolean(KEY_NAV_MICRO_MANEUVERS, true)
                     .putInt(KEY_NAV_MICRO_HOLD_SECONDS, DEFAULT_NAV_MICRO_HOLD_SECONDS)
                     .putInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS, DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS)
+                    .putBoolean(KEY_NAV_STRAIGHT_UNTIL_MAIN, false)
+                    .putInt(KEY_NAV_MAIN_REVEAL_DISTANCE_METERS,
+                            DEFAULT_NAV_MAIN_REVEAL_DISTANCE_METERS)
                     .putBoolean(KEY_NAV_DEBUG_VISIBLE, false)
                     .putBoolean(KEY_AMP, false)
                     .putBoolean(KEY_CANBUS_DEBUG_VISIBLE, false)
@@ -347,6 +354,13 @@ public final class AppSettings {
                 edit.putInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS,
                         normalizeNavMicroMaxDistanceMeters(prefs.getInt(KEY_NAV_MICRO_MAX_DISTANCE_METERS,
                                 DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS)));
+            }
+            if (schema < 49 || !prefs.contains(KEY_NAV_STRAIGHT_UNTIL_MAIN)) {
+                edit.putBoolean(KEY_NAV_STRAIGHT_UNTIL_MAIN, false);
+            }
+            if (schema < 49 || !prefs.contains(KEY_NAV_MAIN_REVEAL_DISTANCE_METERS)) {
+                edit.putInt(KEY_NAV_MAIN_REVEAL_DISTANCE_METERS,
+                        DEFAULT_NAV_MAIN_REVEAL_DISTANCE_METERS);
             }
             if (schema < 20 || !prefs.contains(KEY_CALL)) {
                 edit.putBoolean(KEY_CALL, true);
@@ -625,12 +639,43 @@ public final class AppSettings {
                 normalizeNavMicroMaxDistanceMeters(value)).apply();
     }
 
-    private static int normalizeNavMicroMaxDistanceMeters(int value) {
-        int clamped = clamp(value, DEFAULT_NAV_MICRO_MAX_DISTANCE_METERS,
+    static int normalizeNavMicroMaxDistanceMeters(int value) {
+        int clamped = clamp(value, MIN_NAV_MICRO_MAX_DISTANCE_METERS,
                 MAX_NAV_MICRO_MAX_DISTANCE_METERS);
+        if (clamped <= 100) return 100;
         if (clamped <= 150) return 150;
         if (clamped <= 200) return 200;
-        return 250;
+        if (clamped <= 250) return 250;
+        if (clamped <= 300) return 300;
+        if (clamped <= 400) return 400;
+        return 500;
+    }
+
+    public static boolean navStraightUntilMain(Context context) {
+        return prefs(context).getBoolean(KEY_NAV_STRAIGHT_UNTIL_MAIN, false);
+    }
+
+    public static void setNavStraightUntilMain(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_NAV_STRAIGHT_UNTIL_MAIN, value).apply();
+    }
+
+    public static int navMainRevealDistanceMeters(Context context) {
+        return normalizeNavMainRevealDistanceMeters(prefs(context).getInt(
+                KEY_NAV_MAIN_REVEAL_DISTANCE_METERS, DEFAULT_NAV_MAIN_REVEAL_DISTANCE_METERS));
+    }
+
+    public static void setNavMainRevealDistanceMeters(Context context, int value) {
+        prefs(context).edit().putInt(KEY_NAV_MAIN_REVEAL_DISTANCE_METERS,
+                normalizeNavMainRevealDistanceMeters(value)).apply();
+    }
+
+    static int normalizeNavMainRevealDistanceMeters(int value) {
+        int clamped = clamp(value, 100, 500);
+        if (clamped <= 100) return 100;
+        if (clamped <= 200) return 200;
+        if (clamped <= 300) return 300;
+        if (clamped <= 400) return 400;
+        return 500;
     }
 
     public static boolean navDebugVisible(Context context) {
