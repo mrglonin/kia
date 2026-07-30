@@ -8,6 +8,7 @@ public final class YandexCoreBridgeContract {
     public static final String METHOD_GET_STATE = "get_state";
     public static final String ACTION_V2_SNAPSHOT = "kia.yandex.v2.NAV_SNAPSHOT";
     public static final String SOURCE = "yandex_core_bridge";
+    public static final String EXTRA_MAIN_MANEUVER_ROLLOVER = "main_maneuver_rollover";
 
     public static final String STATE_OFF = "off";
     public static final String STATE_LOADING = "loading";

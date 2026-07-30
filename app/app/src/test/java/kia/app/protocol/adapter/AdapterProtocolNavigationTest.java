@@ -119,4 +119,27 @@ public final class AdapterProtocolNavigationTest {
         assertEquals(0x30, frame[12] & 0xf0);
         assertTrue(AdapterProtocol.validChecksum(frame));
     }
+
+    @Test
+    public void fullProgressUsesSameHighNibbleInNormalAndTbtModes() {
+        byte[] normal = AdapterProtocol.maneuver(
+                "context_ra_turn_right", 300f, false, false, 9);
+        byte[] tbt = AdapterProtocol.maneuver(
+                "context_ra_turn_right", 300f, false, true, 9);
+        byte[] normalGray = AdapterProtocol.maneuverWithGrayRoad(
+                "context_ra_turn_right", "context_ra_gray_straight_right",
+                300f, false, false, 9);
+        byte[] tbtGray = AdapterProtocol.maneuverWithGrayRoad(
+                "context_ra_turn_right", "context_ra_gray_straight_right",
+                300f, false, true, 9);
+
+        assertEquals(0x90, normal[12] & 0xf0);
+        assertEquals(0x90, tbt[12] & 0xf0);
+        assertEquals(0x90, normalGray[12] & 0xf0);
+        assertEquals(0x90, tbtGray[12] & 0xf0);
+        assertTrue(AdapterProtocol.validChecksum(normal));
+        assertTrue(AdapterProtocol.validChecksum(tbt));
+        assertTrue(AdapterProtocol.validChecksum(normalGray));
+        assertTrue(AdapterProtocol.validChecksum(tbtGray));
+    }
 }

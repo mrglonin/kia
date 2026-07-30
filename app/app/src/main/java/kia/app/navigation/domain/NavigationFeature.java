@@ -86,8 +86,7 @@ public final class NavigationFeature {
     private static final float SUSPICIOUS_FINISH_POINT_GPS_METERS = 30f;
     private static final int FINISH_CONFLICT_MINUTES = 2;
     private static final float DISTANCE_DISPLAY_STEP_METERS = 10f;
-    private static final float MANEUVER_PROGRESS_MIN_BASE_METERS = 500f;
-    private static final float MANEUVER_PROGRESS_ZERO_METERS = 50f;
+    private static final long MANEUVER_PROGRESS_MARKER_TTL_MS = 5000L;
     private static final float MAIN_MANEUVER_MICRO_SEPARATION_METERS = 250f;
     private static final float MICRO_POST_PASS_NEAR_MAIN_CLEAR_METERS = 150f;
     private static final float INFERRED_FORWARD_MICRO_MAX_METERS = 450f;
@@ -130,9 +129,10 @@ public final class NavigationFeature {
     private int yandexWatchdogGeneration;
     private int speedLimitExpiryGeneration;
     private int lastSentSpeedLimit = -1;
-    private float maneuverProgressBaseMeters;
-    private float maneuverProgressLastMeters;
-    private String maneuverProgressKey = "";
+    private final ManeuverProgressTracker maneuverProgressTracker =
+            new ManeuverProgressTracker();
+    private final ManeuverProgressRolloverMarker maneuverProgressRolloverMarker =
+            new ManeuverProgressRolloverMarker(MANEUVER_PROGRESS_MARKER_TTL_MS);
     private String lastSentEtaKey = "";
     private String lastSentEtaTimeKey = "";
     private String lastSentNavigationText = "";
@@ -675,8 +675,7 @@ public final class NavigationFeature {
                     state.speedLimit, state.currentSpeed, "teyes_route_fallback", now);
             publishNavigationState();
             sendManeuverWithFallbackGray(fallbackManeuver, fallbackDistance,
-                    maneuverProgressBucket(fallbackManeuver,
-                            first(state.nextStreet, state.currentStreet), fallbackDistance),
+                    maneuverProgressBucket(fallbackManeuver, fallbackDistance),
                     true);
             sendConfiguredText();
             AppLog.line(app, "Navigation TEYES fallback route event: " + fallbackManeuver
@@ -790,8 +789,7 @@ public final class NavigationFeature {
         publishNavigationState();
         if (!micro) startManeuverTextHint(maneuver, "");
         sendManeuverIfChanged(maneuver, distanceValue(normalizedDistance), isKm(normalizedDistance),
-                micro ? 9 : maneuverProgressBucket(maneuver,
-                        first(normalizedStreet, state.nextStreet), normalizedDistance),
+                micro ? 9 : maneuverProgressBucket(maneuver, normalizedDistance),
                 micro);
         if (finish) startFinishHold();
         else sendConfiguredText();
@@ -927,7 +925,7 @@ public final class NavigationFeature {
         if (!micro) startManeuverTextHint(maneuver, "");
         if (!TextUtils.isEmpty(distance)) {
             sendManeuverIfChanged(maneuver, distanceValue(distance), isKm(distance),
-                    micro ? 9 : maneuverProgressBucket(maneuver, state.nextStreet, distance),
+                    micro ? 9 : maneuverProgressBucket(maneuver, distance),
                     micro);
         }
         if (finish) startFinishHold();
@@ -1598,12 +1596,20 @@ public final class NavigationFeature {
         publishNavigationState();
         startManeuverTextHint(maneuver, "");
         sendManeuverIfChanged(imageId, distanceValue(distance), isKm(unit),
-                maneuverProgressBucket(maneuver, normalizedStreet, normalizedDistance));
+                maneuverProgressBucket(maneuver, normalizedDistance));
         sendConfiguredText();
         AppLog.line(app, "Navigation maneuver: " + state.summary());
     }
 
     private void handleManeuver(Intent intent) {
+        boolean trustedRollover = YandexCoreBridgeContract.SOURCE.equals(
+                clean(text(intent, "source")))
+                && bool(intent, YandexCoreBridgeContract.EXTRA_MAIN_MANEUVER_ROLLOVER,
+                false);
+        handleManeuverInternal(intent, trustedRollover);
+    }
+
+    private void handleManeuverInternal(Intent intent, boolean rolloverPacket) {
         String source = first(text(intent, "source"), ACTION_MANEUVER);
         String sourceLower = source.toLowerCase(Locale.US);
         if (ignoredLaneDebugSource(sourceLower)) {
@@ -1784,6 +1790,10 @@ public final class NavigationFeature {
             clearGrayRoadHold();
             clearLearnedRoadOptions();
         }
+        if (rolloverPacket) {
+            resetMainManeuverPreview("confirmed_main_rollover");
+            resetNavigationSendCache();
+        }
         if (routeRoadOnly) {
             explicitGrayRoad = adjustRouteRoadGrayForCurrentManeuver(intent, explicitGrayRoad,
                     first(state.maneuver, cleanManeuver));
@@ -1817,6 +1827,24 @@ public final class NavigationFeature {
             highlightedMicroManeuver = "";
             clearGrayRoadHold();
             clearLearnedRoadOptions();
+        }
+        boolean rolloverProgressPrimed = false;
+        if (rolloverPacket) {
+            if (TextUtils.isEmpty(explicitGrayRoad)) {
+                clearGrayRoadHold();
+                clearLearnedRoadOptions();
+            }
+            AppLog.navigation(app, "NAV_PROGRESS_ROLLOVER_CONFIRMED"
+                    + " routeId=" + first(activeRouteId, "-")
+                    + " maneuver=" + first(clean(cleanManeuver), "-")
+                    + " distance=" + first(clean(maneuverDistance), "-")
+                    + " gray=" + first(clean(explicitGrayRoad), "-"));
+            armManeuverProgressRollover(activeRouteId, maneuverFamily(cleanManeuver));
+            if (!TextUtils.isEmpty(nonZeroDistance(maneuverDistance))) {
+                int rolloverProgress = maneuverProgressBucket(cleanManeuver, maneuverDistance);
+                rolloverProgressPrimed = rolloverProgress == ManeuverProgressTracker.FULL_BUCKET
+                        && !maneuverProgressRolloverMarker.pending();
+            }
         }
         long now = System.currentTimeMillis();
         if (!state.active && packetClaimsActiveRoute(intent)
@@ -2008,11 +2036,12 @@ public final class NavigationFeature {
             String incomingMainDistance = nonZeroDistance(maneuverDistance);
             boolean incomingMainDistanceLooksMicro = laneMainDistanceLooksLikeMicro(
                     incomingMainDistance, explicitMicroDistance);
-            if (routeIdChanged && incomingMainDistanceLooksMicro
+            if ((routeIdChanged || rolloverPacket) && incomingMainDistanceLooksMicro
                     && hasMainManeuverDistanceMeters(intent)) {
-                AppLog.line(app, "Navigation accepted new route main distance despite lane match: main="
+                AppLog.line(app, "Navigation accepted trusted main distance despite lane match: main="
                         + clean(incomingMainDistance)
                         + " lane=" + clean(explicitMicroDistance)
+                        + " reason=" + (rolloverPacket ? "confirmed_rollover" : "route_changed")
                         + " source=" + clean(source));
                 incomingMainDistanceLooksMicro = false;
             }
@@ -2039,7 +2068,8 @@ public final class NavigationFeature {
                     && !TextUtils.isEmpty(nonZeroDistance(mainDistance))
                     && (TextUtils.isEmpty(state.maneuver)
                     || maneuverFamilyChanged(state.maneuver, incomingMainManeuver)
-                    || roundaboutMainRefinement)) {
+                    || roundaboutMainRefinement
+                    || rolloverPacket)) {
                 state = state.withMainManeuver(incomingMainManeuver,
                         maneuverLabel(incomingMainManeuver, roundaboutExit), mainDistance,
                         source, now);
@@ -2303,12 +2333,18 @@ public final class NavigationFeature {
             publishNavigationState();
             AppLog.line(app, "Navigation lane hint only: " + laneHint + " source=" + source);
             if (!AppSettings.navMicroManeuvers(app)) {
+                sendConfirmedMainRolloverBeforeLaneReturn(
+                        rolloverProgressPrimed, incomingMainDistance,
+                        "micro_disabled", source);
                 sendRoundaboutMainRefinementBeforeLaneReturn(
                         roundaboutMainRefinement, mainDistance, "micro_disabled", source);
                 AppLog.line(app, "Navigation ignored micro maneuver by setting: " + source);
                 return;
             }
             if (NavigationModeSettings.isTbt(app)) {
+                sendConfirmedMainRolloverBeforeLaneReturn(
+                        rolloverProgressPrimed, incomingMainDistance,
+                        "tbt", source);
                 sendRoundaboutMainRefinementBeforeLaneReturn(
                         roundaboutMainRefinement, mainDistance, "tbt", source);
                 AppLog.line(app, "Navigation ignored micro maneuver in TBT: " + source);
@@ -2361,7 +2397,6 @@ public final class NavigationFeature {
                         && !visibleRouteActionManeuver.equals(state.maneuver)) {
                     if (maneuverFamilyChanged(state.maneuver, visibleRouteActionManeuver)) {
                         clearClusterVisualHold();
-                        resetManeuverProgress();
                         resetNavigationSendCache();
                     }
                     state = new NavigationState(true, finish, state.speedExceeded,
@@ -2635,7 +2670,6 @@ public final class NavigationFeature {
                     !TextUtils.isEmpty(explicitMicroDistance),
                     sameManeuverFamily(displayManeuver, highlightedMicroManeuver)).microWins();
             clearClusterVisualHold();
-            resetManeuverProgress();
             resetNavigationSendCache();
             clearLaneHintHold(preserveMicro);
         } else if (TextUtils.isEmpty(explicitGrayRoad)
@@ -2777,8 +2811,7 @@ public final class NavigationFeature {
                 + " source=" + source);
         publishNavigationState();
         if (!laneGuidance) startManeuverTextHint(displayManeuver, roundaboutExit);
-        int progressBucket = maneuverProgressBucket(displayManeuver,
-                first(state.nextStreet, state.currentStreet), displayDistance);
+        int progressBucket = maneuverProgressBucket(displayManeuver, displayDistance);
         boolean sendHighlightedMicro = highlightedMicroCanSend;
         boolean sendActiveMicro = !sendHighlightedMicro && shouldTransmitActiveMicroToCluster();
         boolean isMicroTx = sendHighlightedMicro || sendActiveMicro;
@@ -2804,8 +2837,15 @@ public final class NavigationFeature {
             txProgressBucket = progressBucket;
         }
         if (waitingMicroDistance) {
-            AppLog.line(app, "Navigation wait micro distance, keep current tx: "
-                    + clean(activeMicroManeuver) + " status=" + clean(activeMicroStatus));
+            if (rolloverProgressPrimed) {
+                sendConfirmedMainRolloverBeforeLaneReturn(
+                        true, displayDistance, "waiting_micro_distance", source);
+                AppLog.line(app, "Navigation released empty-distance micro for confirmed main: "
+                        + clean(activeMicroManeuver) + " source=" + clean(source));
+            } else {
+                AppLog.line(app, "Navigation wait micro distance, keep current tx: "
+                        + clean(activeMicroManeuver) + " status=" + clean(activeMicroStatus));
+            }
         } else {
             boolean forceRouteSnapshot = routeRoadOnly && !state.clusterTx.contains(txManeuver);
             String decisionReason = sendHighlightedMicro ? highlightedDecision.reason
@@ -2903,8 +2943,7 @@ public final class NavigationFeature {
                 .withClusterVisualText(state.clusterVisual, now)
                 .withClusterTxText(state.clusterTx, now);
         publishNavigationState();
-        int progress = maneuverProgressBucket(maneuver,
-                first(state.nextStreet, state.currentStreet), distance);
+        int progress = maneuverProgressBucket(maneuver, distance);
         sendManeuverWithFallbackGray(maneuver, distance, progress, false);
         AppLog.line(app, "Navigation main guidance distance TX: "
                 + clean(maneuver) + " distance=" + clean(distance)
@@ -3239,8 +3278,7 @@ public final class NavigationFeature {
                 && !acceptedManeuverDistance.equals(previousManeuverDistance)
                 && !TextUtils.isEmpty(state.maneuver) && !finishDirectionShouldOverride()) {
             sendManeuverWithFallbackGray(state.maneuver, acceptedManeuverDistance,
-                    maneuverProgressBucket(state.maneuver, first(state.nextStreet, state.currentStreet),
-                            acceptedManeuverDistance), false);
+                    maneuverProgressBucket(state.maneuver, acceptedManeuverDistance), false);
         }
         if (!routeChanged && staleManeuverBeyondRoute(state.routeDistance, state.maneuverDistance)) {
             clearStaleManeuverVisual("maneuver beyond route eta " + cleanSource);
@@ -4216,6 +4254,41 @@ public final class NavigationFeature {
                 + " source=" + clean(source));
     }
 
+    private void sendConfirmedMainRolloverBeforeLaneReturn(boolean primed,
+                                                           String incomingMainDistance,
+                                                           String reason,
+                                                           String source) {
+        if (!primed) return;
+        String maneuver = clean(state.maneuver);
+        String distance = nonZeroDistance(incomingMainDistance);
+        if (!isUsableManeuver(maneuver) || TextUtils.isEmpty(distance)) {
+            AppLog.navigation(app, "NAV_PROGRESS_ROLLOVER_TX_HOLD"
+                    + " reason=" + clean(reason)
+                    + " main=" + first(maneuver, "-")
+                    + " distance=" + first(distance, "-")
+                    + " source=" + clean(source));
+            return;
+        }
+        int progress = currentMainTxProgress(maneuver, distance);
+        if (progress != ManeuverProgressTracker.FULL_BUCKET) {
+            AppLog.navigation(app, "NAV_PROGRESS_ROLLOVER_TX_HOLD"
+                    + " reason=progress_not_full"
+                    + " branch=" + clean(reason)
+                    + " main=" + maneuver
+                    + " distance=" + distance
+                    + " progress=" + progress
+                    + " source=" + clean(source));
+            return;
+        }
+        sendManeuverWithFallbackGray(maneuver, distance, progress, true);
+        AppLog.navigation(app, "NAV_PROGRESS_ROLLOVER_TX"
+                + " branch=" + clean(reason)
+                + " main=" + maneuver
+                + " distance=" + distance
+                + " progress=" + progress
+                + " source=" + clean(source));
+    }
+
     private boolean nextMainManeuverCloseForMicroPostPass() {
         float meters = distanceMeters(first(nonZeroDistance(state.maneuverDistance),
                 nonZeroDistance(currentMainTxDistance())));
@@ -4855,8 +4928,12 @@ public final class NavigationFeature {
 
     private int currentMainTxProgress(String maneuver, String distanceText) {
         if (!TextUtils.isEmpty(nonZeroDistance(distanceText))) {
-            return maneuverProgressBucket(maneuver, first(state.nextStreet, state.currentStreet),
-                    distanceText);
+            return maneuverProgressBucket(maneuver, distanceText);
+        }
+        ManeuverProgressTracker.Result held = maneuverProgressTracker.current(
+                activeRouteId, maneuverFamily(maneuver));
+        if (held.hasValue) {
+            return held.bucket;
         }
         String frame = currentClusterManeuverFrame();
         String frameManeuver = clusterYellowManeuverFromFrame(frame);
@@ -4864,7 +4941,7 @@ public final class NavigationFeature {
                 ? clusterFrameProgressBucket(frame)
                 : -1;
         if (current >= 0) return current;
-        return maneuverProgressBucket(maneuver, first(state.nextStreet, state.currentStreet), distanceText);
+        return 0;
     }
 
     private String currentClusterManeuverFrame() {
@@ -5739,6 +5816,7 @@ public final class NavigationFeature {
         if (state.finishReached) return;
         if (!state.active && !allowInactive) return;
         resetMainManeuverPreview("rerouting_" + clean(source));
+        resetManeuverProgress();
         long now = System.currentTimeMillis();
         routeReroutingMinUntil = Math.max(routeReroutingMinUntil, now + ROUTE_REROUTING_MIN_HOLD_MS);
         routeReroutingUntil = Math.max(routeReroutingUntil, now + ROUTE_REROUTING_HOLD_MS);
@@ -6244,8 +6322,7 @@ public final class NavigationFeature {
             String distance = nonZeroDistance(state.maneuverDistance);
             if (!TextUtils.isEmpty(distance)) {
                 sendManeuverWithFallbackGray(state.maneuver, distance,
-                        maneuverProgressBucket(state.maneuver,
-                                first(state.nextStreet, state.currentStreet), distance),
+                        maneuverProgressBucket(state.maneuver, distance),
                         true);
                 return;
             }
@@ -6318,12 +6395,30 @@ public final class NavigationFeature {
         }
         String visual = clean(first(activeClusterVisual, state.clusterVisual));
         if (visual.contains(fallback)) return;
-        String distance = first(nonZeroDistance(state.maneuverDistance), nonZeroDistance(state.routeDistance));
-        if (TextUtils.isEmpty(distance)) return;
-        sendManeuverWithGrayRoadIfChanged(maneuver, fallback, distanceValue(distance), isKm(distance),
-                maneuverProgressBucket(maneuver, first(state.nextStreet, state.currentStreet), distance), true);
-        AppLog.line(app, "Navigation held gray road refreshed: maneuver=" + maneuver
-                + " gray=" + fallback + " distance=" + distance);
+        String distance = nonZeroDistance(state.maneuverDistance);
+        if (!TextUtils.isEmpty(distance)) {
+            sendManeuverWithGrayRoadIfChanged(maneuver, fallback,
+                    distanceValue(distance), isKm(distance),
+                    maneuverProgressBucket(maneuver, distance), true);
+            AppLog.line(app, "Navigation held gray road refreshed: maneuver=" + maneuver
+                    + " gray=" + fallback + " distance=" + distance);
+            return;
+        }
+        NavigationTxKey cachedMain = clusterTx.lastMainManeuverKey();
+        if (cachedMain == null || cachedMain.distance <= 0f
+                || !sameManeuverFamily(maneuver, cachedMain.maneuver)) {
+            AppLog.navigation(app, "NAV_GRAY_REFRESH_HOLD"
+                    + " reason=main_distance_unknown"
+                    + " route=" + first(activeRouteId, "-")
+                    + " main=" + first(maneuver, "-")
+                    + " gray=" + fallback);
+            return;
+        }
+        sendManeuverWithGrayRoadIfChanged(maneuver, fallback,
+                cachedMain.distance, cachedMain.km, cachedMain.progress, true);
+        AppLog.line(app, "Navigation held gray road refreshed from cached main: maneuver="
+                + maneuver + " gray=" + fallback
+                + " distance=" + cachedMain.distance + (cachedMain.km ? " km" : " m"));
     }
 
     private String activeFallbackGrayRoadForManeuver(String maneuver, long now) {
@@ -6519,29 +6614,48 @@ public final class NavigationFeature {
         overspeedTextUntil = 0L;
     }
 
-    private int maneuverProgressBucket(String maneuver, String street, String distanceText) {
+    private int maneuverProgressBucket(String maneuver, String distanceText) {
         float meters = distanceMeters(distanceText);
-        if (meters <= 0f) return 0;
-        String key = clean(maneuver) + "|" + simplifyStreet(street);
-        float resetDelta = Math.max(80f, maneuverProgressBaseMeters * 0.35f);
-        boolean distanceJumpedForward = maneuverProgressLastMeters > 0f
-                && meters > maneuverProgressLastMeters + resetDelta;
-        if (!key.equals(maneuverProgressKey) || maneuverProgressBaseMeters <= 0f
-                || distanceJumpedForward || meters > maneuverProgressBaseMeters + resetDelta) {
-            maneuverProgressKey = key;
-            maneuverProgressBaseMeters = meters;
+        String family = maneuverFamily(maneuver);
+        boolean explicitRollover = pendingManeuverProgressRolloverMatches(
+                activeRouteId, family, meters);
+        boolean inferredRolloverAllowed =
+                !YandexCoreBridgeContract.SOURCE.equals(clean(state.source));
+        ManeuverProgressTracker.Result result = maneuverProgressTracker.observeMain(
+                activeRouteId, family, meters, explicitRollover,
+                inferredRolloverAllowed);
+        if (explicitRollover && result.newEvent) {
+            clearPendingManeuverProgressRollover();
         }
-        maneuverProgressLastMeters = meters;
-        if (meters <= MANEUVER_PROGRESS_ZERO_METERS) return 0;
-        float base = Math.max(MANEUVER_PROGRESS_MIN_BASE_METERS, maneuverProgressBaseMeters);
-        float remainingRatio = Math.max(0f, Math.min(1f, meters / base));
-        return clampInt(Math.round(remainingRatio * 9f), 0, 9);
+        if (result.newEvent) {
+            AppLog.navigation(app, "NAV_PROGRESS_EVENT"
+                    + " reason=" + result.reason
+                    + " routeId=" + first(activeRouteId, "-")
+                    + " maneuver=" + first(clean(maneuver), "-")
+                    + " distance=" + first(clean(distanceText), "-")
+                    + " progress=" + result.bucket);
+        }
+        return result.hasValue ? result.bucket : 0;
     }
 
     private void resetManeuverProgress() {
-        maneuverProgressBaseMeters = 0f;
-        maneuverProgressLastMeters = 0f;
-        maneuverProgressKey = "";
+        maneuverProgressTracker.reset();
+        clearPendingManeuverProgressRollover();
+    }
+
+    private void armManeuverProgressRollover(String routeId, String family) {
+        maneuverProgressRolloverMarker.arm(
+                routeId, family, System.currentTimeMillis());
+    }
+
+    private boolean pendingManeuverProgressRolloverMatches(String routeId, String family,
+                                                           float meters) {
+        return maneuverProgressRolloverMarker.matches(
+                routeId, family, meters, System.currentTimeMillis());
+    }
+
+    private void clearPendingManeuverProgressRollover() {
+        maneuverProgressRolloverMarker.clear();
     }
 
     private static boolean isYandexNavigationIntent(Intent intent) {

@@ -18,6 +18,7 @@ import java.util.Locale;
 
 import kia.app.core.AppLog;
 import kia.app.core.settings.AppSettings;
+import kia.app.navigation.domain.ManeuverProgressRolloverPolicy;
 import kia.app.navigation.domain.NavigationFeature;
 
 public final class YandexCoreBridgeClient {
@@ -39,6 +40,9 @@ public final class YandexCoreBridgeClient {
     private static final long MANEUVER_ROUTE_DELTA_MAX_METERS = 350L;
     private static final long REROUTE_ROUTE_GROWTH_METERS = 25L;
     private static final long MANEUVER_ZERO_METERS = 1L;
+    private static final long MANEUVER_ROLLOVER_PENDING_TTL_MS = 3000L;
+    private static final String INTERNAL_DISTANCE_TRANSITION =
+            "_kia_main_distance_transition";
     private static YandexCoreBridgeClient shared;
 
     private static final class SnapshotApplyResult {
@@ -94,6 +98,14 @@ public final class YandexCoreBridgeClient {
     private long lastManeuverProjectionLogAt;
     private long lastManeuverDistanceMeters = -1L;
     private long lastManeuverRouteRemainingMeters = -1L;
+    private long maneuverDistanceEventBaseMeters = -1L;
+    private long maneuverDistanceEventClosestMeters = -1L;
+    private String pendingManeuverRolloverKey = "";
+    private long pendingManeuverRolloverClosestMeters = -1L;
+    private long pendingManeuverRolloverMeters = -1L;
+    private long pendingManeuverRolloverRouteRemainingMeters = -1L;
+    private long pendingManeuverRolloverAtElapsed = -1L;
+    private boolean maneuverDistanceRolloverForSnapshot;
     private long lastLiveRouteMetricsAt = -1L;
     private long lastLiveRouteStartedAt = -1L;
     private long lastLiveRouteRemainingMeters = -1L;
@@ -105,6 +117,7 @@ public final class YandexCoreBridgeClient {
     private boolean broadcastApplyPosted;
     private long lastBroadcastApplyAt = -1L;
     private String lastAppliedCoalescingIdentity = "";
+    private long lastAppliedCoalescingManeuverMeters = -1L;
     private String lastBackgroundSuspensionIdentity = "";
 
     private final Runnable poller = new Runnable() {
@@ -161,6 +174,7 @@ public final class YandexCoreBridgeClient {
             broadcastApplyPosted = false;
             lastBroadcastApplyAt = -1L;
             lastAppliedCoalescingIdentity = "";
+            lastAppliedCoalescingManeuverMeters = -1L;
         }
         resetBridgeSessionState();
         AppLog.line(app, "Yandex Core Bridge: client stopped");
@@ -191,15 +205,27 @@ public final class YandexCoreBridgeClient {
             String tailIdentity = coalescingIdentity(tail);
             String referenceIdentity = tail == null
                     ? lastAppliedCoalescingIdentity : tailIdentity;
+            long referenceManeuverMeters = tail == null
+                    ? lastAppliedCoalescingManeuverMeters
+                    : coalescingManeuverMeters(tail);
+            long incomingManeuverMeters = coalescingManeuverMeters(snapshot);
+            boolean distanceTransition =
+                    YandexSnapshotCoalescingPolicy.isForwardManeuverDistanceTransition(
+                            referenceManeuverMeters, incomingManeuverMeters);
+            if (distanceTransition) {
+                snapshot.putBoolean(INTERNAL_DISTANCE_TRANSITION, true);
+            }
             boolean semanticTransition = YandexSnapshotCoalescingPolicy.isTransition(
-                    referenceIdentity, incomingIdentity);
+                    referenceIdentity, incomingIdentity) || distanceTransition;
             if (lifecyclePriority) {
                 // Keep producer order intact and retain queued route/micro
                 // transitions until the order guard has validated this packet.
                 if (!makePendingBroadcastRoom(snapshot, true, semanticTransition)) return;
                 pendingBroadcastSnapshots.addLast(snapshot);
             } else {
-                if (tail != null && YandexSnapshotCoalescingPolicy.canReplaceTail(
+                if (tail != null
+                        && !bool(tail, INTERNAL_DISTANCE_TRANSITION, false)
+                        && YandexSnapshotCoalescingPolicy.canReplaceTail(
                         priorityBroadcastSnapshot(tail),
                         tailIdentity, incomingIdentity)) {
                     pendingBroadcastSnapshots.removeLast();
@@ -383,6 +409,7 @@ public final class YandexCoreBridgeClient {
         if (YandexBridgeLifecyclePolicy.shouldPreserveActiveRoute(
                 state, callback, recentLiveRoute, hasRouteMetrics(snapshot),
                 routePresentKnown, routePresent)) {
+            clearPendingManeuverRollover();
             String suspensionIdentity = lower(callback) + "|" + seq + "|"
                     + timestampElapsed + "|"
                     + firstString(snapshot, "route_id", "routeId");
@@ -408,6 +435,7 @@ public final class YandexCoreBridgeClient {
                 firstString(snapshot, "route_id", "routeId"), seq, timestampElapsed);
         if (orderResult != YandexSnapshotOrderGuard.Result.ACCEPT
                 && orderResult != YandexSnapshotOrderGuard.Result.ACCEPT_UNTRUSTED_INITIAL) {
+            clearPendingManeuverRollover();
             AppLog.line(app, "Yandex Core Bridge: out-of-order snapshot ignored"
                     + " reason=" + orderResult
                     + " state=" + state
@@ -420,6 +448,7 @@ public final class YandexCoreBridgeClient {
                     + " state=" + state);
         }
         rememberAppliedCoalescingIdentity(snapshot);
+        snapshot.remove(INTERNAL_DISTANCE_TRANSITION);
         if (YandexCoreBridgeContract.STATE_ACTIVE.equals(state)) {
             resetManeuverGuardForRouteChange(snapshot);
             normalizeActiveSnapshot(snapshot, freshness);
@@ -493,6 +522,7 @@ public final class YandexCoreBridgeClient {
     private void rememberAppliedCoalescingIdentity(Bundle snapshot) {
         synchronized (broadcastLock) {
             lastAppliedCoalescingIdentity = coalescingIdentity(snapshot);
+            lastAppliedCoalescingManeuverMeters = coalescingManeuverMeters(snapshot);
         }
     }
 
@@ -541,6 +571,10 @@ public final class YandexCoreBridgeClient {
             man.putExtra("direction", maneuver);
             man.putExtra("distance", maneuverDistance);
             man.putExtra("maneuver_provenance", maneuverProvenance);
+            if (bool(snapshot, YandexCoreBridgeContract.EXTRA_MAIN_MANEUVER_ROLLOVER,
+                    false)) {
+                man.putExtra(YandexCoreBridgeContract.EXTRA_MAIN_MANEUVER_ROLLOVER, true);
+            }
             if (mainDistanceExplicitlyUnknown) {
                 man.putExtra("main_distance_explicitly_unknown", true);
             }
@@ -917,18 +951,23 @@ public final class YandexCoreBridgeClient {
         putMeters(snapshot, correctedManeuver,
                 YandexMainDistanceContinuityPolicy.synchronizedDistanceMeterKeys(
                         selectedMain.provenance));
+        snapshot.remove(YandexCoreBridgeContract.EXTRA_MAIN_MANEUVER_ROLLOVER);
+        if (maneuverDistanceRolloverForSnapshot) {
+            snapshot.putBoolean(YandexCoreBridgeContract.EXTRA_MAIN_MANEUVER_ROLLOVER, true);
+        }
     }
 
     private long correctedManeuverMeters(String maneuverIdentity, long meters,
                                          long routeRemainingMeters,
                                          boolean semanticMicroPresent) {
+        maneuverDistanceRolloverForSnapshot = false;
         if (meters < 0L || TextUtils.isEmpty(maneuverIdentity)) {
             resetManeuverDistanceGuard();
             return meters;
         }
         String key = lower(maneuverIdentity);
         if (!key.equals(lastManeuverDistanceKey) || lastManeuverDistanceMeters < 0L) {
-            rememberManeuverDistance(key, meters, routeRemainingMeters);
+            startManeuverDistanceEvent(key, meters, routeRemainingMeters);
             return meters;
         }
         boolean routeRemainingKnown = routeRemainingMeters >= 0L
@@ -939,11 +978,28 @@ public final class YandexCoreBridgeClient {
                 && routeRemainingMeters > lastManeuverRouteRemainingMeters + REROUTE_ROUTE_GROWTH_METERS;
         if (routeGrew) {
             long previousRouteRemaining = lastManeuverRouteRemainingMeters;
-            rememberManeuverDistance(key, meters, routeRemainingMeters);
-            AppLog.line(app, "Yandex Core Bridge: maneuver guard reset by route growth"
+            long previousDistance = lastManeuverDistanceMeters;
+            long restartThreshold = Math.max(80L,
+                    Math.round(Math.max(0L, previousDistance) * 0.25));
+            boolean mainDistanceRestarted =
+                    ManeuverProgressRolloverPolicy.shouldStartNewEvent(
+                            maneuverDistanceEventBaseMeters,
+                            maneuverDistanceEventClosestMeters, meters)
+                    || (previousDistance > MANEUVER_ZERO_METERS
+                    && meters > previousDistance + restartThreshold);
+            if (mainDistanceRestarted) {
+                startManeuverDistanceEvent(key, meters, routeRemainingMeters);
+                maneuverDistanceRolloverForSnapshot = true;
+            } else {
+                rememberManeuverDistance(key, meters, routeRemainingMeters);
+                clearPendingManeuverRollover();
+            }
+            AppLog.line(app, "Yandex Core Bridge: maneuver route growth"
                     + " lastRoute=" + previousRouteRemaining
                     + " route=" + routeRemainingMeters
-                    + " meters=" + meters);
+                    + " previous=" + previousDistance
+                    + " meters=" + meters
+                    + " rollover=" + mainDistanceRestarted);
             return meters;
         }
         YandexMainDistanceContinuityPolicy.ZeroContinuity zeroContinuity =
@@ -963,7 +1019,53 @@ public final class YandexCoreBridgeClient {
                     routeRemainingMeters);
             return zeroContinuity.outputMeters;
         }
-        if (lastManeuverDistanceMeters <= MANEUVER_ZERO_METERS && meters > MANEUVER_ZERO_METERS) {
+        if (pendingManeuverRolloverAtElapsed > 0L) {
+            long pendingAge = SystemClock.elapsedRealtime() - pendingManeuverRolloverAtElapsed;
+            if (pendingAge < 0L || pendingAge > MANEUVER_ROLLOVER_PENDING_TTL_MS) {
+                clearPendingManeuverRollover();
+            }
+        }
+        if (YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                pendingManeuverRolloverKey, key,
+                pendingManeuverRolloverClosestMeters, pendingManeuverRolloverMeters,
+                meters, pendingManeuverRolloverRouteRemainingMeters, routeRemainingMeters,
+                MANEUVER_ROUTE_DELTA_MAX_METERS)) {
+            long previousDistance = lastManeuverDistanceMeters;
+            long previousClosest = maneuverDistanceEventClosestMeters;
+            startManeuverDistanceEvent(key, meters, routeRemainingMeters);
+            maneuverDistanceRolloverForSnapshot = true;
+            AppLog.navigation(app, "NAV_MAIN_DISTANCE_ROLLOVER"
+                    + " identity=" + key
+                    + " previous=" + previousDistance
+                    + " closest=" + previousClosest
+                    + " incoming=" + meters
+                    + " route=" + routeRemainingMeters
+                    + " confirmation=second_snapshot");
+            return meters;
+        }
+        boolean postPassCandidate = YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                lastManeuverDistanceKey, key,
+                maneuverDistanceEventBaseMeters, maneuverDistanceEventClosestMeters,
+                meters, lastManeuverRouteRemainingMeters, routeRemainingMeters,
+                MANEUVER_ROUTE_DELTA_MAX_METERS);
+        if (postPassCandidate) {
+            long previousDistance = lastManeuverDistanceMeters;
+            long heldDistance = heldManeuverDistanceForCandidate(routeRemainingMeters);
+            rememberManeuverDistance(key, heldDistance, routeRemainingMeters);
+            rememberPendingManeuverRollover(
+                    key, maneuverDistanceEventClosestMeters, meters, routeRemainingMeters);
+            AppLog.navigation(app, "NAV_MAIN_DISTANCE_ROLLOVER_CANDIDATE"
+                    + " identity=" + key
+                    + " previous=" + previousDistance
+                    + " closest=" + maneuverDistanceEventClosestMeters
+                    + " candidate=" + meters
+                    + " held=" + heldDistance
+                    + " route=" + routeRemainingMeters);
+            return heldDistance;
+        }
+        clearPendingManeuverRollover();
+        if (lastManeuverDistanceMeters <= MANEUVER_ZERO_METERS
+                && meters > MANEUVER_ZERO_METERS) {
             rememberManeuverDistance(key, meters, routeRemainingMeters);
             AppLog.line(app, "Yandex Core Bridge: maneuver distance recovered from zero"
                     + " meters=" + meters
@@ -1011,9 +1113,63 @@ public final class YandexCoreBridgeClient {
     }
 
     private void rememberManeuverDistance(String key, long meters, long routeRemainingMeters) {
+        if (!key.equals(lastManeuverDistanceKey)
+                || maneuverDistanceEventBaseMeters <= 0L) {
+            startManeuverDistanceEvent(key, meters, routeRemainingMeters);
+            return;
+        }
         lastManeuverDistanceKey = key;
         lastManeuverDistanceMeters = meters;
         lastManeuverRouteRemainingMeters = routeRemainingMeters;
+        if (meters > MANEUVER_ZERO_METERS) {
+            if (maneuverDistanceEventClosestMeters <= 0L) {
+                maneuverDistanceEventClosestMeters = meters;
+            } else {
+                maneuverDistanceEventClosestMeters =
+                        Math.min(maneuverDistanceEventClosestMeters, meters);
+            }
+        }
+    }
+
+    private void startManeuverDistanceEvent(String key, long meters,
+                                            long routeRemainingMeters) {
+        lastManeuverDistanceKey = key;
+        lastManeuverDistanceMeters = meters;
+        lastManeuverRouteRemainingMeters = routeRemainingMeters;
+        maneuverDistanceEventBaseMeters = meters > MANEUVER_ZERO_METERS ? meters : -1L;
+        maneuverDistanceEventClosestMeters =
+                meters > MANEUVER_ZERO_METERS ? meters : -1L;
+        clearPendingManeuverRollover();
+    }
+
+    private long heldManeuverDistanceForCandidate(long routeRemainingMeters) {
+        long held = lastManeuverDistanceMeters > MANEUVER_ZERO_METERS
+                ? lastManeuverDistanceMeters : maneuverDistanceEventClosestMeters;
+        if (held <= MANEUVER_ZERO_METERS) return Math.max(0L, held);
+        if (lastManeuverRouteRemainingMeters >= 0L && routeRemainingMeters >= 0L) {
+            long routeDelta = lastManeuverRouteRemainingMeters - routeRemainingMeters;
+            if (routeDelta > 0L && routeDelta <= MANEUVER_ROUTE_DELTA_MAX_METERS) {
+                held = Math.max(MANEUVER_ZERO_METERS + 1L, held - routeDelta);
+            }
+        }
+        return held;
+    }
+
+    private void rememberPendingManeuverRollover(String key, long closestMeters,
+                                                 long meters, long routeRemainingMeters) {
+        pendingManeuverRolloverKey = key;
+        pendingManeuverRolloverClosestMeters = closestMeters;
+        pendingManeuverRolloverMeters = meters;
+        pendingManeuverRolloverRouteRemainingMeters = routeRemainingMeters;
+        pendingManeuverRolloverAtElapsed = SystemClock.elapsedRealtime();
+    }
+
+    private void clearPendingManeuverRollover() {
+        pendingManeuverRolloverKey = "";
+        pendingManeuverRolloverClosestMeters = -1L;
+        pendingManeuverRolloverMeters = -1L;
+        pendingManeuverRolloverRouteRemainingMeters = -1L;
+        pendingManeuverRolloverAtElapsed = -1L;
     }
 
     private void logManeuverProjection(String identity, String mode,
@@ -1049,6 +1205,10 @@ public final class YandexCoreBridgeClient {
         lastSpeedSignature = "";
         lastSpeedSnapshotSentAt = 0L;
         lastBroadcastSnapshotAt = -1L;
+        synchronized (broadcastLock) {
+            lastAppliedCoalescingIdentity = "";
+            lastAppliedCoalescingManeuverMeters = -1L;
+        }
     }
 
     private void resetRouteGuards() {
@@ -1062,6 +1222,10 @@ public final class YandexCoreBridgeClient {
         lastManeuverProjectionLogAt = 0L;
         lastManeuverDistanceMeters = -1L;
         lastManeuverRouteRemainingMeters = -1L;
+        maneuverDistanceEventBaseMeters = -1L;
+        maneuverDistanceEventClosestMeters = -1L;
+        clearPendingManeuverRollover();
+        maneuverDistanceRolloverForSnapshot = false;
     }
 
     private void resetManeuverGuardForRouteChange(Bundle snapshot) {
@@ -1292,6 +1456,13 @@ public final class YandexCoreBridgeClient {
                 firstString(snapshot, "road_options", "route_road_options",
                         "gray_road_options", "available_directions"),
                 microStateIdentity(snapshot));
+    }
+
+    private static long coalescingManeuverMeters(Bundle snapshot) {
+        if (snapshot == null) return -1L;
+        MainManeuverSnapshot selected = selectMainManeuver(snapshot);
+        return selected == null
+                ? -1L : YandexSnapshotSemantics.distanceMeters(selected.distance);
     }
 
     private static boolean hasSemanticMicroSignal(Bundle snapshot) {

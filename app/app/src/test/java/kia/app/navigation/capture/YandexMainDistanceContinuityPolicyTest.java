@@ -85,6 +85,49 @@ public class YandexMainDistanceContinuityPolicyTest {
     }
 
     @Test
+    public void directionalGlyphRefinementKeepsStableDistanceIdentity() {
+        assertEquals(
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "annotation", "RIGHT"),
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "annotation", "CONTEXT_RA_EXIT_RIGHT"));
+        assertEquals(
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "annotation", "LEFT"),
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "annotation", "CONTEXT_RA_HARD_TURN_LEFT"));
+        assertEquals(
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "annotation", "RIGHT_FROM_LEFT"),
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "bridge_main", "CONTEXT_RA_TAKE_RIGHT"));
+        assertEquals(
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "annotation", "LEFT_FROM_RIGHT"),
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "bridge_main", "CONTEXT_RA_TAKE_LEFT"));
+    }
+
+    @Test
+    public void provenanceRefinementKeepsStableDistanceIdentity() {
+        String annotation = YandexMainDistanceContinuityPolicy.identity(
+                "route-1", "annotation", "RIGHT");
+        String notification = YandexMainDistanceContinuityPolicy.identity(
+                "route-1", "notification", "RIGHT");
+
+        assertEquals(annotation, notification);
+        assertEquals(
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "notification", "RIGHT"),
+                YandexMainDistanceContinuityPolicy.identity(
+                        "route-1", "bridge_main", "CONTEXT_RA_EXIT_RIGHT"));
+        assertTrue(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                annotation, notification,
+                300L, 40L, 300L,
+                5000L, 4970L, MAX_ROUTE_DELTA));
+    }
+
+    @Test
     public void differentRouteOrNonRoundaboutManeuverChangesIdentity() {
         String right = YandexMainDistanceContinuityPolicy.identity(
                 "route-1", "annotation", "RIGHT");
@@ -97,6 +140,95 @@ public class YandexMainDistanceContinuityPolicyTest {
                         "route-1", "annotation", "LEFT"));
         assertEquals("", YandexMainDistanceContinuityPolicy.identity(
                 "", "annotation", "RIGHT"));
+    }
+
+    @Test
+    public void acceptsStrictSameIdentityPostPassJump() {
+        assertTrue(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                300L, 40L, 300L,
+                5000L, 4970L, MAX_ROUTE_DELTA));
+        assertTrue(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                300L, 60L, 300L,
+                5000L, 4990L, MAX_ROUTE_DELTA));
+    }
+
+    @Test
+    public void acceptsSparseHandoffOnlyAfterRealCountdown() {
+        assertTrue(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                1000L, 120L, 300L,
+                5000L, 4990L, MAX_ROUTE_DELTA));
+        assertTrue(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                1000L, 180L, 800L,
+                5000L, 4990L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                100L, 100L, 180L,
+                5000L, 4990L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                1000L, 700L, 1100L,
+                5000L, 4990L, MAX_ROUTE_DELTA));
+    }
+
+    @Test
+    public void rejectsNoiseUnknownRouteGrowthAndDifferentIdentity() {
+        assertFalse(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                300L, 300L, 310L,
+                5000L, 4995L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                300L, 40L, 300L,
+                -1L, 4970L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                300L, 40L, 300L,
+                5000L, 5001L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|right",
+                300L, 40L, 300L,
+                5000L, 4600L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.isSameIdentityPostPassJump(
+                "route|right", "route|left",
+                300L, 40L, 300L,
+                5000L, 4970L, MAX_ROUTE_DELTA));
+    }
+
+    @Test
+    public void confirmsOnlyASecondConsistentPostPassSnapshot() {
+        assertTrue(YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                "route|right", "route|right",
+                40L, 300L, 290L,
+                4970L, 4960L, MAX_ROUTE_DELTA));
+        assertTrue(YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                "route|right", "route|right",
+                50L, 100L, 95L,
+                4970L, 4965L, MAX_ROUTE_DELTA));
+        assertTrue(YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                "route|right", "route|right",
+                180L, 800L, 780L,
+                4990L, 4970L, MAX_ROUTE_DELTA));
+
+        assertFalse(YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                "route|right", "route|right",
+                100L, 180L, 105L,
+                4970L, 4965L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                "route|right", "route|right",
+                180L, 800L, 185L,
+                4990L, 4970L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                "route|right", "route|left",
+                40L, 300L, 290L,
+                4970L, 4960L, MAX_ROUTE_DELTA));
+        assertFalse(YandexMainDistanceContinuityPolicy.confirmsPendingSameIdentityPostPass(
+                "route|right", "route|right",
+                40L, 300L, 290L,
+                4970L, 4980L, MAX_ROUTE_DELTA));
     }
 
     @Test

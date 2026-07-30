@@ -26,6 +26,10 @@ public class NavigationTxKeyTest {
                 "context_ra_turn_right", "", 70f, false, 9));
         assertNotEquals(base, new NavigationTxKey(
                 "context_ra_turn_right", "", 80f, false, 8));
+        assertNotEquals(new NavigationTxKey(
+                        "context_ra_turn_right", "", 80f, false, 5),
+                new NavigationTxKey(
+                        "context_ra_turn_right", "", 80f, false, 9));
         assertNotEquals(base, new NavigationTxKey(
                 "context_ra_turn_right", "context_ra_gray_right", 80f, false, 9));
     }

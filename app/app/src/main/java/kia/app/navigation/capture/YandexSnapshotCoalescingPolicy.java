@@ -2,6 +2,8 @@ package kia.app.navigation.capture;
 
 /** Pure coalescing rules for ordered full-snapshot micro states. */
 final class YandexSnapshotCoalescingPolicy {
+    private static final long MANEUVER_FORWARD_TRANSITION_METERS = 50L;
+
     private YandexSnapshotCoalescingPolicy() {
     }
 
@@ -13,6 +15,13 @@ final class YandexSnapshotCoalescingPolicy {
                                   String tailState, String incomingState) {
         return !tailLifecyclePriority
                 && clean(tailState).equals(clean(incomingState));
+    }
+
+    static boolean isForwardManeuverDistanceTransition(long previousMeters,
+                                                       long incomingMeters) {
+        return previousMeters > 1L
+                && incomingMeters > previousMeters
+                && incomingMeters - previousMeters >= MANEUVER_FORWARD_TRANSITION_METERS;
     }
 
     /**

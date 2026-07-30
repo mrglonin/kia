@@ -2,29 +2,29 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-[![Скачать KIA 23.05 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.05%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.05-359/kia_359.apk)
+[![Скачать KIA 23.06 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.06%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.06-360/kia_360.apk)
 
-- APK KIA: [kia_359.apk](https://github.com/mrglonin/kia/releases/download/v23.05-359/kia_359.apk)
+- APK KIA: [kia_360.apk](https://github.com/mrglonin/kia/releases/download/v23.06-360/kia_360.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-bgfix.apk](https://github.com/mrglonin/kia/releases/download/v23.04-358/yandex_navi-7_10-universal-kia-mod-bgfix.apk)
 - ABI-варианты Yandex mod: [ARM64](https://github.com/mrglonin/kia/releases/download/v23.04-358/yandex_navi-7_10-arm64-kia-mod-bgfix.apk), [ARM7](https://github.com/mrglonin/kia/releases/download/v23.04-358/yandex_navi-7_10-arm7-kia-mod-bgfix.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.05-359`](https://github.com/mrglonin/kia/releases/tag/v23.05-359)
-- Текущий публичный релиз: `23.05` / `359`
+- GitHub Release: [`v23.06-360`](https://github.com/mrglonin/kia/releases/tag/v23.06-360)
+- Текущий публичный релиз: `23.06` / `360`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.05` / `359` | `updates/kia_359.apk`, 5 991 879 байт | `e40f66b81d0ceed83a5690d40db92963dadf30ca17225a561ed0304541ab4a45` |
+| KIA app | `23.06` / `360` | `updates/kia_360.apk`, 6 002 231 байт | `e56c9f5ccc668521d5063dcb272fb6d1c329b554d00a87d6782a00d250084a46` |
 | Yandex Navigator Kia mod | `7.10-kia.20260723` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-bgfix.apk`](https://github.com/mrglonin/kia/releases/download/v23.04-358/yandex_navi-7_10-universal-kia-mod-bgfix.apk), 115 101 951 байт | `ff34e9f25eeee2ee5a7c95b4b1585586e5c8c5b68f2dce18d10790e8a5d043f1` |
 
-В `23.05` усилена устойчивость всей цепочки данных: источники навигации больше не перебивают друг друга, Yandex и 2GIS поддерживают активный маршрут heartbeat-снимками, а выключение навигации гарантированно очищает TX приборки. TPMS отслеживает свежесть каждого колеса и меняет частоту опроса по открытому экрану, виджету и фону. RCTA автоматически снимает зависшее предупреждение при потере кадров. Скорость `0` и знак ограничения скрыты на стоянке.
+В `23.06` исправлен прогресс-бар навигационного TX: каждый новый манёвр начинается с полной шкалы независимо от первой полученной дистанции, затем шкала только убывает. Следующий однотипный манёвр распознаётся после реального обратного отсчёта и двух согласованных дальних снимков; одиночный скачок, transient `0/1 м`, micro-подсказки, название улицы и уточнение глифа не сбрасывают основной progress.
 
-Настройки получили поиск, базовый/экспертный режим, центр состояния, самопроверку, живое превью фактической приборки, безопасный перенос настроек и диагностический ZIP. Для Android/UART Real можно закрепить либо заблокировать конкретное медиа-приложение. Оригинальный логотип KIA возвращён, а системные уведомления используют отдельный аккуратный монохромный значок.
+Yandex Core Bridge удерживает первый подозрительный переход вроде `40 → 300 м`, подтверждает его следующим отсчётом около `290 м` и передаёт одноразовый marker нового события. NORMAL, TBT, отключённые micro-манёвры и ожидание micro-дистанции получают первый TX с progress `9`, а очередь reconnect хранит только последний актуальный кадр.
 
-Yandex Navigator Kia mod в `23.05` не изменён: используется прежний проверенный пакет `7.10-kia.20260723` / `71011062` из релиза `v23.04-358`. Медиа-профиль TEYES/CC4 и его TX-логика также не изменялись.
+Yandex Navigator Kia mod в `23.06` не изменён: используется прежний проверенный пакет `7.10-kia.20260723` / `71011062` из релиза `v23.04-358`. Медиа-профиль TEYES/CC4 и его медиа-TX логика также не изменялись.
 
-Проверено: `211` unit-тестов, `0 failures`; `lintRelease` — `0 errors` / `73 warnings`; release APK прошёл zipalign и проверку подписи.
+Проверено: `245` unit-тестов, `0 failures/errors/skips`; `lintRelease` — `0 errors` / `73 warnings`; release APK прошёл zipalign и проверку подписи.
 
 ## Что работает
 
@@ -67,7 +67,7 @@ Yandex Navigator Kia mod в `23.05` не изменён: используетс�
 ADB:
 
 ```bash
-adb install -r updates/kia_359.apk
+adb install -r updates/kia_360.apk
 curl -L -o /tmp/yandex_navi-7_10-universal-kia-mod-bgfix.apk \
   https://github.com/mrglonin/kia/releases/download/v23.04-358/yandex_navi-7_10-universal-kia-mod-bgfix.apk
 adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-bgfix.apk
@@ -75,7 +75,7 @@ adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-bgfix.apk
 
 На магнитоле:
 
-1. Установить `kia_359.apk`.
+1. Установить `kia_360.apk`.
 2. Выдать runtime permissions: уведомления, геолокация и Bluetooth — только для используемых функций.
 3. Включить специальные права: поверх окон, доступ к уведомлениям и игнор оптимизации батареи.
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
@@ -102,7 +102,7 @@ Release-сборка подписывается публичным debug-keystor
 
 ```bash
 ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
-$ADB -s emulator-5554 install -r updates/kia_359.apk
+$ADB -s emulator-5554 install -r updates/kia_360.apk
 $ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning
