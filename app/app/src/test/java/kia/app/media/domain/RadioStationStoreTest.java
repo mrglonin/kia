@@ -11,6 +11,7 @@ import org.junit.Test;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -83,6 +84,34 @@ public class RadioStationStoreTest {
                 context.preferences.getString("station_FM_100.5", ""));
         assertFalse(context.preferences.contains("manual_FM_100.5"));
         assertFalse(context.preferences.contains("origin_FM_100.5"));
+    }
+
+    @Test
+    public void stationListSortsFmThenAmByNumericFrequency() {
+        TestContext context = new TestContext();
+        RadioStationStore.saveManualStation(context, "FM", "101.0", "FM High");
+        RadioStationStore.saveManualStation(context, "AM", "1584", "AM Station");
+        RadioStationStore.saveManualStation(context, "FM", "88.8", "FM Low");
+
+        List<RadioStationStore.Entry> entries = RadioStationStore.entries(context);
+
+        assertEquals(3, entries.size());
+        assertEquals("FM", entries.get(0).band);
+        assertEquals("88.8", entries.get(0).frequency);
+        assertEquals("FM", entries.get(1).band);
+        assertEquals("101.0", entries.get(1).frequency);
+        assertEquals("AM", entries.get(2).band);
+        assertEquals("1584", entries.get(2).frequency);
+    }
+
+    @Test
+    public void displayNameHidesOnlyTheGeneratedFrequencyFallback() {
+        assertEquals("", RadioStationStore.displayName(
+                "FM", "101.0", "FM 101.0"));
+        assertEquals("", RadioStationStore.displayName(
+                "fm", "101", "  fm   101.0  "));
+        assertEquals("Europa Plus", RadioStationStore.displayName(
+                "FM", "101.0", "  Europa   Plus  "));
     }
 
     private static final class TestContext extends ContextWrapper {

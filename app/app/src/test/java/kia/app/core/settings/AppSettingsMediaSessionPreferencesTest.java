@@ -65,6 +65,26 @@ public final class AppSettingsMediaSessionPreferencesTest {
                 AppSettings.mediaSessionSelectionSummary(context));
     }
 
+    @Test
+    public void androidAndUartKeepIndependentSourceDelays() {
+        TestContext context = new TestContext();
+
+        assertEquals(300, AppSettings.mediaSourceDelayMs(
+                context, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID));
+        assertEquals(1000, AppSettings.mediaSourceDelayMs(
+                context, AppSettings.MEDIA_PROFILE_UART_REAL));
+
+        AppSettings.setMediaSourceDelayMs(
+                context, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID, 600);
+        AppSettings.setMediaSourceDelayMs(
+                context, AppSettings.MEDIA_PROFILE_UART_REAL, 1500);
+
+        assertEquals(600, AppSettings.mediaSourceDelayMs(
+                context, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID));
+        assertEquals(1500, AppSettings.mediaSourceDelayMs(
+                context, AppSettings.MEDIA_PROFILE_UART_REAL));
+    }
+
     private static final class TestContext extends ContextWrapper {
         private final Map<String, InMemoryPreferences> preferences = new HashMap<>();
 
