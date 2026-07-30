@@ -79,6 +79,8 @@ adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-bgfix.apk
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
 5. Установить или обновить Yandex Navigator mod до `yandex_navi-7_10-universal-kia-mod-bgfix.apk`, чтобы получить исправление фонового режима. Его package/version остаются `ru.yandex.yandexnavi` / `7.10-kia.20260723`.
 
+С уже установленного Kia mod обновление ставится поверх и сохраняет данные. Официальный либо иначе подписанный Yandex Android не разрешит заменить этим APK: сначала сохраните нужные данные, удалите прежнее приложение и затем установите mod.
+
 ## Сборка
 
 Требования: Android SDK, JDK 17 из Android Studio, Gradle wrapper из `app/`.
