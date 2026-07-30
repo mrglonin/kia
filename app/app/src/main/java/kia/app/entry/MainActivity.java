@@ -88,6 +88,7 @@ import kia.app.diagnostics.SettingsTransfer;
 import kia.app.media.capture.MediaNotificationListener;
 import kia.app.media.domain.CallFeature;
 import kia.app.media.domain.MediaFeature;
+import kia.app.media.domain.MediaSettingsVisibilityPolicy;
 import kia.app.media.domain.RadioStationStore;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.navigation.domain.NavigationFeature;
@@ -238,6 +239,8 @@ public final class MainActivity extends Activity {
     private String renderedTpmsWarningKey = "";
     private int mainScrollY;
     private int settingsScrollY;
+    private int radioStationManagerScrollY;
+    private boolean restoreRadioStationManagerScroll;
     private final OnBackInvokedCallback backCallback = this::handleAppBack;
 
     private interface IntSetter {
@@ -1027,29 +1030,99 @@ public final class MainActivity extends Activity {
     private LinearLayout mediaRadioStationPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
         addSettingsPanelHeader(panel, "Радиостанции",
-                "Kia хранит названия по частоте и заполняет новые частоты автоматически",
+                "названия по частоте для Android и UART Real; ручное имя всегда важнее авто",
                 COLOR_ACCENT_BLUE);
-        TextView summary = text(RadioStationStore.summary(this, 5), isCompact() ? 13 : 15,
-                Color.rgb(235, 241, 246));
-        LinearLayout.LayoutParams summaryLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        summaryLp.setMargins(0, dp(12), 0, 0);
-        panel.addView(summary, summaryLp);
 
+        List<RadioStationStore.Entry> entries = RadioStationStore.entries(this);
         MediaState media = StateStore.media();
         String frequency = RadioStationStore.currentFrequency(media);
         String band = RadioStationStore.currentBand(media);
-        String currentHint = frequency.isEmpty()
-                ? "включите радио, чтобы появилась частота"
-                : band + " " + frequency + " -> " + emptyDash(media.title);
+        panel.addView(radioStationStats(entries));
+        panel.addView(currentRadioStationCard(band, frequency, media.title));
+
         addActionGrid(panel,
-                action("Текущая", currentHint, frequency.isEmpty() ? COLOR_MUTED : COLOR_ACCENT_BLUE,
-                        this::showCurrentRadioStationDialog),
-                action("Список", "все сохранённые частоты", COLOR_ACCENT_BLUE,
-                        this::showRadioStationListDialog),
-                action("Добавить", "частота и своё название", COLOR_ACCENT_BLUE,
+                action("Открыть список",
+                        entries.isEmpty() ? "станций пока нет" : "Сохранено: " + entries.size(),
+                        entries.isEmpty() ? COLOR_MUTED : COLOR_ACCENT_BLUE,
+                        this::showRadioStationListDialogFresh),
+                action("Добавить станцию", "FM/AM, частота и своё название", COLOR_ACCENT_BLUE,
                         this::showAddRadioStationBandDialog));
         return panel;
+    }
+
+    private View radioStationStats(List<RadioStationStore.Entry> entries) {
+        int manual = 0;
+        for (RadioStationStore.Entry entry : entries) {
+            if (entry != null && entry.manual) manual++;
+        }
+        LinearLayout chips = row();
+        chips.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        chips.addView(pill("Всего: " + entries.size(), COLOR_ACCENT_BLUE),
+                chipLayout(true));
+        chips.addView(pill("Своих: " + manual,
+                        manual > 0 ? COLOR_SUCCESS : COLOR_PANEL_SOFT),
+                chipLayout(false));
+        chips.addView(pill("Авто: " + (entries.size() - manual), COLOR_PANEL_SOFT),
+                chipLayout(false));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(12), 0, 0);
+        chips.setLayoutParams(lp);
+        return chips;
+    }
+
+    private View currentRadioStationCard(String band, String frequency, String stationName) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(13), dp(16), dp(13));
+        card.setMinimumHeight(isCompact() ? dp(82) : dp(94));
+        boolean available = frequency != null && !frequency.isEmpty();
+        card.setBackground(settingsActionBackground(available,
+                available ? COLOR_SUCCESS : COLOR_ACCENT_BLUE));
+        String displayName = RadioStationStore.displayName(band, frequency, stationName);
+
+        LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView label = text(available ? "Сейчас в радио" : "Текущая станция",
+                isCompact() ? 13 : 15, available ? COLOR_SUCCESS : COLOR_MUTED);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        header.addView(label, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (available) header.addView(pill(band, COLOR_ACCENT_BLUE));
+        card.addView(header);
+
+        TextView title = text(available
+                        ? (displayName.isEmpty()
+                        ? "Название ещё не определено" : displayName)
+                        : "Включите FM или AM — частота появится здесь",
+                isCompact() ? 17 : 20, available ? Color.WHITE : COLOR_TEXT);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setMaxLines(2);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        titleLp.setMargins(0, dp(7), 0, 0);
+        card.addView(title, titleLp);
+
+        if (available) {
+            String unit = "AM".equalsIgnoreCase(band) ? "кГц" : "МГц";
+            TextView detail = text(frequency + " " + unit + "  ·  Нажмите, чтобы изменить имя",
+                    isCompact() ? 12 : 14, COLOR_MUTED);
+            LinearLayout.LayoutParams detailLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            detailLp.setMargins(0, dp(4), 0, 0);
+            card.addView(detail, detailLp);
+            card.setClickable(true);
+            card.setFocusable(true);
+            card.setContentDescription(band + " " + frequency + ". "
+                    + (displayName.isEmpty() ? "Без названия" : displayName)
+                    + ". Изменить название");
+            card.setOnClickListener(v -> showCurrentRadioStationDialog());
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(12), 0, dp(4));
+        card.setLayoutParams(lp);
+        return card;
     }
 
     private LinearLayout mediaSessionPriorityPanel() {
@@ -2164,7 +2237,8 @@ public final class MainActivity extends Activity {
             return SETTINGS_TPMS;
         }
         if (containsAny(value, "медиа", "music", "музык", "радио", "трек",
-                "артист", "uart", "teyes", "android")) {
+                "артист", "uart", "teyes", "android", "задерж", "пауза",
+                "синхрон")) {
             return SETTINGS_MEDIA;
         }
         if (containsAny(value, "нави", "yandex", "яндекс", "2gis", "манев",
@@ -2815,8 +2889,12 @@ public final class MainActivity extends Activity {
     }
 
     private void renderMediaTab(LinearLayout root) {
+        int profile = AppSettings.mediaProfile(this);
         root.addView(mediaMusicPanel());
-        if (AppSettings.universalMediaProfile(this)) {
+        if (MediaSettingsVisibilityPolicy.showsTimingControls(profile)) {
+            root.addView(mediaTimingPanel(profile));
+        }
+        if (MediaSettingsVisibilityPolicy.showsUniversalControls(profile)) {
             root.addView(mediaSessionPriorityPanel());
             root.addView(mediaRadioStationPanel());
         }
@@ -2869,28 +2947,67 @@ public final class MainActivity extends Activity {
                 action("Только трек", "без исполнителя", mediaTextModeColor(AppSettings.MEDIA_TEXT_TRACK_ONLY),
                         () -> setMediaTextMode(AppSettings.MEDIA_TEXT_TRACK_ONLY)));
 
-        if (AppSettings.universalMediaProfile(this) && AppSettings.expertMode(this)) {
-            panel.addView(settingsDivider());
-            addSettingsSubHeader(panel, "Синхронизация источника",
-                    profile == AppSettings.MEDIA_PROFILE_UART_REAL
-                            ? "пауза после реального UART source перед текстом"
-                            : "пауза после переключения штатного media source");
-            addActionGridColumns(panel, 3,
-                    mediaSourceDelayAction(0),
-                    mediaSourceDelayAction(300),
-                    mediaSourceDelayAction(600),
-                    mediaSourceDelayAction(1000),
-                    mediaSourceDelayAction(1500),
-                    mediaSourceDelayAction(2000));
+        return panel;
+    }
 
-            panel.addView(settingsDivider());
-            addSettingsSubHeader(panel, "Исполнитель перед треком",
-                    "время первой строки; 0 сразу показывает название");
+    private LinearLayout mediaTimingPanel(int profile) {
+        LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
+        String profileName = profile == AppSettings.MEDIA_PROFILE_UART_REAL
+                ? "UART Real" : "Android";
+        addSettingsPanelHeader(panel, "Синхронизация отправки трека",
+                "активный профиль: " + profileName
+                        + "; TEYES / CC4 не изменяется",
+                COLOR_ACCENT_BLUE);
+
+        boolean artistThenTrack = AppSettings.mediaTextMode(this)
+                == AppSettings.MEDIA_TEXT_ARTIST_THEN_TRACK;
+        TextView current = text(
+                "После смены источника (" + profileName + "): "
+                        + mediaDelayText(AppSettings.mediaSourceDelayMs(this, profile))
+                        + "\nАвтор перед названием: "
+                        + (artistThenTrack
+                        ? mediaDelayText(AppSettings.mediaArtistDelayMs(this)) + " (общая)"
+                        : "не используется в режиме «Только трек»"),
+                isCompact() ? 13 : 15, Color.rgb(235, 241, 246));
+        panel.addView(statusBox("Сейчас", current, COLOR_ACCENT_BLUE));
+
+        panel.addView(settingsDivider());
+        addSettingsSubHeader(panel, "После смены источника",
+                profile == AppSettings.MEDIA_PROFILE_UART_REAL
+                        ? "пауза после реального UART source перед отправкой текста"
+                        : "пауза после переключения штатного media source");
+        addActionGridColumns(panel, 3,
+                mediaSourceDelayAction(0),
+                mediaSourceDelayAction(300),
+                mediaSourceDelayAction(600),
+                mediaSourceDelayAction(1000),
+                mediaSourceDelayAction(1500),
+                mediaSourceDelayAction(2000),
+                mediaSourceDelayAction(3000));
+
+        panel.addView(settingsDivider());
+        addSettingsSubHeader(panel, "Автор → название трека",
+                artistThenTrack
+                        ? "общая для Android и UART Real; 0 сразу отправляет название"
+                        : "не используется, пока выбран режим «Только трек»");
+        if (artistThenTrack) {
             addActionGridColumns(panel, 2,
                     mediaArtistDelayAction(0),
                     mediaArtistDelayAction(2500),
                     mediaArtistDelayAction(5000),
                     mediaArtistDelayAction(8000));
+        } else {
+            TextView inactive = text(
+                    "Выберите выше «Автор + трек», чтобы настроить время показа исполнителя.",
+                    isCompact() ? 13 : 15, COLOR_MUTED);
+            panel.addView(statusBox("Сейчас выключено", inactive, COLOR_PANEL_SOFT));
+        }
+
+        if (MediaSettingsVisibilityPolicy.showsSourceReassertControl(
+                profile, AppSettings.expertMode(this))) {
+            panel.addView(settingsDivider());
+            addSettingsSubHeader(panel, "Дополнительно",
+                    "контрольный повтор нужен только некоторым приборным панелям");
             addActionGrid(panel,
                     action("Контрольный повтор",
                             AppSettings.mediaSourceReassertEnabled(this)
@@ -2899,7 +3016,6 @@ public final class MainActivity extends Activity {
                             choiceColor(AppSettings.mediaSourceReassertEnabled(this)),
                             this::toggleMediaSourceReassert));
         }
-
         return panel;
     }
 
@@ -2931,134 +3047,513 @@ public final class MainActivity extends Activity {
 
     private void showRadioStationListDialog() {
         List<RadioStationStore.Entry> entries = RadioStationStore.entries(this);
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
-                .setTitle("Радиостанции");
-        if (entries.isEmpty()) {
-            builder.setMessage("Список пока пуст. Станцию можно добавить вручную "
-                    + "или включить радио для автоматического определения.");
-        } else {
-            String[] labels = new String[entries.size()];
-            for (int i = 0; i < entries.size(); i++) {
-                RadioStationStore.Entry entry = entries.get(i);
-                labels[i] = entry.band + " " + entry.frequency + " -> " + entry.name
-                        + (entry.manual ? "  · ручная" : "  · авто");
-            }
-            builder.setItems(labels, (dialog, which) -> {
-                RadioStationStore.Entry entry = entries.get(which);
-                showRadioStationEditDialog(entry.band, entry.frequency, entry.name);
-            });
+        AlertDialog dialog = new AlertDialog.Builder(this).create();
+        dialog.setView(radioStationManagerView(entries, dialog), 0, 0, 0, 0);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setDimAmount(0.68f);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
+            lp.copyFrom(window.getAttributes());
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            lp.width = Math.min(screenWidth - dp(28), dp(680));
+            int targetHeightDp = entries.isEmpty() ? 420 : entries.size() <= 2 ? 540 : 720;
+            lp.height = Math.min(screenHeight - dp(28), dp(targetHeightDp));
+            window.setAttributes(lp);
         }
-        builder
-                .setPositiveButton("Добавить", (dialog, which) -> showAddRadioStationBandDialog())
-                .setNegativeButton("Закрыть", null)
-                .show();
+    }
+
+    private void showRadioStationListDialogFresh() {
+        radioStationManagerScrollY = 0;
+        restoreRadioStationManagerScroll = false;
+        showRadioStationListDialog();
+    }
+
+    private View radioStationManagerView(List<RadioStationStore.Entry> entries,
+                                         AlertDialog dialog) {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(16), dp(18), dp(18));
+        panel.setBackground(round(COLOR_SETTINGS_PANEL, dp(10),
+                COLOR_SETTINGS_DIVIDER, dp(1)));
+        panel.setAccessibilityPaneTitle("Радиостанции");
+
+        LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titleBox = new LinearLayout(this);
+        titleBox.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text("Радиостанции", isCompact() ? 19 : 22, Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        titleBox.addView(title);
+        TextView hint = text("Android и UART Real · ручные имена защищены от автообновления",
+                isCompact() ? 11 : 13, COLOR_MUTED);
+        hint.setMaxLines(2);
+        titleBox.addView(hint);
+        header.addView(titleBox, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView close = text("×", isCompact() ? 24 : 28, COLOR_MUTED);
+        close.setGravity(Gravity.CENTER);
+        close.setTypeface(Typeface.DEFAULT_BOLD);
+        close.setClickable(true);
+        close.setFocusable(true);
+        close.setContentDescription("Закрыть список радиостанций");
+        close.setBackground(settingsButtonBackground(false));
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        panel.addView(header);
+
+        panel.addView(radioStationStats(entries));
+        ScrollView list = (ScrollView) radioStationListView(entries, dialog);
+        if (restoreRadioStationManagerScroll) {
+            int scrollY = radioStationManagerScrollY;
+            list.post(() -> list.scrollTo(0, scrollY));
+            restoreRadioStationManagerScroll = false;
+        }
+        LinearLayout.LayoutParams listLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        listLp.setMargins(0, dp(8), 0, dp(10));
+        panel.addView(list, listLp);
+
+        LinearLayout actions = row();
+        TextView add = wizardActionButton("Добавить станцию", true);
+        add.setOnClickListener(v -> {
+            rememberRadioStationManagerScroll(list);
+            dialog.dismiss();
+            showRadioStationEditorDialog("", "", "", true);
+        });
+        TextView done = wizardActionButton("Готово", false);
+        done.setOnClickListener(v -> dialog.dismiss());
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        addLp.setMargins(0, 0, dp(5), 0);
+        LinearLayout.LayoutParams doneLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        doneLp.setMargins(dp(5), 0, 0, 0);
+        actions.addView(add, addLp);
+        actions.addView(done, doneLp);
+        panel.addView(actions);
+        return panel;
+    }
+
+    private View radioStationListView(List<RadioStationStore.Entry> entries,
+                                      AlertDialog dialog) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(0, 0, 0, dp(4));
+
+        if (entries.isEmpty()) {
+            LinearLayout empty = new LinearLayout(this);
+            empty.setOrientation(LinearLayout.VERTICAL);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(dp(20), dp(34), dp(20), dp(34));
+            empty.setBackground(settingsInsetBackground(COLOR_ACCENT_BLUE));
+            TextView title = text("Список пока пуст", isCompact() ? 18 : 21, Color.WHITE);
+            title.setTypeface(Typeface.DEFAULT_BOLD);
+            title.setGravity(Gravity.CENTER);
+            TextView hint = text("Добавьте FM/AM вручную или включите радио — "
+                            + "Kia запомнит найденную частоту автоматически",
+                    isCompact() ? 13 : 15, COLOR_MUTED);
+            hint.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            hintLp.setMargins(0, dp(8), 0, 0);
+            empty.addView(title);
+            empty.addView(hint, hintLp);
+            LinearLayout.LayoutParams emptyLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            emptyLp.setMargins(0, dp(14), 0, 0);
+            root.addView(empty, emptyLp);
+        } else {
+            addRadioStationBandSection(root, "FM", entries, dialog, scroll);
+            addRadioStationBandSection(root, "AM", entries, dialog, scroll);
+        }
+        scroll.addView(root, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return scroll;
+    }
+
+    private void addRadioStationBandSection(LinearLayout root, String band,
+                                            List<RadioStationStore.Entry> entries,
+                                            AlertDialog dialog,
+                                            ScrollView scroll) {
+        int count = 0;
+        for (RadioStationStore.Entry entry : entries) {
+            if (entry != null && band.equalsIgnoreCase(entry.band)) count++;
+        }
+        if (count == 0) return;
+
+        TextView header = text(band + "  ·  " + count, isCompact() ? 15 : 17, Color.WHITE);
+        header.setTypeface(Typeface.DEFAULT_BOLD);
+        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headerLp.setMargins(0, dp(18), 0, dp(7));
+        root.addView(header, headerLp);
+
+        for (RadioStationStore.Entry entry : entries) {
+            if (entry == null || !band.equalsIgnoreCase(entry.band)) continue;
+            root.addView(radioStationListCard(entry, dialog, scroll));
+        }
+    }
+
+    private View radioStationListCard(RadioStationStore.Entry entry,
+                                      AlertDialog dialog,
+                                      ScrollView scroll) {
+        MediaState currentMedia = StateStore.media();
+        boolean current = entry.band.equalsIgnoreCase(
+                RadioStationStore.currentBand(currentMedia))
+                && entry.frequency.equals(RadioStationStore.currentFrequency(currentMedia));
+        String displayName = RadioStationStore.displayName(
+                entry.band, entry.frequency, entry.name);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(15), dp(12), dp(15), dp(12));
+        card.setMinimumHeight(isCompact() ? dp(78) : dp(88));
+        card.setClickable(true);
+        card.setFocusable(true);
+        card.setBackground(settingsActionBackground(current,
+                current ? COLOR_SUCCESS : COLOR_ACCENT_BLUE));
+        card.setContentDescription(entry.band + " " + entry.frequency + ". "
+                + (displayName.isEmpty() ? "Без названия" : displayName) + ". "
+                + (entry.manual ? "Своё название" : "Авто")
+                + (current ? ". Сейчас включена" : "") + ". Изменить");
+        card.setOnClickListener(v -> {
+            rememberRadioStationManagerScroll(scroll);
+            dialog.dismiss();
+            showRadioStationEditorDialog(
+                    entry.band, entry.frequency, entry.name, true);
+        });
+
+        LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        String unit = "AM".equalsIgnoreCase(entry.band) ? "кГц" : "МГц";
+        TextView frequency = text(entry.frequency + " " + unit,
+                isCompact() ? 18 : 21, Color.WHITE);
+        frequency.setTypeface(Typeface.DEFAULT_BOLD);
+        header.addView(frequency, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (current) {
+            header.addView(pill("сейчас", COLOR_SUCCESS), chipLayout(true));
+        }
+        header.addView(pill(entry.manual ? "своё"
+                                : displayName.isEmpty() ? "без имени" : "авто",
+                        entry.manual ? COLOR_ACCENT_BLUE : COLOR_PANEL_SOFT),
+                chipLayout(!current));
+        card.addView(header);
+
+        TextView name = text(displayName.isEmpty()
+                        ? "Название ещё не определено" : displayName,
+                isCompact() ? 15 : 17, COLOR_TEXT);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setMaxLines(2);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        nameLp.setMargins(0, dp(6), 0, 0);
+        card.addView(name, nameLp);
+
+        TextView edit = text("Изменить название  ›", isCompact() ? 12 : 13, COLOR_MUTED);
+        LinearLayout.LayoutParams editLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        editLp.setMargins(0, dp(4), 0, 0);
+        card.addView(edit, editLp);
+
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.setMargins(0, 0, 0, dp(7));
+        card.setLayoutParams(cardLp);
+        return card;
+    }
+
+    private void rememberRadioStationManagerScroll(ScrollView scroll) {
+        radioStationManagerScrollY = scroll == null ? 0 : scroll.getScrollY();
+        restoreRadioStationManagerScroll = true;
     }
 
     private void showAddRadioStationBandDialog() {
-        String[] bands = {"FM", "AM"};
-        new AlertDialog.Builder(this)
-                .setTitle("Диапазон станции")
-                .setItems(bands, (dialog, which) -> showAddRadioStationDialog(bands[which]))
-                .setNegativeButton("Отмена", null)
-                .show();
-    }
-
-    private void showAddRadioStationDialog(String band) {
-        String cleanBand = "AM".equalsIgnoreCase(band) ? "AM" : "FM";
-        LinearLayout form = new LinearLayout(this);
-        form.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(18);
-        form.setPadding(pad, dp(8), pad, 0);
-
-        EditText frequencyInput = new EditText(this);
-        frequencyInput.setSingleLine(true);
-        frequencyInput.setHint("FM".equals(cleanBand) ? "Частота, например 101.0" : "Частота, например 1584");
-        frequencyInput.setInputType(InputType.TYPE_CLASS_NUMBER
-                | ("FM".equals(cleanBand) ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
-        frequencyInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(7)});
-        form.addView(frequencyInput, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        EditText nameInput = new EditText(this);
-        nameInput.setSingleLine(true);
-        nameInput.setHint("Название станции");
-        nameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        nameInput.setFilters(new InputFilter[]{new InputFilter.LengthFilter(64)});
-        form.addView(nameInput, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Новая " + cleanBand + " станция")
-                .setView(form)
-                .setPositiveButton("Сохранить", null)
-                .setNegativeButton("Отмена", null)
-                .create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener(v -> {
-                    String normalized = RadioStationStore.normalizeFrequencyInput(
-                            cleanBand, frequencyInput.getText().toString());
-                    if (normalized.isEmpty()) {
-                        frequencyInput.setError("Проверьте частоту");
-                        return;
-                    }
-                    if (!RadioStationStore.saveManualStation(this, cleanBand, normalized,
-                            nameInput.getText().toString())) {
-                        nameInput.setError("Введите название, а не только частоту");
-                        return;
-                    }
-                    AppLog.line(this, "Radio station added: " + cleanBand + " " + normalized);
-                    resendRadioStationName(cleanBand, normalized);
-                    dialog.dismiss();
-                    renderTab();
-                    refresh();
-                }));
-        dialog.show();
+        showRadioStationEditorDialog("", "", "", false);
     }
 
     private void showRadioStationEditDialog(String band, String frequency, String currentName) {
+        showRadioStationEditorDialog(band, frequency, currentName, false);
+    }
+
+    private void showRadioStationEditorDialog(String band, String frequency,
+                                              String currentName,
+                                              boolean returnToManager) {
+        boolean editing = frequency != null && !frequency.trim().isEmpty();
+        String cleanBand = "AM".equalsIgnoreCase(band) ? "AM" : "FM";
+        String cleanFrequency = editing
+                ? RadioStationStore.normalizeFrequencyInput(cleanBand, frequency) : "";
+        String initialName = editing
+                ? RadioStationStore.displayName(
+                cleanBand, cleanFrequency, currentName) : "";
         MediaState currentMedia = StateStore.media();
-        boolean currentStation = band.equalsIgnoreCase(
+        boolean currentStation = editing && cleanBand.equalsIgnoreCase(
                 RadioStationStore.currentBand(currentMedia))
-                && frequency.equals(RadioStationStore.currentFrequency(currentMedia));
+                && cleanFrequency.equals(RadioStationStore.currentFrequency(currentMedia));
+
+        AlertDialog dialog = new AlertDialog.Builder(this).create();
+        String[] selectedBand = {cleanBand};
+        boolean[] destructiveArmed = {false};
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(16), dp(18), dp(18));
+        panel.setBackground(round(COLOR_SETTINGS_PANEL, dp(10),
+                COLOR_SETTINGS_DIVIDER, dp(1)));
+        panel.setAccessibilityPaneTitle(
+                editing ? "Редактирование радиостанции" : "Новая радиостанция");
+
+        LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titleBox = new LinearLayout(this);
+        titleBox.setOrientation(LinearLayout.VERTICAL);
+        TextView title = text(editing ? "Изменить станцию" : "Новая радиостанция",
+                isCompact() ? 19 : 22, Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        titleBox.addView(title);
+        TextView hint = text(editing
+                        ? cleanBand + " " + cleanFrequency
+                        + ("AM".equals(cleanBand) ? " кГц" : " МГц")
+                        + " · ручное имя важнее авто"
+                        : "Выберите FM/AM, укажите частоту и своё название",
+                isCompact() ? 11 : 13, COLOR_MUTED);
+        hint.setMaxLines(2);
+        titleBox.addView(hint);
+        header.addView(titleBox, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView close = text("×", isCompact() ? 24 : 28, COLOR_MUTED);
+        close.setGravity(Gravity.CENTER);
+        close.setTypeface(Typeface.DEFAULT_BOLD);
+        close.setClickable(true);
+        close.setFocusable(true);
+        close.setContentDescription("Закрыть редактор станции");
+        close.setBackground(settingsButtonBackground(false));
+        close.setOnClickListener(v -> dialog.dismiss());
+        header.addView(close, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        panel.addView(header);
+
+        TextView bandLabel = radioStationFieldLabel(
+                editing ? "Диапазон (не изменяется)" : "Диапазон");
+        panel.addView(bandLabel, radioStationFieldLabelLayout(true));
+        LinearLayout bandRow = row();
+        TextView fm = wizardActionButton("FM", "FM".equals(cleanBand));
+        TextView am = wizardActionButton("AM", "AM".equals(cleanBand));
+        fm.setEnabled(!editing);
+        am.setEnabled(!editing);
+        if (editing) {
+            fm.setVisibility("FM".equals(cleanBand) ? View.VISIBLE : View.GONE);
+            am.setVisibility("AM".equals(cleanBand) ? View.VISIBLE : View.GONE);
+        }
+        LinearLayout.LayoutParams fmLp = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        fmLp.setMargins(0, 0, dp(5), 0);
+        LinearLayout.LayoutParams amLp = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        amLp.setMargins(dp(5), 0, 0, 0);
+        bandRow.addView(fm, fmLp);
+        bandRow.addView(am, amLp);
+        panel.addView(bandRow);
+
+        TextView frequencyLabel = radioStationFieldLabel("Частота");
+        EditText frequencyInput = radioStationEditorInput(
+                "FM".equals(cleanBand) ? "Например, 101.0" : "Например, 1584",
+                InputType.TYPE_CLASS_NUMBER
+                        | ("FM".equals(cleanBand) ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0),
+                7);
+        frequencyInput.setId(View.generateViewId());
+        frequencyLabel.setLabelFor(frequencyInput.getId());
+        if (editing) {
+            frequencyInput.setText(cleanFrequency);
+            frequencyInput.setEnabled(false);
+        }
+        panel.addView(frequencyLabel, radioStationFieldLabelLayout(false));
+        LinearLayout frequencyRow = row();
+        frequencyRow.setGravity(Gravity.CENTER_VERTICAL);
+        frequencyRow.addView(frequencyInput, new LinearLayout.LayoutParams(
+                0, dp(56), 1f));
+        TextView unit = text("FM".equals(cleanBand) ? "МГц" : "кГц",
+                isCompact() ? 14 : 16, Color.WHITE);
+        unit.setGravity(Gravity.CENTER);
+        unit.setTypeface(Typeface.DEFAULT_BOLD);
+        unit.setBackground(settingsInsetBackground(COLOR_ACCENT_BLUE));
+        LinearLayout.LayoutParams unitLp = new LinearLayout.LayoutParams(dp(82), dp(56));
+        unitLp.setMargins(dp(10), 0, 0, 0);
+        frequencyRow.addView(unit, unitLp);
+        panel.addView(frequencyRow);
+
+        TextView nameLabel = radioStationFieldLabel("Название");
+        EditText nameInput = radioStationEditorInput(
+                "Например, Europa Plus",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+                64);
+        nameInput.setId(View.generateViewId());
+        nameLabel.setLabelFor(nameInput.getId());
+        nameInput.setText(initialName);
+        nameInput.setSelectAllOnFocus(editing);
+        nameInput.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        panel.addView(nameLabel, radioStationFieldLabelLayout(false));
+        panel.addView(nameInput, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+
+        Runnable updateBandUi = () -> {
+            boolean fmSelected = "FM".equals(selectedBand[0]);
+            fm.setBackground(settingsActionBackground(fmSelected, COLOR_ACCENT_BLUE));
+            am.setBackground(settingsActionBackground(!fmSelected, COLOR_ACCENT_BLUE));
+            fm.setContentDescription("FM" + (fmSelected ? ". Выбрано" : ""));
+            am.setContentDescription("AM" + (!fmSelected ? ". Выбрано" : ""));
+            frequencyInput.setHint(fmSelected ? "Например, 101.0" : "Например, 1584");
+            frequencyInput.setInputType(InputType.TYPE_CLASS_NUMBER
+                    | (fmSelected ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
+            unit.setText(fmSelected ? "МГц" : "кГц");
+            frequencyInput.setError(null);
+        };
+        fm.setOnClickListener(v -> {
+            if (!"FM".equals(selectedBand[0])) frequencyInput.setText("");
+            selectedBand[0] = "FM";
+            updateBandUi.run();
+            frequencyInput.requestFocus();
+        });
+        am.setOnClickListener(v -> {
+            if (!"AM".equals(selectedBand[0])) frequencyInput.setText("");
+            selectedBand[0] = "AM";
+            updateBandUi.run();
+            frequencyInput.requestFocus();
+        });
+        updateBandUi.run();
+
+        if (editing) {
+            TextView destructive = wizardActionButton(
+                    currentStation ? "Очистить название" : "Удалить станцию", false);
+            destructive.setBackground(settingsActionBackground(false, COLOR_DANGER));
+            destructive.setOnClickListener(v -> {
+                if (!destructiveArmed[0]) {
+                    destructiveArmed[0] = true;
+                    destructive.setText(currentStation
+                            ? "Подтвердить очистку" : "Подтвердить удаление");
+                    destructive.setContentDescription(destructive.getText()
+                            + ". Нажмите ещё раз");
+                    destructive.setBackground(settingsActionBackground(true, COLOR_DANGER));
+                    Toast.makeText(this, "Нажмите ещё раз для подтверждения",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                RadioStationStore.clearStationName(this, cleanBand, cleanFrequency);
+                String action = currentStation ? "reset to auto" : "deleted";
+                AppLog.line(this, "Radio station " + action + ": "
+                        + cleanBand + " " + cleanFrequency);
+                resendRadioStationName(cleanBand, cleanFrequency);
+                renderTab();
+                refresh();
+                dialog.dismiss();
+            });
+            LinearLayout.LayoutParams destructiveLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
+            destructiveLp.setMargins(0, dp(14), 0, 0);
+            panel.addView(destructive, destructiveLp);
+        }
+
+        LinearLayout actions = row();
+        TextView cancel = wizardActionButton("Отмена", false);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        TextView save = wizardActionButton("Сохранить", true);
+        save.setOnClickListener(v -> {
+            String targetBand = editing ? cleanBand : selectedBand[0];
+            String normalized = editing ? cleanFrequency
+                    : RadioStationStore.normalizeFrequencyInput(
+                    targetBand, frequencyInput.getText().toString());
+            if (normalized.isEmpty()) {
+                frequencyInput.setError("Проверьте частоту");
+                frequencyInput.requestFocus();
+                return;
+            }
+            if (!RadioStationStore.saveManualStation(this, targetBand, normalized,
+                    nameInput.getText().toString())) {
+                nameInput.setError("Введите название, а не только частоту");
+                nameInput.requestFocus();
+                return;
+            }
+            AppLog.line(this, "Radio station " + (editing ? "saved" : "added")
+                    + ": " + targetBand + " " + normalized);
+            resendRadioStationName(targetBand, normalized);
+            renderTab();
+            refresh();
+            dialog.dismiss();
+        });
+        LinearLayout.LayoutParams cancelLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        cancelLp.setMargins(0, dp(14), dp(5), 0);
+        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        saveLp.setMargins(dp(5), dp(14), 0, 0);
+        actions.addView(cancel, cancelLp);
+        actions.addView(save, saveLp);
+        panel.addView(actions);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.addView(panel, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        dialog.setView(scroll, 0, 0, 0, 0);
+        dialog.setOnDismissListener(ignored -> {
+            if (!returnToManager) return;
+            handler.post(() -> {
+                if (activityVisible && !isFinishing() && !isDestroyed()
+                        && AppSettings.universalMediaProfile(this)) {
+                    showRadioStationListDialog();
+                }
+            });
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setDimAmount(0.68f);
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams();
+            lp.copyFrom(window.getAttributes());
+            int screenWidth = getResources().getDisplayMetrics().widthPixels;
+            int screenHeight = getResources().getDisplayMetrics().heightPixels;
+            lp.width = Math.min(screenWidth - dp(28), dp(620));
+            lp.height = Math.min(screenHeight - dp(28), dp(editing ? 620 : 570));
+            window.setAttributes(lp);
+        }
+    }
+
+    private TextView radioStationFieldLabel(String value) {
+        TextView label = text(value, isCompact() ? 13 : 15, COLOR_TEXT);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        return label;
+    }
+
+    private LinearLayout.LayoutParams radioStationFieldLabelLayout(boolean first) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(first ? 14 : 12), 0, dp(6));
+        return lp;
+    }
+
+    private EditText radioStationEditorInput(String hint, int inputType, int maxLength) {
         EditText input = new EditText(this);
         input.setSingleLine(true);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(64)});
-        input.setText(currentName == null ? "" : currentName);
-        input.setSelectAllOnFocus(true);
-        int pad = dp(18);
-        input.setPadding(pad, dp(8), pad, dp(8));
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(band + " " + frequency)
-                .setView(input)
-                .setPositiveButton("Сохранить", null)
-                .setNeutralButton(currentStation ? "Авто" : "Удалить", (ignored, which) -> {
-                    RadioStationStore.clearStationName(this, band, frequency);
-                    String action = currentStation ? "reset to auto" : "deleted";
-                    AppLog.line(this, "Radio station " + action + ": " + band + " " + frequency);
-                    resendRadioStationName(band, frequency);
-                    renderTab();
-                    refresh();
-                })
-                .setNegativeButton("Отмена", null)
-                .create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener(v -> {
-                    if (!RadioStationStore.saveManualStation(this, band, frequency,
-                            input.getText().toString())) {
-                        input.setError("Введите название, а не только частоту");
-                        return;
-                    }
-                    AppLog.line(this, "Radio station saved: " + band + " " + frequency);
-                    resendRadioStationName(band, frequency);
-                    dialog.dismiss();
-                    renderTab();
-                    refresh();
-                }));
-        dialog.show();
+        input.setHint(hint);
+        input.setInputType(inputType);
+        input.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(maxLength)});
+        input.setTextColor(Color.WHITE);
+        input.setHintTextColor(COLOR_MUTED);
+        input.setTextSize(isCompact() ? 15f : 17f);
+        input.setPadding(dp(14), dp(8), dp(14), dp(8));
+        input.setBackground(round(COLOR_PANEL_SOFT, dp(8),
+                COLOR_SETTINGS_DIVIDER, dp(1)));
+        return input;
     }
 
     private void resendRadioStationName(String band, String frequency) {
+        if (!AppSettings.universalMediaProfile(this)) return;
         MediaState media = StateStore.media();
         if (!band.equalsIgnoreCase(RadioStationStore.currentBand(media))
                 || !frequency.equals(RadioStationStore.currentFrequency(media))) return;
@@ -4242,7 +4737,8 @@ public final class MainActivity extends Activity {
         AppSettings.setMediaSourceDelayMs(this, profile, delayMs);
         AppLog.line(this, "Media source delay: " + delayMs + " ms / "
                 + AppSettings.mediaProfileLabel(this));
-        MediaFeature.get(this).resendCurrent("media source delay " + delayMs + "ms");
+        Toast.makeText(this, "Применится при следующей смене источника",
+                Toast.LENGTH_SHORT).show();
         renderTab();
         refresh();
     }
@@ -4266,9 +4762,16 @@ public final class MainActivity extends Activity {
         boolean enabled = !AppSettings.mediaSourceReassertEnabled(this);
         AppSettings.setMediaSourceReassertEnabled(this, enabled);
         AppLog.line(this, "Media source reassert: " + enabled);
-        MediaFeature.get(this).resendCurrent("media source reassert " + enabled);
+        Toast.makeText(this, "Применится при следующей смене источника",
+                Toast.LENGTH_SHORT).show();
         renderTab();
         refresh();
+    }
+
+    private static String mediaDelayText(int delayMs) {
+        if (delayMs <= 0) return "без паузы";
+        if (delayMs < 1000) return delayMs + " мс";
+        return formatSeconds(delayMs) + " с";
     }
 
     private static String formatSeconds(int delayMs) {

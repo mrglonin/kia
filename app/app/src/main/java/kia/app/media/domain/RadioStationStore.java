@@ -112,6 +112,16 @@ public final class RadioStationStore {
         return normalizeFrequency(cleanBand(band), frequency);
     }
 
+    public static String displayName(String band, String frequency, String stationName) {
+        String cleanName = clean(stationName);
+        if (empty(cleanName)) return "";
+        String cleanBand = cleanBand(band);
+        String normalized = normalizeFrequency(cleanBand, frequency);
+        String fallbackFrequency = empty(normalized) ? clean(frequency) : normalized;
+        String fallback = defaultLabel(cleanBand, fallbackFrequency);
+        return cleanName.equalsIgnoreCase(fallback) ? "" : cleanName;
+    }
+
     public static void clearStationName(Context context, String source, String frequency) {
         if (context == null) return;
         String band = band(source, frequency);
@@ -135,7 +145,13 @@ public final class RadioStationStore {
             Entry parsed = parseEntry(context, key, (String) value);
             if (parsed != null) out.add(parsed);
         }
-        Collections.sort(out, (a, b) -> a.sortKey().compareTo(b.sortKey()));
+        Collections.sort(out, (a, b) -> {
+            int band = Integer.compare(a.bandRank(), b.bandRank());
+            if (band != 0) return band;
+            int frequency = Double.compare(a.numericFrequency(), b.numericFrequency());
+            if (frequency != 0) return frequency;
+            return a.name.compareToIgnoreCase(b.name);
+        });
         return out;
     }
 
@@ -396,8 +412,16 @@ public final class RadioStationStore {
             this.manual = ORIGIN_MANUAL.equals(origin);
         }
 
-        private String sortKey() {
-            return band + "|" + frequency;
+        private int bandRank() {
+            return "FM".equalsIgnoreCase(band) ? 0 : 1;
+        }
+
+        private double numericFrequency() {
+            try {
+                return Double.parseDouble(frequency);
+            } catch (Exception ignored) {
+                return Double.MAX_VALUE;
+            }
         }
     }
 
