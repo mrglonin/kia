@@ -30,6 +30,20 @@ public class YandexSnapshotCoalescingPolicyTest {
     }
 
     @Test
+    public void possibleNextManeuverDistanceJumpCannotBeCoalescedAway() {
+        assertTrue(YandexSnapshotCoalescingPolicy
+                .isForwardManeuverDistanceTransition(40L, 300L));
+        assertTrue(YandexSnapshotCoalescingPolicy
+                .isForwardManeuverDistanceTransition(50L, 100L));
+        assertFalse(YandexSnapshotCoalescingPolicy
+                .isForwardManeuverDistanceTransition(300L, 310L));
+        assertFalse(YandexSnapshotCoalescingPolicy
+                .isForwardManeuverDistanceTransition(300L, 290L));
+        assertFalse(YandexSnapshotCoalescingPolicy
+                .isForwardManeuverDistanceTransition(-1L, 300L));
+    }
+
+    @Test
     public void lifecyclePacketDisplacesOrdinaryPacketInFullQueue() {
         assertTrue(YandexSnapshotCoalescingPolicy.evictionIndex(
                 true, true, false, false, true) >= 0);

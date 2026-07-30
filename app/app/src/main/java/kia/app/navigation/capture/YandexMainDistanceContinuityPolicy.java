@@ -2,6 +2,8 @@ package kia.app.navigation.capture;
 
 import java.util.Locale;
 
+import kia.app.navigation.domain.ManeuverProgressRolloverPolicy;
+
 /** Pure continuity rule for transient zero main-distance samples during micro guidance. */
 final class YandexMainDistanceContinuityPolicy {
     static final class ZeroContinuity {
@@ -31,8 +33,24 @@ final class YandexMainDistanceContinuityPolicy {
         if (main.contains("roundabout") || main.contains("circular")
                 || main.contains("круг") || main.contains("кольц")) {
             main = "roundabout";
+        } else if (main.contains("turn_back") || main.contains("uturn")
+                || main.contains("развор")) {
+            main = "uturn";
+        } else if (main.contains("right_from_left") || main.contains("rightfromleft")) {
+            main = "right";
+        } else if (main.contains("left_from_right") || main.contains("leftfromright")) {
+            main = "left";
+        } else if (main.contains("left") || main.contains("лев")) {
+            main = "left";
+        } else if (main.contains("right") || main.contains("прав")) {
+            main = "right";
+        } else if (main.contains("forward") || main.contains("straight")
+                || main.contains("прям")) {
+            main = "forward";
         }
-        return route + "|" + lower(provenance) + "|" + main;
+        // Provenance can switch between annotation/notification/bridge_main while Yandex is
+        // describing the same semantic maneuver. It must not split the distance event.
+        return route + "|" + main;
     }
 
     static String selectProvenanceDistance(boolean sameMainIdentity,
@@ -82,6 +100,64 @@ final class YandexMainDistanceContinuityPolicy {
                 previousRouteRemaining, currentRouteRemaining,
                 semanticMicro, maxDeltaMeters, maxRouteGrowthMeters, zeroMeters);
         return result.handled && result.outputMeters == incomingMeters;
+    }
+
+    static boolean isSameIdentityPostPassJump(String previousIdentity,
+                                              String currentIdentity,
+                                              long eventBaseMeters,
+                                              long eventClosestMeters,
+                                              long incomingMeters,
+                                              long previousRouteRemaining,
+                                              long currentRouteRemaining,
+                                              long maxRouteDeltaMeters) {
+        String previousKey = clean(previousIdentity);
+        String currentKey = clean(currentIdentity);
+        if (previousKey.isEmpty() || !previousKey.equals(currentKey)
+                || eventBaseMeters <= 0L || eventClosestMeters <= 0L
+                || incomingMeters <= 0L
+                || previousRouteRemaining < 0L || currentRouteRemaining < 0L
+                || maxRouteDeltaMeters < 0L) {
+            return false;
+        }
+        long routeDelta = previousRouteRemaining - currentRouteRemaining;
+        if (routeDelta < 0L || routeDelta > maxRouteDeltaMeters) return false;
+        long projectedClosest = Math.max(0L, eventClosestMeters - routeDelta);
+        if (ManeuverProgressRolloverPolicy.shouldStartNewEvent(
+                eventBaseMeters, projectedClosest, incomingMeters)) {
+            return true;
+        }
+
+        // The bridge can miss several near-maneuver samples while Yandex is backgrounded.
+        // Treat a far handoff as a candidate only after a strong real countdown; the caller
+        // still requires a second consistent snapshot before it emits a rollover marker.
+        long countdown = eventBaseMeters - projectedClosest;
+        long forwardJump = incomingMeters - projectedClosest;
+        long requiredCountdown = Math.max(250L, Math.round(eventBaseMeters * 0.50d));
+        long requiredJump = Math.max(200L, projectedClosest);
+        return countdown >= requiredCountdown && forwardJump >= requiredJump;
+    }
+
+    static boolean confirmsPendingSameIdentityPostPass(String pendingIdentity,
+                                                       String currentIdentity,
+                                                       long pendingClosestMeters,
+                                                       long pendingMeters,
+                                                       long incomingMeters,
+                                                       long pendingRouteRemaining,
+                                                       long currentRouteRemaining,
+                                                       long maxRouteDeltaMeters) {
+        String pendingKey = clean(pendingIdentity);
+        String currentKey = clean(currentIdentity);
+        if (pendingKey.isEmpty() || !pendingKey.equals(currentKey)
+                || pendingClosestMeters <= 0L || pendingMeters <= 0L
+                || incomingMeters <= 0L
+                || pendingRouteRemaining < 0L || currentRouteRemaining < 0L
+                || maxRouteDeltaMeters < 0L) {
+            return false;
+        }
+        long routeDelta = pendingRouteRemaining - currentRouteRemaining;
+        if (routeDelta < 0L || routeDelta > maxRouteDeltaMeters) return false;
+        return ManeuverProgressRolloverPolicy.confirmsPendingEvent(
+                pendingClosestMeters, pendingMeters, incomingMeters, routeDelta);
     }
 
     /**

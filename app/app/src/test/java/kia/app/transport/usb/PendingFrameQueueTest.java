@@ -38,6 +38,21 @@ public final class PendingFrameQueueTest {
     }
 
     @Test
+    public void fullProgressResetReplacesQueuedHalfProgressManeuver() {
+        PendingFrameQueue queue = new PendingFrameQueue(80);
+
+        queue.offer(AdapterProtocol.maneuver(
+                "context_ra_turn_right", 300f, false, false, 5));
+        queue.offer(AdapterProtocol.maneuver(
+                "context_ra_turn_right", 300f, false, false, 9));
+
+        List<byte[]> frames = queue.snapshot();
+        assertEquals(1, frames.size());
+        assertEquals(AdapterProtocol.CMD_MANEUVER, command(frames.get(0)));
+        assertEquals(0x90, frames.get(0)[12] & 0xf0);
+    }
+
+    @Test
     public void navigationOffInvalidatesStaleNavigationButKeepsOtherTraffic() {
         PendingFrameQueue queue = new PendingFrameQueue(80);
 
