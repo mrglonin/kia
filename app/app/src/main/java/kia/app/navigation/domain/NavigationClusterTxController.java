@@ -72,7 +72,12 @@ final class NavigationClusterTxController {
     }
 
     void rememberMainManeuver(String imageId, float distance, boolean km, int progressBucket) {
-        NavigationTxKey key = maneuverKey(imageId, "", distance, km, progressBucket);
+        rememberMainManeuver(imageId, "", distance, km, progressBucket);
+    }
+
+    void rememberMainManeuver(String imageId, String grayRoadId, float distance,
+                              boolean km, int progressBucket) {
+        NavigationTxKey key = maneuverKey(imageId, grayRoadId, distance, km, progressBucket);
         lastMainManeuverKey = updatedMainManeuverKey(lastMainManeuverKey, key, true);
     }
 

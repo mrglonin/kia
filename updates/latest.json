@@ -1,11 +1,11 @@
 {
   "app": {
-    "version_name": "23.03",
-    "version_code": 357,
-    "asset_name": "kia_357.apk",
-    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.03-357/kia_357.apk",
-    "sha256": "a1700e5065f1bd5ff45da0d2c6fb063165b042a81c3a055c6b29001d0427d14d",
-    "size": 5890783
+    "version_name": "23.04",
+    "version_code": 358,
+    "asset_name": "kia_358.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.04-358/kia_358.apk",
+    "sha256": "ecc651bf018166774665534a26e6e448d901cee3f30f0f127ed2043fbe7a4dc6",
+    "size": 5915023
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
@@ -15,10 +15,10 @@
     "apk_dir": "updates/yandex",
     "files": [
       {
-        "name": "yandex_navi-7_10-arm7-kia-mod.apk",
-        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.00-354/yandex_navi-7_10-arm7-kia-mod.apk",
-        "sha256": "07f4979ee2df95b62ce8c1a44f8ecc6a9892b9481951ab780962fe06508f8be7",
-        "size": 79674122
+        "name": "yandex_navi-7_10-universal-kia-mod-bgfix.apk",
+        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.04-358/yandex_navi-7_10-universal-kia-mod-bgfix.apk",
+        "sha256": "ff34e9f25eeee2ee5a7c95b4b1585586e5c8c5b68f2dce18d10790e8a5d043f1",
+        "size": 115101951
       }
     ]
   },

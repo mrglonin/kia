@@ -154,6 +154,7 @@ public final class MainActivity extends Activity {
     private CompoundButton navigationDebugToggle;
     private CompoundButton navigationOverlayToggle;
     private CompoundButton microManeuverToggle;
+    private CompoundButton straightUntilMainToggle;
     private CompoundButton finishCompassAutoToggle;
     private CompoundButton navTbtToggle;
     private CompoundButton overspeedToggle;
@@ -1013,6 +1014,7 @@ public final class MainActivity extends Activity {
         navigationDebugToggle = null;
         navigationOverlayToggle = null;
         microManeuverToggle = null;
+        straightUntilMainToggle = null;
         finishCompassAutoToggle = null;
         navTbtToggle = null;
         overspeedToggle = null;
@@ -2888,10 +2890,14 @@ public final class MainActivity extends Activity {
     private String navigationAssistTileHint(int mode) {
         if (mode == NavigationOutputMode.TBT) return "ETA в TBT";
         if (mode == NavigationOutputMode.FINISH_DIRECTION) return "заменён стрелкой";
-        return AppSettings.navMicroManeuvers(this)
-                ? "ассистент до " + AppSettings.navMicroMaxDistanceMeters(this)
-                + " м, " + AppSettings.navMicroHoldSeconds(this) + "с"
-                : "ассистент выключен";
+        String main = AppSettings.yandexNavigationEnabled(this)
+                && AppSettings.navStraightUntilMain(this)
+                ? "основной за " + AppSettings.navMainRevealDistanceMeters(this) + " м"
+                : "основной сразу";
+        String micro = AppSettings.navMicroManeuvers(this)
+                ? "микро до " + AppSettings.navMicroMaxDistanceMeters(this) + " м"
+                : "микро выкл";
+        return main + " · " + micro;
     }
 
     private int navigationAssistTileColor(int mode) {
@@ -2906,8 +2912,9 @@ public final class MainActivity extends Activity {
 
     private String navigationNormalExtraText() {
         String speed = AppSettings.navOverspeedTextEnabled(this) ? "warning" : "знак скорости";
-        if (!AppSettings.navMicroManeuvers(this)) return speed;
-        return speed + " + ассистент";
+        if (AppSettings.navStraightUntilMain(this)) speed += " + прямо";
+        if (AppSettings.navMicroManeuvers(this)) speed += " + ассистент";
+        return speed;
     }
 
     private String navigationTextOutputText(int mode) {
@@ -2949,6 +2956,7 @@ public final class MainActivity extends Activity {
         addSettingsSubHeader(panel, "1. Настройки основной навигации",
                 normalMode ? "манёвр маршрута, серая дорога и текстовые строки"
                         : "доступно только в режиме маршрута Обычный");
+        boolean yandexNormalMode = normalMode && AppSettings.yandexNavigationEnabled(this);
         addActionGrid(panel,
                 navSettingsAction(navAddressAction(0, "Улица сейчас", "текущая улица"), normalMode),
                 navSettingsAction(navAddressAction(1, "После манёвра", "улица после поворота"), normalMode),
@@ -2961,6 +2969,17 @@ public final class MainActivity extends Activity {
                             renderTab();
                             refresh();
                         }), normalMode));
+        straightUntilMainToggle = addSettingsPanelSwitchHeader(panel,
+                "До манёвра показывать прямо · Яндекс",
+                yandexNormalMode
+                        ? "основной знак появится только за выбранное расстояние; микроподсказки сохраняются"
+                        : !normalMode
+                        ? "доступно только в режиме маршрута Обычный"
+                        : "доступно для источника Яндекс",
+                AppSettings.navStraightUntilMain(this), this::toggleStraightUntilMain);
+        straightUntilMainToggle.setEnabled(yandexNormalMode);
+        straightUntilMainToggle.setAlpha(yandexNormalMode ? 1f : 0.45f);
+        addActionGrid(panel, navMainRevealDistanceCycleAction(yandexNormalMode));
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "2. Ассистент манёвров",
                 normalMode ? "короткая жёлтая подсказка перед сложным манёвром"
@@ -3365,6 +3384,7 @@ public final class MainActivity extends Activity {
         }
         updateOverlayToggle();
         updateMicroManeuverToggle();
+        updateStraightUntilMainToggle();
         updateNavTbtToggle();
         updateOverspeedToggle();
         updateNavDebugToggle();
@@ -4156,12 +4176,30 @@ public final class MainActivity extends Activity {
         int meters = AppSettings.navMicroMaxDistanceMeters(this);
         boolean enabled = normalMode && AppSettings.navMicroManeuvers(this);
         String hint = !normalMode ? "доступно только в обычном режиме"
-                : enabled ? "когда ассистент может заменить основной манёвр"
+                : enabled ? "максимальная дистанция для краткой подсказки"
                 : "сначала включите ассистент подсказок";
-        View button = action("Порог " + navMicroDistanceText(meters), hint,
+        View button = action("Микро до " + navMicroDistanceText(meters), hint,
                 enabled ? COLOR_ACCENT_BLUE : COLOR_MUTED, false, () -> {
                     if (!navNormalSettingsEnabled() || !AppSettings.navMicroManeuvers(this)) return;
-                    setNavMicroMaxDistanceMeters(nextValue(meters, 150, 200, 250));
+                    setNavMicroMaxDistanceMeters(nextValue(meters,
+                            100, 150, 200, 250, 300, 400, 500));
+                });
+        return navSettingsAction(button, enabled);
+    }
+
+    private View navMainRevealDistanceCycleAction(boolean available) {
+        int meters = AppSettings.navMainRevealDistanceMeters(this);
+        boolean enabled = available && AppSettings.navStraightUntilMain(this);
+        String hint = !navNormalSettingsEnabled() ? "доступно только в обычном режиме"
+                : !AppSettings.yandexNavigationEnabled(this) ? "доступно для источника Яндекс"
+                : enabled ? "100 / 200 / 300 / 400 / 500 м"
+                : "сначала включите показ прямо до манёвра";
+        View button = action("Основной за " + meters + " м", hint,
+                enabled ? COLOR_ACCENT_BLUE : COLOR_MUTED, false, () -> {
+                    if (!navNormalSettingsEnabled()
+                            || !AppSettings.yandexNavigationEnabled(this)
+                            || !AppSettings.navStraightUntilMain(this)) return;
+                    setNavMainRevealDistanceMeters(nextValue(meters, 100, 200, 300, 400, 500));
                 });
         return navSettingsAction(button, enabled);
     }
@@ -4225,6 +4263,16 @@ public final class MainActivity extends Activity {
         AppSettings.setNavMicroMaxDistanceMeters(this, meters);
         AppLog.line(this, "Navigation maneuver assistant max distance meters: "
                 + AppSettings.navMicroMaxDistanceMeters(this));
+        NavigationFeature.get(this).onManeuverDisplaySettingsChanged("micro_max_distance");
+        renderTab();
+        refresh();
+    }
+
+    private void setNavMainRevealDistanceMeters(int meters) {
+        AppSettings.setNavMainRevealDistanceMeters(this, meters);
+        AppLog.line(this, "Navigation main maneuver reveal distance meters: "
+                + AppSettings.navMainRevealDistanceMeters(this));
+        NavigationFeature.get(this).onManeuverDisplaySettingsChanged("main_reveal_distance");
         renderTab();
         refresh();
     }
@@ -4306,6 +4354,20 @@ public final class MainActivity extends Activity {
         }
         AppSettings.setNavMicroManeuvers(this, enabled);
         AppLog.line(this, "Navigation maneuver assistant: " + enabled);
+        NavigationFeature.get(this).onManeuverDisplaySettingsChanged("micro_enabled");
+        renderTab();
+        refresh();
+    }
+
+    private void toggleStraightUntilMain(CompoundButton button, boolean enabled) {
+        if (!navNormalSettingsEnabled() || !AppSettings.yandexNavigationEnabled(this)) {
+            updateStraightUntilMainToggle();
+            return;
+        }
+        AppSettings.setNavStraightUntilMain(this, enabled);
+        AppLog.line(this, "Navigation straight until main maneuver: " + enabled);
+        NavigationFeature.get(this).onManeuverDisplaySettingsChanged("straight_until_main");
+        renderTab();
         refresh();
     }
 
@@ -5174,6 +5236,15 @@ public final class MainActivity extends Activity {
         microManeuverToggle.setOnCheckedChangeListener(null);
         microManeuverToggle.setChecked(enabled);
         microManeuverToggle.setOnCheckedChangeListener(this::toggleMicroManeuvers);
+    }
+
+    private void updateStraightUntilMainToggle() {
+        if (straightUntilMainToggle == null) return;
+        boolean enabled = AppSettings.navStraightUntilMain(this);
+        if (straightUntilMainToggle.isChecked() == enabled) return;
+        straightUntilMainToggle.setOnCheckedChangeListener(null);
+        straightUntilMainToggle.setChecked(enabled);
+        straightUntilMainToggle.setOnCheckedChangeListener(this::toggleStraightUntilMain);
     }
 
     private void updateNavTbtToggle() {
