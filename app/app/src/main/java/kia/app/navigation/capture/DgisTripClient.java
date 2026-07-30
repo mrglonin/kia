@@ -96,7 +96,7 @@ public final class DgisTripClient implements ServiceConnection {
 
     private void bind() {
         if (!running || bound) return;
-        if (!AppSettings.dgisNavigationEnabled(app)) {
+        if (!sourceEnabled()) {
             logQuiet("2GIS trip: disabled by source mode " + AppSettings.navSourceLabel(app));
             handler.postDelayed(this::bind, RECONNECT_MS);
             return;
@@ -120,6 +120,12 @@ public final class DgisTripClient implements ServiceConnection {
             logQuiet("2GIS trip: bind failed " + e.getClass().getSimpleName());
             handler.postDelayed(this::bind, RECONNECT_MS);
         }
+    }
+
+    private boolean sourceEnabled() {
+        return NavigationSourceGate.dgisEnabled(
+                AppSettings.navigationEnabled(app),
+                AppSettings.dgisNavigationEnabled(app));
     }
 
     private String installedPackage() {

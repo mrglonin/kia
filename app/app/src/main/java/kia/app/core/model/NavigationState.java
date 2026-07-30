@@ -1,5 +1,6 @@
 package kia.app.core.model;
 
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -443,7 +444,7 @@ public final class NavigationState {
         boolean hasRouteMetrics = !routeDistance.isEmpty() || !routeTime.isEmpty()
                 || !arrivalTime.isEmpty();
         if (active && hasRouteMetrics) return false;
-        boolean notificationOnly = source.toLowerCase().contains("2gis");
+        boolean notificationOnly = source.toLowerCase(Locale.ROOT).contains("2gis");
         if (notificationOnly && hasManeuver) return false;
         return active && !finishReached && !hasManeuver;
     }
@@ -460,7 +461,7 @@ public final class NavigationState {
     }
 
     private String providerLabel() {
-        String all = (source + " " + laneSource).toLowerCase();
+        String all = (source + " " + laneSource).toLowerCase(Locale.ROOT);
         if (all.contains("2gis") || all.contains("2гис")) return "2GIS";
         if (all.contains("yandex") || all.contains("яндекс")) return "Yandex";
         if (all.contains("gps")) return "GPS";
@@ -469,7 +470,7 @@ public final class NavigationState {
 
     private String roundaboutText() {
         String value = first(maneuver, first(routeActionId, mainManeuverId));
-        String p = safe(value).toLowerCase();
+        String p = safe(value).toLowerCase(Locale.ROOT);
         if (!(p.contains("roundabout") || p.contains("circular") || p.contains("круг"))) return "";
         if (p.contains("exit_1")) return "1-й съезд";
         if (p.contains("exit_2")) return "2-й съезд";
@@ -560,7 +561,7 @@ public final class NavigationState {
     }
 
     private static String humanEventLabel(String value) {
-        String text = safe(value).toLowerCase();
+        String text = safe(value).toLowerCase(Locale.ROOT);
         if (text.contains("lane") || text.contains("полос")) return "камера на полосу";
         if (text.contains("speed") || text.contains("limit") || text.contains("скор")) {
             return "камера скорости";
@@ -587,9 +588,9 @@ public final class NavigationState {
         if (!txEvent.isEmpty()) return txEvent;
         String explicit = humanClusterLine(eventHint);
         if (!explicit.isEmpty()) return explicit;
-        String source = (safe(laneSource) + " " + safe(eventSource)).toLowerCase();
+        String source = (safe(laneSource) + " " + safe(eventSource)).toLowerCase(Locale.ROOT);
         String hint = humanClusterLine(laneHint);
-        if (eventLikeText(hint) || hint.toLowerCase().contains("знак")) return hint;
+        if (eventLikeText(hint) || hint.toLowerCase(Locale.ROOT).contains("знак")) return hint;
         if (!(source.contains("direction_sign") || source.contains("road_sign")
                 || source.contains("roadsign") || source.contains("event")
                 || source.contains("camera") || source.contains("warning"))) {
@@ -760,7 +761,7 @@ public final class NavigationState {
     }
 
     private static boolean eventLikeText(String value) {
-        String text = safe(value).toLowerCase();
+        String text = safe(value).toLowerCase(Locale.ROOT);
         return text.contains("превыш") || text.contains("overspeed")
                 || text.contains("камера") || text.contains("camera")
                 || text.contains("warning") || text.contains("event");
@@ -774,7 +775,7 @@ public final class NavigationState {
     }
 
     private static String humanDirectionsText(String value) {
-        String text = safe(value).toLowerCase().replace('-', '_');
+        String text = safe(value).toLowerCase(Locale.ROOT).replace('-', '_');
         if (text.isEmpty()) return "";
         boolean uturnLeft = hasDirectionToken(text, "left180")
                 || hasDirectionToken(text, "uturn_left")
@@ -816,7 +817,7 @@ public final class NavigationState {
     }
 
     private static String humanDirectionToken(String value) {
-        String text = safe(value).toLowerCase().replace('-', '_');
+        String text = safe(value).toLowerCase(Locale.ROOT).replace('-', '_');
         if (text.isEmpty()) return "";
         if (hasDirectionToken(text, "left180") || hasDirectionToken(text, "uturn_left")
                 || hasDirectionToken(text, "turn_back_left")) {
@@ -852,8 +853,8 @@ public final class NavigationState {
     }
 
     private static boolean hasDirectionToken(String value, String token) {
-        String text = safe(value).toLowerCase().replace('-', '_');
-        String needle = safe(token).toLowerCase().replace('-', '_');
+        String text = safe(value).toLowerCase(Locale.ROOT).replace('-', '_');
+        String needle = safe(token).toLowerCase(Locale.ROOT).replace('-', '_');
         if (text.isEmpty() || needle.isEmpty()) return false;
         String[] parts = text.split("[^a-z0-9_а-я]+");
         for (String part : parts) {
@@ -863,10 +864,10 @@ public final class NavigationState {
     }
 
     private static boolean containsAnyLower(String value, String... tokens) {
-        String text = safe(value).toLowerCase();
+        String text = safe(value).toLowerCase(Locale.ROOT);
         if (text.isEmpty()) return false;
         for (String token : tokens) {
-            if (!safe(token).isEmpty() && text.contains(token.toLowerCase())) return true;
+            if (!safe(token).isEmpty() && text.contains(token.toLowerCase(Locale.ROOT))) return true;
         }
         return false;
     }
@@ -875,7 +876,7 @@ public final class NavigationState {
         String text = safe(value);
         String cleanMarker = safe(marker);
         if (text.isEmpty() || cleanMarker.isEmpty()) return "";
-        int start = text.toLowerCase().indexOf(cleanMarker.toLowerCase());
+        int start = text.toLowerCase(Locale.ROOT).indexOf(cleanMarker.toLowerCase(Locale.ROOT));
         if (start < 0) return "";
         String tail = text.substring(start + cleanMarker.length()).trim();
         int end = tail.length();
@@ -912,7 +913,7 @@ public final class NavigationState {
         String text = safe(value);
         if (text.isEmpty()) return "";
         text = text.replace(',', '.');
-        String lower = text.toLowerCase();
+        String lower = text.toLowerCase(Locale.ROOT);
         if (lower.endsWith("km")) {
             return trimClusterNumber(text.substring(0, text.length() - 2)) + " км";
         }
@@ -1006,7 +1007,7 @@ public final class NavigationState {
     }
 
     private static String maneuverLabel(String maneuver) {
-        String p = safe(maneuver).toLowerCase();
+        String p = safe(maneuver).toLowerCase(Locale.ROOT);
         if (p.contains("turn_back")) return p.contains("right") ? "разворот направо" : "разворот налево";
         if (p.contains("take_left")) return "держитесь левее";
         if (p.contains("take_right")) return "держитесь правее";

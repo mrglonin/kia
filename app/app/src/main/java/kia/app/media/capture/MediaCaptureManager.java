@@ -8,6 +8,7 @@ public final class MediaCaptureManager {
     private final Context app;
     private final TeyesWidgetCapture teyesWidgetCapture;
     private final UniversalMediaCapture universalMediaCapture;
+    private int activeProfile = AppSettings.MEDIA_PROFILE_OFF;
 
     public MediaCaptureManager(Context context) {
         this.app = context.getApplicationContext();
@@ -16,26 +17,37 @@ public final class MediaCaptureManager {
     }
 
     public void start() {
-        if (!AppSettings.mediaEnabled(app)) {
-            stop();
-            return;
+        int desiredProfile = AppSettings.mediaEnabled(app)
+                ? AppSettings.mediaProfile(app)
+                : AppSettings.MEDIA_PROFILE_OFF;
+        if (desiredProfile != activeProfile) {
+            stopActiveCapture();
+            activeProfile = desiredProfile;
         }
-        int profile = AppSettings.mediaProfile(app);
-        if (profile == AppSettings.MEDIA_PROFILE_TEYES) {
-            universalMediaCapture.stop();
-            teyesWidgetCapture.start();
-        } else if (profile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID
-                || profile == AppSettings.MEDIA_PROFILE_UART_REAL) {
-            teyesWidgetCapture.stop();
-            universalMediaCapture.start();
-        } else {
-            stop();
-        }
+        startActiveCapture();
     }
 
     public void stop() {
-        teyesWidgetCapture.stop();
-        universalMediaCapture.stop();
+        stopActiveCapture();
+        activeProfile = AppSettings.MEDIA_PROFILE_OFF;
+    }
+
+    private void startActiveCapture() {
+        if (activeProfile == AppSettings.MEDIA_PROFILE_TEYES) {
+            teyesWidgetCapture.start();
+        } else if (activeProfile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID
+                || activeProfile == AppSettings.MEDIA_PROFILE_UART_REAL) {
+            universalMediaCapture.start();
+        }
+    }
+
+    private void stopActiveCapture() {
+        if (activeProfile == AppSettings.MEDIA_PROFILE_TEYES) {
+            teyesWidgetCapture.stop();
+        } else if (activeProfile == AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID
+                || activeProfile == AppSettings.MEDIA_PROFILE_UART_REAL) {
+            universalMediaCapture.stop();
+        }
     }
 
     public static boolean scanOnce(Context context) {

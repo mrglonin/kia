@@ -9,6 +9,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
+import android.os.SystemClock;
 import android.text.TextUtils;
 
 import org.json.JSONArray;
@@ -32,6 +33,7 @@ public final class DgisDashboardClient implements ServiceConnection {
     private static final int TRANSACTION_IS_MAP_ACTIVE = 6;
     private static final long POLL_MS = 1000L;
     private static final long QUIET_LOG_MS = 15000L;
+    private static final long OWNER_HEARTBEAT_MS = 5000L;
 
     private final Context app;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -39,6 +41,8 @@ public final class DgisDashboardClient implements ServiceConnection {
     private String boundPackage = "";
     private String lastJson = "";
     private long lastQuietLogAt;
+    private long lastOwnerHeartbeatAt;
+    private boolean lastDashboardRouteActive;
     private boolean running;
     private boolean bound;
 
@@ -46,6 +50,10 @@ public final class DgisDashboardClient implements ServiceConnection {
         @Override
         public void run() {
             if (!running) return;
+            if (!sourceEnabled()) {
+                stop();
+                return;
+            }
             readDashboard();
             handler.postDelayed(this, POLL_MS);
         }
@@ -56,6 +64,10 @@ public final class DgisDashboardClient implements ServiceConnection {
     }
 
     public void start() {
+        if (!sourceEnabled()) {
+            stop();
+            return;
+        }
         if (running) return;
         running = true;
         bind();
@@ -63,7 +75,7 @@ public final class DgisDashboardClient implements ServiceConnection {
 
     public void stop() {
         running = false;
-        handler.removeCallbacks(poll);
+        handler.removeCallbacksAndMessages(null);
         if (bound) {
             try {
                 app.unbindService(this);
@@ -72,11 +84,19 @@ public final class DgisDashboardClient implements ServiceConnection {
         }
         bound = false;
         remote = null;
+        boundPackage = "";
+        lastJson = "";
+        lastOwnerHeartbeatAt = 0L;
+        lastDashboardRouteActive = false;
     }
 
     @Override
     public void onServiceConnected(ComponentName name, IBinder service) {
         remote = service;
+        if (!sourceEnabled()) {
+            stop();
+            return;
+        }
         boundPackage = name == null ? "" : name.getPackageName();
         AppLog.line(app, "2GIS dashboard: connected " + boundPackage
                 + " api=" + transactInt(TRANSACTION_GET_API_VERSION, 0)
@@ -90,15 +110,21 @@ public final class DgisDashboardClient implements ServiceConnection {
     public void onServiceDisconnected(ComponentName name) {
         remote = null;
         AppLog.line(app, "2GIS dashboard: disconnected");
-        if (running) {
+        if (running && sourceEnabled()) {
             bound = false;
             handler.removeCallbacks(poll);
             handler.postDelayed(this::bind, 2000L);
+        } else {
+            stop();
         }
     }
 
     private void bind() {
         if (!running || bound) return;
+        if (!sourceEnabled()) {
+            stop();
+            return;
+        }
         String pkg = installedPackage();
         if (TextUtils.isEmpty(pkg)) {
             logQuiet("2GIS dashboard: package not installed");
@@ -143,16 +169,28 @@ public final class DgisDashboardClient implements ServiceConnection {
             bind();
             return;
         }
-        if (!AppSettings.dgisNavigationEnabled(app)) {
-            lastJson = "";
-            return;
-        }
         String json = transactString(TRANSACTION_GET_JSON);
         if (json == null) return;
         json = json.trim();
-        if (json.equals(lastJson)) return;
+        if (json.equals(lastJson)) {
+            if (!lastDashboardRouteActive) return;
+            long now = SystemClock.elapsedRealtime();
+            if (now - lastOwnerHeartbeatAt < OWNER_HEARTBEAT_MS) return;
+            lastOwnerHeartbeatAt = now;
+            if (NavigationFeature.get(app).touchDgisDashboardHeartbeat()) {
+                handleJson(json);
+            }
+            return;
+        }
         lastJson = json;
+        lastOwnerHeartbeatAt = SystemClock.elapsedRealtime();
         handleJson(json);
+    }
+
+    private boolean sourceEnabled() {
+        return NavigationSourceGate.dgisEnabled(
+                AppSettings.navigationEnabled(app),
+                AppSettings.dgisNavigationEnabled(app));
     }
 
     private void handleJson(String json) {
@@ -168,6 +206,15 @@ public final class DgisDashboardClient implements ServiceConnection {
             double speedLimit = obj.optDouble("speedLimit", 0d);
             boolean exceeded = obj.optBoolean("exceedingMaxSpeedLimit", false);
             double[] destinationPoint = destinationPoint(obj);
+            String cleanMode = clean(mode).toLowerCase(Locale.US);
+            lastDashboardRouteActive =
+                    (!TextUtils.isEmpty(cleanMode)
+                            && !"unknown".equals(cleanMode)
+                            && !"freeroam".equals(cleanMode))
+                            || !TextUtils.isEmpty(clean(maneuverDistance))
+                            || !TextUtils.isEmpty(clean(totalDistance))
+                            || !TextUtils.isEmpty(clean(remainingTime))
+                            || !TextUtils.isEmpty(clean(arrivalTime));
             NavigationFeature.get(app).handleDgisDashboard(mode, maneuverIcon, maneuverDescription,
                     maneuverDistance, totalDistance, remainingTime, arrivalTime,
                     dashboardSpeed(speedLimit), exceeded,
@@ -176,6 +223,7 @@ public final class DgisDashboardClient implements ServiceConnection {
             logDashboard(mode, maneuverIcon, maneuverDescription, maneuverDistance,
                     totalDistance, remainingTime, arrivalTime, speedLimit);
         } catch (Exception e) {
+            lastDashboardRouteActive = false;
             AppLog.line(app, "2GIS dashboard JSON failed: " + e.getClass().getSimpleName()
                     + " " + shortText(json));
         }

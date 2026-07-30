@@ -117,8 +117,39 @@ public final class NavigatorUpdateController {
             Toast.makeText(activity, "Проверяю Yandex Navigator и начну установку", Toast.LENGTH_SHORT).show();
             return;
         }
-        InstalledApkInfo installed = installedNavigator(source.packageName);
-        if (!shouldInstall(source, installed)) {
+        if (busy) {
+            Toast.makeText(activity, "Проверка Navigator уже идёт", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        busy = true;
+        setNavigator("Navigator update: проверка APK", source.version, source.packageName,
+                source.displayAsset(), 0, source.totalSize(), true,
+                true, false, false, false);
+        EXEC.execute(() -> {
+            try {
+                InstalledApkInfo installed = installedNavigator(source.packageName);
+                boolean installNeeded = shouldInstall(source, installed);
+                boolean downloaded = installNeeded && allDownloaded(source);
+                activity.runOnUiThread(() -> {
+                    busy = false;
+                    continueDownloadAndInstall(activity, source, installNeeded, downloaded);
+                });
+            } catch (Exception e) {
+                busy = false;
+                setNavigator("Navigator update: ошибка проверки "
+                                + e.getClass().getSimpleName(),
+                        source.version, source.packageName, source.displayAsset(),
+                        0, source.totalSize(), true,
+                        false, false, false, false);
+                AppLog.line(app, "Navigator update preflight: "
+                        + e.getClass().getSimpleName() + " " + e.getMessage());
+            }
+        });
+    }
+
+    private void continueDownloadAndInstall(Activity activity, NavigatorInfo source,
+                                            boolean installNeeded, boolean downloaded) {
+        if (!installNeeded) {
             setNavigator("Navigator update: актуально " + source.version, source.version,
                     source.packageName, source.displayAsset(), 0, source.totalSize(),
                     false, false, false, false, false);
@@ -132,7 +163,7 @@ public final class NavigatorUpdateController {
             openInstallPermission(activity);
             return;
         }
-        if (allDownloaded(source)) {
+        if (downloaded) {
             install(source);
             return;
         }

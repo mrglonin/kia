@@ -168,6 +168,7 @@ public final class YandexCoreBridgeClient {
 
     public void acceptBroadcastSnapshot(Bundle input) {
         if (input == null || input.isEmpty()) return;
+        if (!sourceIngressAllowed()) return;
         try {
             Bundle snapshot = new Bundle(input);
             normalizeSnapshotEnvelope(snapshot);
@@ -303,7 +304,7 @@ public final class YandexCoreBridgeClient {
     }
 
     private long pollOnce() {
-        if (!AppSettings.navigationEnabled(app) || !AppSettings.yandexNavigationEnabled(app)) {
+        if (!sourceIngressAllowed()) {
             return IDLE_POLL_MS;
         }
         if (lastBroadcastSnapshotAt > 0L
@@ -360,6 +361,9 @@ public final class YandexCoreBridgeClient {
     }
 
     private synchronized SnapshotApplyResult applySnapshot(Bundle snapshot) {
+        if (!sourceIngressAllowed()) {
+            return snapshotResult(IDLE_POLL_MS, false);
+        }
         String state = lower(firstString(snapshot, "state", "route_state", "status"));
         if (TextUtils.isEmpty(state)) {
             state = bool(snapshot, "active", false)
@@ -432,7 +436,9 @@ public final class YandexCoreBridgeClient {
         }
         if (state.equals(lastState) && signature.equals(lastSignature)) {
             if (routeLive) {
-                NavigationFeature.get(app).touchYandexCoreBridgeHeartbeat(hasRouteMetrics(snapshot));
+                boolean replay = NavigationFeature.get(app)
+                        .touchYandexCoreBridgeHeartbeat(hasRouteMetrics(snapshot));
+                if (replay) sendActiveSnapshot(freshness, snapshot);
             }
             return snapshotResult(routeLive ? ACTIVE_POLL_MS : IDLE_POLL_MS, true);
         }
@@ -471,6 +477,13 @@ public final class YandexCoreBridgeClient {
         }
         sendActiveSnapshot(freshness, snapshot);
         return snapshotResult(ACTIVE_POLL_MS, true);
+    }
+
+    private boolean sourceIngressAllowed() {
+        return NavigationSourcePolicy.ingressAllowed(
+                AppSettings.navigationEnabled(app),
+                AppSettings.navSourceMode(app),
+                NavigationSourcePolicy.SOURCE_YANDEX);
     }
 
     private static SnapshotApplyResult snapshotResult(long delayMs, boolean accepted) {

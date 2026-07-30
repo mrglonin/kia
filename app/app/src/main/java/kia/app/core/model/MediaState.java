@@ -1,5 +1,7 @@
 package kia.app.core.model;
 
+import java.util.Locale;
+
 public final class MediaState {
     public final String source;
     public final String packageName;
@@ -68,8 +70,8 @@ public final class MediaState {
     }
 
     private String sourceCode() {
-        String value = (source + " " + packageName).toLowerCase();
-        String sourceValue = source.toLowerCase();
+        String value = (source + " " + packageName).toLowerCase(Locale.ROOT);
+        String sourceValue = source.toLowerCase(Locale.ROOT);
         if (value.contains("usb") || value.contains("local_music") || value.contains("spd.media")) return "USB";
         if (value.contains("bluetooth") || value.contains("bt") || value.contains("a2dp") || value.contains("avrcp")) return "BT";
         if (value.contains("am")) return "AM";

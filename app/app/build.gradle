@@ -2,14 +2,14 @@ plugins {
     id "com.android.application"
 }
 
-def kiaVersionCode = 358
-def kiaVersionName = "23.04"
-def kiaReleaseApk = "kia_358.apk"
+def kiaVersionCode = 359
+def kiaVersionName = "23.05"
+def kiaReleaseApk = "kia_359.apk"
 def publicReleaseKey = rootProject.file("../signing/kia-debug-release.keystore")
 
 android {
     namespace "kia.app"
-    compileSdk 35
+    compileSdk 36
     buildToolsVersion "37.0.0"
 
     signingConfigs {
@@ -26,7 +26,7 @@ android {
     defaultConfig {
         applicationId "kia.app"
         minSdk 29
-        targetSdk 35
+        targetSdk 36
         versionCode kiaVersionCode
         versionName kiaVersionName
     }

@@ -21,6 +21,10 @@ public final class HealthMonitor {
                 handler.postDelayed(this, 750L);
                 return;
             }
+            if (!gateway.usbReady()) {
+                handler.postDelayed(this, 5000L);
+                return;
+            }
             gateway.pollVehicleSnapshot();
             long now = System.currentTimeMillis();
             if (now - lastHealthAt > 5000L) {

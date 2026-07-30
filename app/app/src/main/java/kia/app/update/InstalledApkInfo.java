@@ -6,13 +6,11 @@ import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.text.TextUtils;
 
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.InputStream;
-import java.security.MessageDigest;
 
 final class InstalledApkInfo {
+    private static final FileSha256Cache SHA_CACHE = new FileSha256Cache();
+
     final boolean installed;
     final long versionCode;
     final String versionName;
@@ -75,24 +73,6 @@ final class InstalledApkInfo {
     }
 
     private static String sha256(File file) {
-        try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[65536];
-            int read;
-            while ((read = in.read(buffer)) != -1) digest.update(buffer, 0, read);
-            return hex(digest.digest());
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private static String hex(byte[] data) {
-        StringBuilder out = new StringBuilder();
-        for (byte b : data) {
-            int v = b & 0xff;
-            if (v < 16) out.append('0');
-            out.append(Integer.toHexString(v));
-        }
-        return out.toString();
+        return SHA_CACHE.sha256(file);
     }
 }

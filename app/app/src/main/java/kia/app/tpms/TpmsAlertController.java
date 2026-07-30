@@ -82,7 +82,7 @@ public final class TpmsAlertController {
     public static int warningState(Context context, TpmsState state, int wheel) {
         if (state == null || state.known == null || state.pressureKpa == null
                 || state.temperatureC == null || wheel < 0 || wheel >= TpmsState.WHEEL_COUNT
-                || !state.known[wheel]) {
+                || !state.known[wheel] || !state.isWheelFresh(wheel)) {
             return WARNING_NONE;
         }
         int flags = state.flags == null ? 0 : state.flags[wheel];
@@ -115,7 +115,7 @@ public final class TpmsAlertController {
     public static int warningSeverity(Context context, TpmsState state, int wheel) {
         if (state == null || state.known == null || state.pressureKpa == null
                 || state.temperatureC == null || wheel < 0 || wheel >= TpmsState.WHEEL_COUNT
-                || !state.known[wheel]) {
+                || !state.known[wheel] || !state.isWheelFresh(wheel)) {
             return SEVERITY_NONE;
         }
         int flags = state.flags == null ? 0 : state.flags[wheel];

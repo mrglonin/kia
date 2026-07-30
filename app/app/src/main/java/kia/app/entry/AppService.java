@@ -16,7 +16,9 @@ import android.content.pm.ServiceInfo;
 import android.graphics.BitmapFactory;
 import android.location.LocationManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 
@@ -32,6 +34,7 @@ import kia.app.media.domain.CallFeature;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.navigation.capture.DgisDashboardClient;
 import kia.app.navigation.capture.LegacyNavBroadcastReceiver;
+import kia.app.navigation.capture.NavigationSourceGate;
 import kia.app.navigation.capture.YandexCoreBridgeClient;
 import kia.app.navigation.compass.CompassMonitor;
 import kia.app.navigation.domain.NavigationFeature;
@@ -47,6 +50,8 @@ public final class AppService extends Service {
     private static final String SERVICE_TEXT = "CANBUS и датчики работают в фоне";
     private static final String SERVICE_DETAILS = "Kia следит за автомобилем, TPMS, медиа и навигацией.";
     private static final int NOTIFICATION_ID = 51;
+    private static final long WAKE_LOCK_TIMEOUT_MS = 10L * 60L * 1000L;
+    private static final long WAKE_LOCK_RENEW_MS = 9L * 60L * 1000L;
 
     private AdapterGateway gateway;
     private HealthMonitor healthMonitor;
@@ -61,9 +66,12 @@ public final class AppService extends Service {
     private BluetoothCallReceiver bluetoothCallReceiver;
     private BroadcastReceiver locationProviderReceiver;
     private PowerManager.WakeLock serviceWakeLock;
+    private final Handler wakeLockHandler = new Handler(Looper.getMainLooper());
+    private final Runnable renewWakeLock = this::acquireServiceWakeLock;
     private boolean navReceiverRegistered;
     private boolean bluetoothCallReceiverRegistered;
     private boolean locationProviderReceiverRegistered;
+    private boolean terminalForegroundFailure;
     private long lastLocationProviderRefreshAt;
 
     public static void start(Context context) {
@@ -72,7 +80,11 @@ public final class AppService extends Service {
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent);
             else context.startService(intent);
         } catch (Exception e) {
-            AppLog.line(context, "Service: start blocked " + e.getClass().getSimpleName());
+            String stage = "launch " + e.getClass().getSimpleName();
+            String health = foregroundFailureHealth(stage);
+            StateStore.setAdapter(context, StateStore.adapter().withHealth(health));
+            AppLog.line(context, "Service: start blocked " + e.getClass().getSimpleName()
+                    + " " + safeMessage(e));
         }
     }
 
@@ -81,7 +93,10 @@ public final class AppService extends Service {
         super.onCreate();
         AppSettings.applyDefaults(this);
         StateStore.restoreNavigation(this);
-        startForegroundCompat(SERVICE_TEXT);
+        if (!startForegroundCompat(SERVICE_TEXT)) {
+            stopAfterForegroundFailure("create");
+            return;
+        }
         registerLocationProviderReceiver();
         acquireServiceWakeLock();
         gateway = AdapterGateway.get(this);
@@ -97,15 +112,13 @@ public final class AppService extends Service {
 
         compassMonitor = new CompassMonitor(this);
         if (AppSettings.compassEnabled(this)) {
-            startForegroundCompat(SERVICE_TEXT);
             compassMonitor.start();
         }
         registerNavReceiver();
         syncBluetoothCallReceiver();
         dgisDashboard = new DgisDashboardClient(this);
-        dgisDashboard.start();
         yandexCoreBridge = new YandexCoreBridgeClient(this);
-        yandexCoreBridge.start();
+        syncNavigationCapture();
         navigationOverlay = NavigationOverlayController.get(this);
         navigationOverlay.start();
         mediaOverlay = MediaOverlayController.get(this);
@@ -116,7 +129,15 @@ public final class AppService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForegroundCompat(SERVICE_TEXT);
+        if (terminalForegroundFailure) {
+            stopSelf(startId);
+            return foregroundStartMode(false);
+        }
+        if (!startForegroundCompat(SERVICE_TEXT)) {
+            stopAfterForegroundFailure("start");
+            stopSelf(startId);
+            return foregroundStartMode(false);
+        }
         acquireServiceWakeLock();
         if (gateway == null) gateway = AdapterGateway.get(this);
         gateway.start();
@@ -127,30 +148,27 @@ public final class AppService extends Service {
         syncMediaCapture();
         if (compassMonitor == null) compassMonitor = new CompassMonitor(this);
         if (AppSettings.compassEnabled(this)) {
-            startForegroundCompat(SERVICE_TEXT);
             compassMonitor.start();
         } else {
             compassMonitor.stop();
-            startForegroundCompat(SERVICE_TEXT);
         }
         registerNavReceiver();
         syncBluetoothCallReceiver();
         if (dgisDashboard == null) dgisDashboard = new DgisDashboardClient(this);
-        dgisDashboard.start();
         if (yandexCoreBridge == null) yandexCoreBridge = new YandexCoreBridgeClient(this);
-        yandexCoreBridge.start();
+        syncNavigationCapture();
         if (navigationOverlay == null) navigationOverlay = NavigationOverlayController.get(this);
         navigationOverlay.start();
         if (mediaOverlay == null) mediaOverlay = MediaOverlayController.get(this);
         mediaOverlay.start();
         if (rctaOverlay == null) rctaOverlay = RctaOverlayController.get(this);
         rctaOverlay.start();
-        return START_STICKY;
+        return foregroundStartMode(true);
     }
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        if (AppSettings.autoStart(this)) AppService.start(this);
+        if (!terminalForegroundFailure && AppSettings.autoStart(this)) AppService.start(this);
         super.onTaskRemoved(rootIntent);
     }
 
@@ -180,12 +198,20 @@ public final class AppService extends Service {
         return null;
     }
 
-    private void startForegroundCompat(String text) {
-        Notification note = notification(text);
+    private boolean startForegroundCompat(String text) {
+        Notification note;
+        try {
+            note = notification(text);
+        } catch (Exception e) {
+            AppLog.line(this, "Service: notification failed "
+                    + e.getClass().getSimpleName() + " " + safeMessage(e));
+            return false;
+        }
         if (Build.VERSION.SDK_INT >= 29) {
             int types = foregroundTypes();
             try {
                 startForeground(NOTIFICATION_ID, note, types);
+                return true;
             } catch (Exception e) {
                 AppLog.line(this, "Service: foreground fallback "
                         + e.getClass().getSimpleName() + " " + safeMessage(e));
@@ -195,14 +221,49 @@ public final class AppService extends Service {
                             note,
                             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
                     );
+                    return true;
                 } catch (Exception fallback) {
                     AppLog.line(this, "Service: foreground failed "
                             + fallback.getClass().getSimpleName() + " " + safeMessage(fallback));
+                    return false;
                 }
             }
-        } else {
-            startForeground(NOTIFICATION_ID, note);
         }
+        try {
+            startForeground(NOTIFICATION_ID, note);
+            return true;
+        } catch (Exception e) {
+            AppLog.line(this, "Service: foreground failed "
+                    + e.getClass().getSimpleName() + " " + safeMessage(e));
+            return false;
+        }
+    }
+
+    private void stopAfterForegroundFailure(String stage) {
+        terminalForegroundFailure = true;
+        String health = foregroundFailureHealth(stage);
+        StateStore.setAdapter(this, StateStore.adapter().withHealth(health));
+        AppLog.line(this, "Service: stopping after " + health);
+        try {
+            if (Build.VERSION.SDK_INT >= 24) {
+                stopForeground(STOP_FOREGROUND_REMOVE);
+            } else {
+                stopForeground(true);
+            }
+        } catch (Exception ignored) {
+        }
+        stopSelf();
+    }
+
+    static String foregroundFailureHealth(String stage) {
+        String clean = stage == null ? "" : stage.replace('\n', ' ').replace('\r', ' ').trim();
+        if (clean.isEmpty()) clean = "unknown";
+        if (clean.length() > 40) clean = clean.substring(0, 40);
+        return "service foreground failed: " + clean;
+    }
+
+    static int foregroundStartMode(boolean foregroundReady) {
+        return foregroundReady ? START_STICKY : START_NOT_STICKY;
     }
 
     private Notification notification(String text) {
@@ -223,7 +284,7 @@ public final class AppService extends Service {
                 ? new Notification.Builder(this, CHANNEL)
                 : new Notification.Builder(this);
         return builder
-                .setSmallIcon(R.drawable.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_kia)
                 .setLargeIcon(BitmapFactory.decodeResource(getResources(), R.drawable.ic_launcher))
                 .setContentTitle(SERVICE_TITLE)
                 .setContentText(text)
@@ -276,7 +337,10 @@ public final class AppService extends Service {
                     long now = SystemClock.elapsedRealtime();
                     if (now - lastLocationProviderRefreshAt < 750L) return;
                     lastLocationProviderRefreshAt = now;
-                    startForegroundCompat(SERVICE_TEXT);
+                    if (!startForegroundCompat(SERVICE_TEXT)) {
+                        stopAfterForegroundFailure("location refresh");
+                        return;
+                    }
                     if (compassMonitor != null && AppSettings.compassEnabled(AppService.this)) {
                         compassMonitor.start();
                     }
@@ -342,6 +406,7 @@ public final class AppService extends Service {
 
     private void acquireServiceWakeLock() {
         try {
+            wakeLockHandler.removeCallbacks(renewWakeLock);
             if (serviceWakeLock == null) {
                 PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
                 if (pm != null) {
@@ -349,9 +414,11 @@ public final class AppService extends Service {
                     serviceWakeLock.setReferenceCounted(false);
                 }
             }
-            if (serviceWakeLock != null && !serviceWakeLock.isHeld()) {
-                serviceWakeLock.acquire();
+            if (serviceWakeLock != null) {
+                if (serviceWakeLock.isHeld()) serviceWakeLock.release();
+                serviceWakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
                 AppLog.line(this, "Service: wakelock acquired");
+                wakeLockHandler.postDelayed(renewWakeLock, WAKE_LOCK_RENEW_MS);
             }
         } catch (Exception e) {
             AppLog.line(this, "Service: wakelock failed " + e.getClass().getSimpleName());
@@ -359,6 +426,7 @@ public final class AppService extends Service {
     }
 
     private void releaseServiceWakeLock() {
+        wakeLockHandler.removeCallbacks(renewWakeLock);
         try {
             if (serviceWakeLock != null && serviceWakeLock.isHeld()) serviceWakeLock.release();
         } catch (Exception ignored) {
@@ -413,6 +481,24 @@ public final class AppService extends Service {
         } else {
             unregisterBluetoothCallReceiver();
             CallFeature.get(this).stop();
+        }
+    }
+
+    private void syncNavigationCapture() {
+        boolean navigationEnabled = AppSettings.navigationEnabled(this);
+        NavigationFeature.get(this).syncNavigationEnabled(navigationEnabled);
+        boolean yandexEnabled = NavigationSourceGate.yandexEnabled(
+                navigationEnabled, AppSettings.yandexNavigationEnabled(this));
+        boolean dgisEnabled = NavigationSourceGate.dgisEnabled(
+                navigationEnabled, AppSettings.dgisNavigationEnabled(this));
+
+        if (yandexCoreBridge != null) {
+            if (yandexEnabled) yandexCoreBridge.start();
+            else yandexCoreBridge.stop();
+        }
+        if (dgisDashboard != null) {
+            if (dgisEnabled) dgisDashboard.start();
+            else dgisDashboard.stop();
         }
     }
 }

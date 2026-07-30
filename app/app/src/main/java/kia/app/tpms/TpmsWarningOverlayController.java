@@ -148,14 +148,13 @@ public final class TpmsWarningOverlayController {
         box.setGravity(Gravity.CENTER_VERTICAL);
         box.setPadding(dp(28), dp(14), dp(28), dp(14));
         box.setBackground(redBackground());
-        box.setClickable(true);
+        box.setClickable(false);
         box.setFocusable(false);
-        box.setOnClickListener(v -> dismiss());
 
         LinearLayout texts = new LinearLayout(windowContext);
         texts.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(windowContext);
-        title.setText("TPMS warning");
+        title.setText("Предупреждение TPMS");
         title.setTextColor(Color.WHITE);
         title.setTextSize(21f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -180,6 +179,9 @@ public final class TpmsWarningOverlayController {
         close.setTextSize(36f);
         close.setGravity(Gravity.CENTER);
         close.setTypeface(Typeface.DEFAULT_BOLD);
+        close.setClickable(true);
+        close.setFocusable(true);
+        close.setContentDescription("Закрыть предупреждение TPMS");
         close.setOnClickListener(v -> dismiss());
         box.addView(close, new LinearLayout.LayoutParams(dp(74), dp(74)));
         return box;

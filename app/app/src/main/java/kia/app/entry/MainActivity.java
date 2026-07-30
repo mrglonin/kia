@@ -5,6 +5,8 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -22,7 +24,9 @@ import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
@@ -42,10 +46,13 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import android.view.inputmethod.EditorInfo;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -53,12 +60,15 @@ import android.widget.SeekBar;
 import android.widget.Space;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import kia.app.R;
 import kia.app.amp.AmpController;
@@ -73,6 +83,8 @@ import kia.app.core.model.TpmsState;
 import kia.app.core.model.UpdateState;
 import kia.app.core.model.VehicleState;
 import kia.app.core.settings.AppSettings;
+import kia.app.diagnostics.DiagnosticBundleExporter;
+import kia.app.diagnostics.SettingsTransfer;
 import kia.app.media.capture.MediaNotificationListener;
 import kia.app.media.domain.CallFeature;
 import kia.app.media.domain.MediaFeature;
@@ -87,9 +99,11 @@ import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
 import kia.app.rcta.BlindSpotOverlayView;
 import kia.app.rcta.RctaOverlayController;
+import kia.app.tpms.DashboardNavigationSnapshot;
 import kia.app.tpms.TpmsAlertController;
 import kia.app.tpms.TpmsController;
 import kia.app.tpms.TpmsDashboardView;
+import kia.app.tpms.TpmsPollingMode;
 import kia.app.tpms.TpmsWarningOverlayController;
 import kia.app.update.AppUpdateController;
 import kia.app.update.FirmwareUpdateController;
@@ -131,8 +145,17 @@ public final class MainActivity extends Activity {
     private static final int SETTINGS_RCTA = 4;
     private static final int SETTINGS_GENERAL = 5;
     private static final int REQUEST_FIRMWARE_FILE = 42;
+    private static final int REQUEST_EXPORT_SETTINGS = 43;
+    private static final int REQUEST_IMPORT_SETTINGS = 44;
+    private static final int REQUEST_DIAGNOSTICS_FILE = 45;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ExecutorService fileExecutor =
+            Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "kia-user-file");
+                thread.setDaemon(true);
+                return thread;
+            });
     private FrameLayout screenFrame;
     private LinearLayout rootLayout;
     private LinearLayout tabContent;
@@ -175,6 +198,7 @@ public final class MainActivity extends Activity {
     private TextView firmwareActionHintText;
     private TextView log;
     private TextView permissionSummary;
+    private TextView healthSummary;
     private TextView sasRatioStatus;
     private EditText sasRatioInput;
     private View sasRatioPreview;
@@ -205,8 +229,8 @@ public final class MainActivity extends Activity {
     private boolean navigatorUpdatePromptShown;
     private boolean activityVisible;
     private AlertDialog updatePromptDialog;
-    private boolean askedWriteSettings;
     private boolean askedOverlay;
+    private boolean askedBackgroundLocationSettings;
     private boolean askedBatteryOptimization;
     private boolean askedNotificationListener;
     private long renderedTpmsAt = -1L;
@@ -214,6 +238,7 @@ public final class MainActivity extends Activity {
     private String renderedTpmsWarningKey = "";
     private int mainScrollY;
     private int settingsScrollY;
+    private final OnBackInvokedCallback backCallback = this::handleAppBack;
 
     private interface IntSetter {
         void set(int value);
@@ -281,9 +306,12 @@ public final class MainActivity extends Activity {
         navigatorUpdater = new NavigatorUpdateController(this);
         firmwareUpdater = FirmwareUpdateController.get(this);
         setContentView(buildUi());
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, backCallback);
+        }
         applyImmersiveMode();
         AppService.start(this);
-        requestRuntimePermissions();
         handler.postDelayed(this::maybeShowMediaProfileWizard, 900L);
         handler.postDelayed(this::checkUpdatesOnLaunch, 1600L);
         refresh();
@@ -291,7 +319,10 @@ public final class MainActivity extends Activity {
 
     private void checkUpdatesOnLaunch() {
         if (isFinishing() || isDestroyed() || launchUpdateCheckStarted) return;
+        long now = System.currentTimeMillis();
+        if (now - AppSettings.lastUpdateCheckAt(this) < 24L * 60L * 60L * 1000L) return;
         launchUpdateCheckStarted = true;
+        AppSettings.setLastUpdateCheckAt(this, now);
         AppLog.line(this, "Startup update check: Kia + Yandex");
         appUpdater.checkAsync();
         navigatorUpdater.checkAsync();
@@ -300,6 +331,7 @@ public final class MainActivity extends Activity {
 
     private void maybeShowLaunchUpdatePrompt() {
         if (!launchUpdateCheckStarted || !activityVisible || isFinishing() || isDestroyed()) return;
+        if (navigationSpeedKmh() > 5f) return;
         if (updatePromptDialog != null && updatePromptDialog.isShowing()) return;
         UpdateState s = StateStore.updates();
         if (!appUpdatePromptShown && !s.appChecking && !s.appDownloading && s.appAvailable) {
@@ -390,10 +422,10 @@ public final class MainActivity extends Activity {
         close.setTypeface(Typeface.DEFAULT_BOLD);
         close.setClickable(true);
         close.setFocusable(true);
+        close.setContentDescription("Закрыть мастер");
         close.setBackground(settingsButtonBackground(false));
         close.setOnClickListener(v -> closeMediaProfileWizard(dialog));
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(wide ? 34 : 40),
-                dp(wide ? 34 : 40));
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(48), dp(48));
         head.addView(close, closeLp);
         LinearLayout.LayoutParams headLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -406,11 +438,11 @@ public final class MainActivity extends Activity {
                             "TEYES / CC4 Pro", "Музыка, радио и Bluetooth с магнитолы TEYES",
                             COLOR_ACCENT_BLUE),
                     mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID,
-                            "Universal Android", "Трек и источник из Android-приложений",
+                            "Музыка Android", "Трек и источник из Android-приложений",
                             COLOR_ACCENT)));
             panel.addView(mediaProfileWizardChoiceRow(dialog,
                     mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UART_REAL,
-                            "UART real + Android", "Магнитола ведет режим, Kia показывает трек",
+                            "Штатный источник + Android", "Магнитола ведёт режим, Kia показывает трек",
                             COLOR_WARNING),
                     mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_OFF,
                             "Media выключено", "Не отправлять музыку на приборку",
@@ -420,20 +452,51 @@ public final class MainActivity extends Activity {
                     "TEYES / CC4 Pro", "Музыка, радио и Bluetooth с магнитолы TEYES",
                     COLOR_ACCENT_BLUE));
             panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID,
-                    "Universal Android", "Трек и источник из Android-приложений",
+                    "Музыка Android", "Трек и источник из Android-приложений",
                     COLOR_ACCENT));
             panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_UART_REAL,
-                    "UART real + Android", "Магнитола ведет режим, Kia показывает трек",
+                    "Штатный источник + Android", "Магнитола ведёт режим, Kia показывает трек",
                     COLOR_WARNING));
             panel.addView(mediaProfileWizardChoice(dialog, AppSettings.MEDIA_PROFILE_OFF,
                     "Media выключено", "Не отправлять музыку на приборку",
                     COLOR_MUTED));
         }
+
+        LinearLayout actions = row();
+        TextView permissions = wizardActionButton("Проверить разрешения", false);
+        permissions.setOnClickListener(v -> {
+            closeMediaProfileWizard(dialog);
+            requestRuntimePermissions();
+        });
+        TextView done = wizardActionButton("Готово", true);
+        done.setOnClickListener(v -> closeMediaProfileWizard(dialog));
+        LinearLayout.LayoutParams permissionsLp = new LinearLayout.LayoutParams(
+                0, dp(52), 1f);
+        permissionsLp.setMargins(0, dp(10), dp(5), 0);
+        LinearLayout.LayoutParams doneLp = new LinearLayout.LayoutParams(
+                0, dp(52), 1f);
+        doneLp.setMargins(dp(5), dp(10), 0, 0);
+        actions.addView(permissions, permissionsLp);
+        actions.addView(done, doneLp);
+        panel.addView(actions);
+
         Space bottomGuard = new Space(this);
         panel.addView(bottomGuard, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(2)));
 
         return panel;
+    }
+
+    private TextView wizardActionButton(String label, boolean primary) {
+        TextView button = text(label, isCompact() ? 14 : 15, Color.WHITE);
+        button.setGravity(Gravity.CENTER);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setClickable(true);
+        button.setFocusable(true);
+        button.setContentDescription(label);
+        button.setBackground(settingsActionBackground(primary,
+                primary ? COLOR_ACCENT_BLUE : COLOR_MUTED));
+        return button;
     }
 
     private LinearLayout mediaProfileWizardChoiceRow(AlertDialog dialog, View left, View right) {
@@ -538,7 +601,7 @@ public final class MainActivity extends Activity {
         }
         handler.post(refreshTick);
         normalizeModeForWindow();
-        TpmsController.get(this).setForegroundActive(true, tpmsWidgetMode());
+        TpmsController.get(this).setPollingMode(TpmsPollingMode.FULL_DASHBOARD);
         TpmsWarningOverlayController.get(this).setActivityVisible(true);
         NavigationOverlayController.get(this).apply();
         applyImmersiveMode();
@@ -556,7 +619,7 @@ public final class MainActivity extends Activity {
         handler.removeCallbacks(pendingStateRefresh);
         cancelRctaDemoSequence();
         hideRctaDemoAlert();
-        TpmsController.get(this).setForegroundActive(false, false);
+        TpmsController.get(this).setPollingMode(TpmsPollingMode.BACKGROUND);
         TpmsWarningOverlayController.get(this).setActivityVisible(false);
         try {
             unregisterReceiver(stateReceiver);
@@ -575,7 +638,7 @@ public final class MainActivity extends Activity {
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         normalizeModeForWindow();
-        TpmsController.get(this).setForegroundActive(true, tpmsWidgetMode());
+        TpmsController.get(this).setPollingMode(TpmsPollingMode.FULL_DASHBOARD);
         renderTab();
         refresh();
         applyImmersiveMode();
@@ -585,7 +648,7 @@ public final class MainActivity extends Activity {
     public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
         normalizeModeForWindow();
-        TpmsController.get(this).setForegroundActive(true, tpmsWidgetMode());
+        TpmsController.get(this).setPollingMode(TpmsPollingMode.FULL_DASHBOARD);
         renderTab();
         refresh();
         applyImmersiveMode();
@@ -606,6 +669,12 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_EXPORT_SETTINGS
+                || requestCode == REQUEST_IMPORT_SETTINGS
+                || requestCode == REQUEST_DIAGNOSTICS_FILE) {
+            handleUserFileResult(requestCode, resultCode, data);
+            return;
+        }
         if (requestCode != REQUEST_FIRMWARE_FILE) return;
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             AppLog.line(this, "Firmware file: selection cancelled");
@@ -623,6 +692,96 @@ public final class MainActivity extends Activity {
         pendingFirmwareLabel = label;
         renderTab();
         refresh();
+    }
+
+    private void handleUserFileResult(int requestCode, int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        if (requestCode == REQUEST_EXPORT_SETTINGS) {
+            runUserFileTask("Настройки сохранены", () -> SettingsTransfer.write(this, uri),
+                    false);
+        } else if (requestCode == REQUEST_IMPORT_SETTINGS) {
+            runUserFileTask("Настройки восстановлены", () -> {
+                SettingsTransfer.ImportResult result = SettingsTransfer.read(this, uri);
+                AppLog.line(this, result.summary());
+            }, true);
+        } else if (requestCode == REQUEST_DIAGNOSTICS_FILE) {
+            runUserFileTask("Диагностика сохранена", () ->
+                    DiagnosticBundleExporter.write(this, uri), false);
+        }
+    }
+
+    private void runUserFileTask(String success, FileTask task, boolean restartFeatures) {
+        Toast.makeText(this, "Подготовка файла…", Toast.LENGTH_SHORT).show();
+        fileExecutor.execute(() -> {
+            String failure = null;
+            try {
+                task.run();
+            } catch (Exception e) {
+                failure = e.getMessage();
+                if (failure == null || failure.trim().isEmpty()) {
+                    failure = e.getClass().getSimpleName();
+                }
+                AppLog.line(this, "User file operation failed: "
+                        + e.getClass().getSimpleName() + " " + failure);
+            }
+            String finalFailure = failure;
+            handler.post(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (finalFailure == null) {
+                    if (restartFeatures) {
+                        AppService.start(this);
+                        renderTab();
+                        refresh();
+                    }
+                    Toast.makeText(this, success, Toast.LENGTH_LONG).show();
+                } else {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Не удалось обработать файл")
+                            .setMessage(finalFailure)
+                            .setPositiveButton("Закрыть", null)
+                            .show();
+                }
+            });
+        });
+    }
+
+    private interface FileTask {
+        void run() throws Exception;
+    }
+
+    @Override
+    protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
+        fileExecutor.shutdownNow();
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
+        }
+        super.onDestroy();
+    }
+
+    @Override
+    @SuppressLint("GestureBackNavigation")
+    public void onBackPressed() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            handleAppBack();
+            return;
+        }
+        handleAppBack();
+    }
+
+    private void handleAppBack() {
+        if (settingsMode) {
+            closeSettings();
+            return;
+        }
+        if (selectedTab != TAB_TPMS) {
+            selectedTab = TAB_TPMS;
+            renderTab();
+            refresh();
+            return;
+        }
+        finishAfterTransition();
     }
 
     private View buildUi() {
@@ -734,18 +893,24 @@ public final class MainActivity extends Activity {
             getWindow().setDecorFitsSystemWindows(false);
             WindowInsetsController controller = getWindow().getDecorView().getWindowInsetsController();
             if (controller != null) {
-                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                if (isInMultiWindowMode()) {
+                    controller.show(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                } else {
+                    controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                }
                 controller.setSystemBarsBehavior(
                         WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             }
         }
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        if (Build.VERSION.SDK_INT < 30 || !isInMultiWindowMode()) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
     }
 
     private void prepareContentHost(boolean fixedScreen) {
@@ -758,8 +923,15 @@ public final class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(settingsMode ? COLOR_SETTINGS_BG : COLOR_BG);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
-            rootInsetTop = 0;
-            rootInsetBottom = 0;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets safe = insets.getInsets(
+                        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                rootInsetTop = Math.max(0, safe.top);
+                rootInsetBottom = Math.max(0, safe.bottom);
+            } else {
+                rootInsetTop = Math.max(0, insets.getSystemWindowInsetTop());
+                rootInsetBottom = Math.max(0, insets.getSystemWindowInsetBottom());
+            }
             applyRootPadding();
             return insets;
         });
@@ -878,6 +1050,81 @@ public final class MainActivity extends Activity {
                 action("Добавить", "частота и своё название", COLOR_ACCENT_BLUE,
                         this::showAddRadioStationBandDialog));
         return panel;
+    }
+
+    private LinearLayout mediaSessionPriorityPanel() {
+        LinearLayout panel = settingsPanel(COLOR_ACCENT);
+        addSettingsPanelHeader(panel, "Выбор музыкального приложения",
+                "действует только для Android и «Штатный источник + Android»; TEYES не меняется",
+                COLOR_ACCENT);
+        String currentPackage = StateStore.media().packageName;
+        String currentLabel = mediaSessionAppLabel(currentPackage);
+        TextView summary = text(AppSettings.mediaSessionSelectionSummary(this)
+                        + "\nСейчас: " + (currentPackage == null || currentPackage.isEmpty()
+                        ? "нет активной MediaSession" : currentLabel + " · " + currentPackage)
+                        + "\nИсключения: " + AppSettings.mediaBlockedSessionsSummary(this),
+                isCompact() ? 12 : 14, Color.rgb(235, 241, 246));
+        LinearLayout.LayoutParams summaryLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        summaryLp.setMargins(0, dp(10), 0, dp(6));
+        panel.addView(summary, summaryLp);
+
+        boolean packageReady = currentPackage != null && !currentPackage.trim().isEmpty()
+                && !getPackageName().equals(currentPackage)
+                && !currentPackage.toLowerCase(Locale.ROOT).contains("spd.radio");
+        boolean blocked = packageReady
+                && AppSettings.isMediaSessionPackageBlocked(this, currentPackage);
+        View prefer = action("Предпочитать текущее",
+                packageReady ? currentLabel : "сначала запустите музыку",
+                packageReady ? COLOR_ACCENT : COLOR_MUTED, false, () -> {
+                    if (!packageReady) return;
+                    AppSettings.setMediaPreferredSessionPackage(this, currentPackage);
+                    AppLog.line(this, "Media preferred session: " + currentPackage);
+                    renderTab();
+                    refresh();
+                });
+        View block = action(blocked ? "Вернуть текущее" : "Игнорировать текущее",
+                packageReady ? currentLabel : "сначала запустите музыку",
+                packageReady ? (blocked ? COLOR_SUCCESS : COLOR_WARNING) : COLOR_MUTED,
+                false, () -> {
+                    if (!packageReady) return;
+                    AppSettings.setMediaSessionPackageBlocked(this, currentPackage, !blocked);
+                    AppLog.line(this, "Media session blocked " + currentPackage + ": " + !blocked);
+                    renderTab();
+                    refresh();
+                });
+        View reset = action("Автовыбор", "сбросить приоритет и исключения",
+                COLOR_ACCENT_BLUE, false, this::resetMediaSessionSelection);
+        addActionGrid(panel,
+                navSettingsAction(prefer, packageReady),
+                navSettingsAction(block, packageReady),
+                reset);
+        return panel;
+    }
+
+    private String mediaSessionAppLabel(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) return "приложение";
+        try {
+            android.content.pm.ApplicationInfo info =
+                    getPackageManager().getApplicationInfo(packageName, 0);
+            CharSequence label = getPackageManager().getApplicationLabel(info);
+            if (label != null && !label.toString().trim().isEmpty()) {
+                return label.toString().trim();
+            }
+        } catch (Exception ignored) {
+        }
+        return packageName;
+    }
+
+    private void resetMediaSessionSelection() {
+        AppSettings.clearMediaPreferredSessionPackage(this);
+        for (String packageName :
+                new ArrayList<>(AppSettings.mediaBlockedSessionPackages(this))) {
+            AppSettings.setMediaSessionPackageBlocked(this, packageName, false);
+        }
+        AppLog.line(this, "Media session selection reset");
+        renderTab();
+        refresh();
     }
 
     private View mainGearButton() {
@@ -1098,13 +1345,11 @@ public final class MainActivity extends Activity {
         stage.addView(dashboard, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        if (!tpmsWidgetLocksSettings()) {
-            int gearSize = isCompact() ? dp(36) : dp(48);
-            FrameLayout.LayoutParams gearLp = new FrameLayout.LayoutParams(gearSize, gearSize,
-                    Gravity.RIGHT | Gravity.TOP);
-            gearLp.setMargins(0, isCompact() ? dp(8) : dp(16), isCompact() ? dp(8) : dp(18), 0);
-            stage.addView(tpmsKia130GearButton(), gearLp);
-        }
+        int gearSize = isCompact() ? dp(48) : dp(56);
+        FrameLayout.LayoutParams gearLp = new FrameLayout.LayoutParams(gearSize, gearSize,
+                Gravity.RIGHT | Gravity.TOP);
+        gearLp.setMargins(0, isCompact() ? dp(8) : dp(16), isCompact() ? dp(8) : dp(18), 0);
+        stage.addView(tpmsKia130GearButton(), gearLp);
         return stage;
     }
 
@@ -1116,9 +1361,9 @@ public final class MainActivity extends Activity {
         settings.setPadding(dp(11), dp(11), dp(11), dp(11));
         settings.setClickable(true);
         settings.setFocusable(true);
+        settings.setContentDescription("Открыть настройки");
         settings.setBackground(tpmsGearBackground());
         settings.setOnClickListener(v -> {
-            if (tpmsWidgetLocksSettings()) return;
             settingsMode = true;
             settingsTab = SETTINGS_TPMS;
             renderTab();
@@ -1683,6 +1928,7 @@ public final class MainActivity extends Activity {
         settings.setTypeface(Typeface.DEFAULT_BOLD);
         settings.setClickable(true);
         settings.setFocusable(true);
+        settings.setContentDescription("Открыть настройки");
         settings.setBackground(gradient(softColor(COLOR_PANEL_SOFT, 170), softColor(COLOR_ACCENT_BLUE, 76),
                 softColor(Color.WHITE, 44), dp(1), dp(8)));
         settings.setOnClickListener(v -> {
@@ -1773,6 +2019,7 @@ public final class MainActivity extends Activity {
         item.setPadding(dp(10), 0, dp(10), 0);
         item.setClickable(true);
         item.setFocusable(true);
+        item.setContentDescription("Раздел настроек: " + label);
         item.setBackground(selected
                 ? settingsButtonBackground(true)
                 : round(Color.TRANSPARENT, dp(7), Color.TRANSPARENT, 0));
@@ -1793,39 +2040,62 @@ public final class MainActivity extends Activity {
     }
 
     private View settingsTopRow() {
-        LinearLayout row = row();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(14), dp(8), dp(12), dp(8));
-        row.setBackgroundColor(COLOR_SETTINGS_BG);
+        LinearLayout outer = row();
+        outer.setGravity(Gravity.CENTER_VERTICAL);
+        outer.setPadding(dp(10), dp(8), dp(10), dp(8));
+        outer.setBackgroundColor(COLOR_SETTINGS_BG);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 0, 0, 0);
-        row.setLayoutParams(lp);
+        outer.setLayoutParams(lp);
 
-        row.addView(settingsMenuItem(SETTINGS_TPMS, "TPMS"), settingsHeaderItemLayout(true));
+        HorizontalScrollView scroller = new HorizontalScrollView(this);
+        scroller.setHorizontalScrollBarEnabled(false);
+        scroller.setFillViewport(false);
+        LinearLayout tabs = row();
+        tabs.setGravity(Gravity.CENTER_VERTICAL);
+        tabs.addView(settingsMenuItem(SETTINGS_TPMS, "TPMS"), settingsHeaderItemLayout(true));
         if (AppSettings.mediaTabVisible(this)) {
-            row.addView(settingsMenuItem(SETTINGS_MEDIA, "Медиа"), settingsHeaderItemLayout(false));
+            tabs.addView(settingsMenuItem(SETTINGS_MEDIA, "Медиа"), settingsHeaderItemLayout(false));
         }
-        row.addView(settingsMenuItem(SETTINGS_NAVIGATION, "Навигация"), settingsHeaderItemLayout(false));
-        row.addView(settingsMenuItem(SETTINGS_CANBUS, "Canbus"), settingsHeaderItemLayout(false));
-        row.addView(settingsMenuItem(SETTINGS_RCTA, "RCTA"), settingsHeaderItemLayout(false));
-        row.addView(settingsMenuItem(SETTINGS_GENERAL, "Общее"), settingsHeaderItemLayout(false));
+        tabs.addView(settingsMenuItem(SETTINGS_NAVIGATION, "Навигация"), settingsHeaderItemLayout(false));
+        tabs.addView(settingsMenuItem(SETTINGS_CANBUS, "Canbus"), settingsHeaderItemLayout(false));
+        tabs.addView(settingsMenuItem(SETTINGS_RCTA, "RCTA"), settingsHeaderItemLayout(false));
+        tabs.addView(settingsMenuItem(SETTINGS_GENERAL, "Общее"), settingsHeaderItemLayout(false));
+        scroller.addView(tabs, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        outer.addView(scroller, new LinearLayout.LayoutParams(
+                0, isCompact() ? dp(46) : dp(52), 1f));
+
+        TextView search = text("⌕", isCompact() ? 25 : 28, Color.WHITE);
+        search.setGravity(Gravity.CENTER);
+        search.setTypeface(Typeface.DEFAULT_BOLD);
+        search.setClickable(true);
+        search.setFocusable(true);
+        search.setContentDescription("Поиск настроек");
+        search.setBackground(settingsButtonBackground(false));
+        search.setOnClickListener(v -> showSettingsSearch());
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(
+                isCompact() ? dp(48) : dp(54), isCompact() ? dp(46) : dp(52));
+        searchLp.setMargins(dp(5), 0, dp(5), 0);
+        outer.addView(search, searchLp);
 
         TextView close = text("×", isCompact() ? 30 : 34, Color.WHITE);
         close.setGravity(Gravity.CENTER);
         close.setTypeface(Typeface.DEFAULT_BOLD);
         close.setClickable(true);
         close.setFocusable(true);
+        close.setContentDescription("Закрыть настройки");
         close.setBackground(settingsButtonBackground(false));
         close.setOnClickListener(v -> closeSettings());
-        row.addView(close, new LinearLayout.LayoutParams(
+        outer.addView(close, new LinearLayout.LayoutParams(
                 isCompact() ? dp(52) : dp(60), isCompact() ? dp(46) : dp(52)));
-        return row;
+        return outer;
     }
 
     private LinearLayout.LayoutParams settingsHeaderItemLayout(boolean first) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0,
-                isCompact() ? dp(46) : dp(52), 1f);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                isCompact() ? dp(94) : dp(122), isCompact() ? dp(46) : dp(52));
         lp.setMargins(first ? 0 : dp(3), 0, dp(3), 0);
         return lp;
     }
@@ -1846,6 +2116,80 @@ public final class MainActivity extends Activity {
         selectedTab = TAB_TPMS;
         renderTab();
         refresh();
+    }
+
+    private void showSettingsSearch() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Например: Yandex, давление, радио, обновление");
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        int pad = dp(18);
+        input.setPadding(pad, dp(10), pad, dp(10));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Найти настройку")
+                .setView(input)
+                .setPositiveButton("Открыть", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            View open = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            open.setOnClickListener(v -> {
+                String query = input.getText().toString();
+                int target = settingsTabForQuery(query);
+                if (target < 0) {
+                    input.setError("Не найдено. Попробуйте: TPMS, медиа, Yandex, CAN, RCTA, обновление");
+                    return;
+                }
+                settingsTab = target;
+                settingsScrollY = 0;
+                dialog.dismiss();
+                renderTab();
+                refresh();
+            });
+            input.setOnEditorActionListener((view, actionId, event) -> {
+                if (actionId != EditorInfo.IME_ACTION_SEARCH) return false;
+                open.performClick();
+                return true;
+            });
+            input.requestFocus();
+        });
+        dialog.show();
+    }
+
+    private int settingsTabForQuery(String query) {
+        String value = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        if (value.isEmpty()) return settingsTab;
+        if (containsAny(value, "tpms", "шин", "давлен", "колес", "температур")) {
+            return SETTINGS_TPMS;
+        }
+        if (containsAny(value, "медиа", "music", "музык", "радио", "трек",
+                "артист", "uart", "teyes", "android")) {
+            return SETTINGS_MEDIA;
+        }
+        if (containsAny(value, "нави", "yandex", "яндекс", "2gis", "манев",
+                "маршрут", "скорост", "съезд", "микро")) {
+            return SETTINGS_NAVIGATION;
+        }
+        if (containsAny(value, "can", "адаптер", "двигател", "наружн", "sas",
+                "усилител", "amp")) {
+            return SETTINGS_CANBUS;
+        }
+        if (containsAny(value, "rcta", "слеп", "задн", "стрелк")) {
+            return SETTINGS_RCTA;
+        }
+        if (containsAny(value, "обнов", "разреш", "прошив", "диагност", "экспорт",
+                "импорт", "backup", "резерв", "эксперт", "автозапуск", "версия")) {
+            return SETTINGS_GENERAL;
+        }
+        return -1;
+    }
+
+    private static boolean containsAny(String value, String... needles) {
+        for (String needle : needles) {
+            if (value.contains(needle)) return true;
+        }
+        return false;
     }
 
     private void renderSettingsContent(LinearLayout root) {
@@ -2132,8 +2476,10 @@ public final class MainActivity extends Activity {
 
     private View tpmsWheelCard(TpmsState state, int wheel) {
         boolean known = state != null && state.known != null && wheel < state.known.length && state.known[wheel];
+        long now = System.currentTimeMillis();
+        boolean fresh = known && state.isWheelFresh(wheel, now);
         int warning = TpmsAlertController.warningState(this, state, wheel);
-        int color = warningColor(warning);
+        int color = fresh ? warningColor(warning) : COLOR_MUTED;
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -2152,7 +2498,7 @@ public final class MainActivity extends Activity {
         card.addView(header);
 
         TextView pressure = text(known ? TpmsAlertController.barText(state.pressureKpa[wheel]) : "-- bar",
-                isCompact() ? 24 : 30, Color.WHITE);
+                isCompact() ? 24 : 30, fresh ? Color.WHITE : COLOR_MUTED);
         pressure.setTypeface(Typeface.DEFAULT_BOLD);
         LinearLayout.LayoutParams pressureLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2160,11 +2506,14 @@ public final class MainActivity extends Activity {
         card.addView(pressure, pressureLp);
 
         String temp = known ? state.temperatureC[wheel] + "C" : "--C";
-        String detail = warning == TpmsAlertController.WARNING_NONE
-                ? (known ? "норма" : "нет данных")
+        String detail = !known ? "нет данных"
+                : !fresh ? "данные устарели · "
+                + ageText(now, now - state.wheelAgeMs(wheel, now))
+                : warning == TpmsAlertController.WARNING_NONE
+                ? "норма"
                 : TpmsAlertController.warningText(warning);
         TextView meta = text(temp + "  ·  " + detail, isCompact() ? 13 : 15,
-                warning == TpmsAlertController.WARNING_NONE ? COLOR_MUTED : color);
+                warning == TpmsAlertController.WARNING_NONE || !fresh ? COLOR_MUTED : color);
         meta.setTypeface(Typeface.DEFAULT_BOLD);
         card.addView(meta);
         return card;
@@ -2235,6 +2584,9 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         CompoundButton toggle = checkBox("", checked);
+        toggle.setId(View.generateViewId());
+        toggle.setContentDescription(title);
+        label.setLabelFor(toggle.getId());
         toggle.setOnCheckedChangeListener(listener);
         header.addView(toggle, switchLayout(true));
         panel.addView(header);
@@ -2314,6 +2666,9 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         CompoundButton toggle = checkBox("", checked);
+        toggle.setId(View.generateViewId());
+        toggle.setContentDescription(title);
+        name.setLabelFor(toggle.getId());
         toggle.setOnCheckedChangeListener(listener);
         line.addView(toggle, switchLayout(true));
         root.addView(line);
@@ -2354,7 +2709,9 @@ public final class MainActivity extends Activity {
         summaryLp.setMargins(0, dp(10), 0, 0);
         panel.addView(summary, summaryLp);
 
-        TextView logic = text("При жёлтом или красном состоянии TPMS переходит на опрос 1 сек; без предупреждений: фон 60 сек, открытый экран 5 сек.",
+        TextView logic = text("Опрос: красное состояние 1 сек, жёлтое 5 сек, "
+                        + "открытый экран 5 сек, встроенный виджет 30 сек, фон 120 сек. "
+                        + "Через 3 минуты без ответа колесо помечается как устаревшее.",
                 isCompact() ? 12 : 14, COLOR_MUTED);
         LinearLayout.LayoutParams logicLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2460,12 +2817,15 @@ public final class MainActivity extends Activity {
     private void renderMediaTab(LinearLayout root) {
         root.addView(mediaMusicPanel());
         if (AppSettings.universalMediaProfile(this)) {
+            root.addView(mediaSessionPriorityPanel());
             root.addView(mediaRadioStationPanel());
         }
         if (AppSettings.teyesMediaProfile(this)) {
             root.addView(mediaCallPanel());
         }
-        root.addView(mediaDebugPanel());
+        if (AppSettings.expertMode(this)) {
+            root.addView(mediaDebugPanel());
+        }
     }
 
     private LinearLayout mediaMusicPanel() {
@@ -2479,7 +2839,8 @@ public final class MainActivity extends Activity {
         addActionGridColumns(panel, 2,
                 mediaProfileAction(AppSettings.MEDIA_PROFILE_TEYES, "TEYES / CC4", "магнитола TEYES, радио, USB, BT"),
                 mediaProfileAction(AppSettings.MEDIA_PROFILE_UNIVERSAL_ANDROID, "Android", "музыка из Android и база радио"),
-                mediaProfileAction(AppSettings.MEDIA_PROFILE_UART_REAL, "UART real", "оставить штатный режим, менять только текст"),
+                mediaProfileAction(AppSettings.MEDIA_PROFILE_UART_REAL,
+                        "Штатный источник + Android", "магнитола ведёт режим, Kia меняет только текст"),
                 mediaProfileAction(AppSettings.MEDIA_PROFILE_OFF, "Выкл", "Kia не отправляет медиа"));
 
         if (!AppSettings.mediaEnabled(this)) {
@@ -2508,7 +2869,7 @@ public final class MainActivity extends Activity {
                 action("Только трек", "без исполнителя", mediaTextModeColor(AppSettings.MEDIA_TEXT_TRACK_ONLY),
                         () -> setMediaTextMode(AppSettings.MEDIA_TEXT_TRACK_ONLY)));
 
-        if (AppSettings.universalMediaProfile(this)) {
+        if (AppSettings.universalMediaProfile(this) && AppSettings.expertMode(this)) {
             panel.addView(settingsDivider());
             addSettingsSubHeader(panel, "Синхронизация источника",
                     profile == AppSettings.MEDIA_PROFILE_UART_REAL
@@ -2747,15 +3108,80 @@ public final class MainActivity extends Activity {
     }
 
     private void renderNavigationTab(LinearLayout root) {
+        root.addView(navigationLivePanel());
         root.addView(navigationOutputPanel());
         addSection(root, "Источник", "Yandex использует прямой Core Bridge; Auto оставлен как резервный режим.",
                 navSourceAction(AppSettings.NAV_SOURCE_AUTO, "Auto", "fallback Yandex + 2GIS"),
                 navSourceAction(AppSettings.NAV_SOURCE_YANDEX, "Yandex", "только Yandex Core Bridge"),
                 navSourceAction(AppSettings.NAV_SOURCE_2GIS, "2GIS", "только dashboard 2GIS"));
         root.addView(navigationOptionsPanel());
-        navigationDebugToggle = addSettingSwitch(root, "Панель диагностики",
-                "служебные данные навигации поверх карты",
-                AppSettings.navOverlayEnabled(this), this::toggleNavDebug);
+        if (AppSettings.expertMode(this)) {
+            navigationDebugToggle = addSettingSwitch(root, "Панель диагностики",
+                    "служебные данные навигации поверх карты",
+                    AppSettings.navOverlayEnabled(this), this::toggleNavDebug);
+        }
+    }
+
+    private LinearLayout navigationLivePanel() {
+        LinearLayout panel = settingsPanel(COLOR_ACCENT);
+        addSettingsPanelHeader(panel, "Сейчас в приборке",
+                "живой снимок фактического состояния; пример ниже не отправляет TX",
+                COLOR_ACCENT);
+
+        TextView live = text(navigationLiveText(), isCompact() ? 12 : 14,
+                Color.rgb(235, 241, 246));
+        live.setTypeface(Typeface.MONOSPACE);
+        live.setLineSpacing(0f, 1.08f);
+        panel.addView(statusBox("Последнее решение", live,
+                StateStore.navigation().active ? COLOR_SUCCESS : COLOR_WARNING));
+
+        NavigationSettingsPreviewView preview = new NavigationSettingsPreviewView(this);
+        preview.setContentDescription("Визуальный пример выбранного режима навигации");
+        LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, isCompact() ? dp(230) : dp(250));
+        previewLp.setMargins(0, dp(12), 0, 0);
+        panel.addView(preview, previewLp);
+        return panel;
+    }
+
+    private String navigationLiveText() {
+        kia.app.core.model.NavigationState state = StateStore.navigation();
+        if (!state.active) {
+            return "Маршрут не активен\n"
+                    + "Источник: " + AppSettings.navSourceLabel(this)
+                    + " · последний снимок " + timeText(state.updatedAt)
+                    + "\nПоследний TX: " + lastLineOrDash(state.clusterTx);
+        }
+        DashboardNavigationSnapshot actual = DashboardNavigationSnapshot.resolve(state);
+        String maneuver = actual.maneuverId.isEmpty()
+                ? "—"
+                : actual.presentation.fallbackLabel;
+        String distance = emptyDash(actual.distance);
+        String gray = emptyDash(actual.grayRoad);
+        String micro = state.microManeuverId.isEmpty()
+                ? "нет"
+                : state.microManeuverId + (state.microDistance.isEmpty()
+                ? "" : " · " + state.microDistance);
+        return "Знак: " + maneuver + " · дистанция " + distance
+                + "\nСерая дорога: " + gray + " · micro " + micro
+                + "\nСкорость: " + emptyDash(state.currentSpeed)
+                + " · лимит " + emptyDash(state.speedLimit)
+                + "\nПоследний TX: " + lastLineOrDash(state.clusterTx);
+    }
+
+    private static String lastLineOrDash(String value) {
+        if (value == null || value.trim().isEmpty()) return "—";
+        String clean = value.trim();
+        int split = clean.lastIndexOf('\n');
+        return split >= 0 ? clean.substring(split + 1) : clean;
+    }
+
+    private static String firstNonEmpty(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()) return value.trim();
+        }
+        return "";
     }
 
     private LinearLayout navigationOutputPanel() {
@@ -3002,11 +3428,14 @@ public final class MainActivity extends Activity {
 
     private void renderCanbusTab(LinearLayout root) {
         if (AppSettings.ampEnabled(this)) requestAmpSettingsIfNeeded();
+        root.addView(canbusAdapterPanel());
         root.addView(canbusTemperaturePanel());
-        sasRatioStatus = text("", 14, Color.rgb(235, 241, 246));
-        sasRatioInput = sasRatioInput();
-        root.addView(sasRatioPanel());
-        addAmpSection(root);
+        if (AppSettings.expertMode(this)) {
+            sasRatioStatus = text("", 14, Color.rgb(235, 241, 246));
+            sasRatioInput = sasRatioInput();
+            root.addView(sasRatioPanel());
+            addAmpSection(root);
+        }
     }
 
     private LinearLayout canbusAdapterPanel() {
@@ -3026,10 +3455,10 @@ public final class MainActivity extends Activity {
     private LinearLayout canbusTemperaturePanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
         addSettingsPanelHeader(panel, "Температура на панели",
-                "старый параметр Sportage: что адаптер отдаёт в слот температуры", COLOR_ACCENT_BLUE);
+                "выберите значение, которое автомобиль покажет как температуру", COLOR_ACCENT_BLUE);
 
         addActionGrid(panel,
-                action("Улица", "наружная температура", canbusTempSourceColor(AppSettings.CANBUS_TEMP_OUTSIDE),
+                action("Наружная", "температура за бортом", canbusTempSourceColor(AppSettings.CANBUS_TEMP_OUTSIDE),
                         AppSettings.canbusTemperatureSource(this) == AppSettings.CANBUS_TEMP_OUTSIDE,
                         () -> setCanbusTemperatureSource(AppSettings.CANBUS_TEMP_OUTSIDE)),
                 action("Двигатель", "температура двигателя", canbusTempSourceColor(AppSettings.CANBUS_TEMP_ENGINE),
@@ -3048,13 +3477,153 @@ public final class MainActivity extends Activity {
     }
 
     private void renderGeneralSettingsTab(LinearLayout root) {
-        root.addView(generalAppPanel());
-        root.addView(canbusAdapterPanel());
-        root.addView(firmwarePanel());
+        root.addView(generalHealthPanel());
         addPermissionSection(root);
         root.addView(generalUpdatesPanel());
+        root.addView(generalDataPanel());
+        root.addView(generalAppPanel());
         root.addView(mediaVisibilityPanel());
+        if (AppSettings.expertMode(this)) {
+            root.addView(firmwarePanel());
+        }
         root.addView(generalVersionFooter());
+    }
+
+    private LinearLayout generalHealthPanel() {
+        LinearLayout panel = settingsPanel(
+                StateStore.adapter().usbConnected ? COLOR_SUCCESS : COLOR_WARNING);
+        addSettingsPanelHeader(panel, "Состояние системы",
+                "один экран для адаптера, навигации, медиа и разрешений",
+                StateStore.adapter().usbConnected ? COLOR_SUCCESS : COLOR_WARNING);
+        healthSummary = text(healthSummaryText(), isCompact() ? 13 : 15,
+                Color.rgb(235, 241, 246));
+        healthSummary.setTypeface(Typeface.DEFAULT_BOLD);
+        healthSummary.setLineSpacing(0f, 1.08f);
+        LinearLayout.LayoutParams statusLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statusLp.setMargins(0, dp(12), 0, dp(8));
+        panel.addView(healthSummary, statusLp);
+        addActionGrid(panel,
+                action("Самопроверка", "обновить сервисы и состояния", COLOR_SUCCESS,
+                        this::runSystemSelfCheck),
+                action("Краткий отчёт", "скопировать без адресов и названий треков",
+                        COLOR_ACCENT_BLUE, this::copyShortDiagnostic));
+        return panel;
+    }
+
+    private String healthSummaryText() {
+        long now = System.currentTimeMillis();
+        kia.app.core.model.AdapterState adapter = StateStore.adapter();
+        kia.app.core.model.NavigationState navigation = StateStore.navigation();
+        MediaState media = StateStore.media();
+        TpmsState tpms = StateStore.tpms();
+        kia.app.core.model.RctaState rcta = StateStore.rcta();
+        return healthLine("Адаптер", adapter.usbConnected,
+                adapter.usbConnected ? "RX " + ageText(now, adapter.lastFrameAt) : adapter.usbText)
+                + "\n" + healthLine("Yandex / маршрут",
+                navigation.active || !AppSettings.navigationEnabled(this),
+                navigation.active ? "данные " + ageText(now, navigation.updatedAt)
+                        : "маршрут не активен")
+                + "\n" + healthLine("Медиа",
+                !AppSettings.mediaEnabled(this) || media.updatedAt > 0L,
+                AppSettings.mediaProfileLabel(this) + " · "
+                        + (media.updatedAt > 0L ? ageText(now, media.updatedAt) : "нет данных"))
+                + "\n" + healthLine("TPMS", tpms.hasFreshData(),
+                tpms.hasFreshData() ? "данные " + ageText(now, tpms.updatedAt)
+                        : tpms.hasData() ? "данные устарели" : "ожидание датчиков")
+                + "\n" + healthLine("RCTA", true,
+                rcta.active() ? rcta.summary() + " · " + ageText(now, rcta.updatedAt) : "готов")
+                + "\n" + healthLine("Разрешения", missingPermissionCount() == 0,
+                missingPermissionCount() == 0 ? "всё готово"
+                        : "нужно включить " + missingPermissionCount());
+    }
+
+    private String healthLine(String title, boolean ok, String details) {
+        return (ok ? "✓ " : "! ") + title + ": " + details;
+    }
+
+    private static String ageText(long now, long then) {
+        if (then <= 0L) return "никогда";
+        long seconds = Math.max(0L, now - then) / 1000L;
+        if (seconds < 60L) return seconds + " сек назад";
+        if (seconds < 3600L) return (seconds / 60L) + " мин назад";
+        return (seconds / 3600L) + " ч назад";
+    }
+
+    private void runSystemSelfCheck() {
+        AppService.start(this);
+        NavigationOverlayController.get(this).apply();
+        RctaOverlayController.get(this).apply();
+        TpmsWarningOverlayController.get(this).setActivityVisible(activityVisible);
+        AppLog.line(this, "Self-check requested from UI");
+        Toast.makeText(this, "Состояния обновлены", Toast.LENGTH_SHORT).show();
+        handler.postDelayed(this::refresh, 600L);
+    }
+
+    private void copyShortDiagnostic() {
+        ClipboardManager clipboard =
+                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null) return;
+        clipboard.setPrimaryClip(ClipData.newPlainText(
+                "KIA diagnostic", DiagnosticBundleExporter.summary(this)));
+        Toast.makeText(this, "Краткий отчёт скопирован", Toast.LENGTH_SHORT).show();
+    }
+
+    private LinearLayout generalDataPanel() {
+        LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
+        addSettingsPanelHeader(panel, "Данные и диагностика",
+                "перенос настроек и один архив для разбора проблемы",
+                COLOR_ACCENT_BLUE);
+        addActionGrid(panel,
+                action("Сохранить настройки", "включая ручные названия радио",
+                        COLOR_ACCENT_BLUE, this::openSettingsExport),
+                action("Восстановить", "проверить и импортировать JSON",
+                        COLOR_ACCENT_BLUE, this::openSettingsImport),
+                action("Сохранить проблему", "ZIP: состояния, настройки и ограниченные логи",
+                        COLOR_WARNING, this::openDiagnosticsExport));
+        TextView privacy = text("Архив создаётся только по нажатию. Он может содержать служебные "
+                        + "строки навигационного журнала; автоматически никуда не отправляется.",
+                isCompact() ? 11 : 12, COLOR_MUTED);
+        LinearLayout.LayoutParams privacyLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        privacyLp.setMargins(0, dp(8), 0, 0);
+        panel.addView(privacy, privacyLp);
+        return panel;
+    }
+
+    private void openSettingsExport() {
+        openCreateDocument(REQUEST_EXPORT_SETTINGS, "application/json",
+                SettingsTransfer.FILE_NAME);
+    }
+
+    private void openSettingsImport() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, REQUEST_IMPORT_SETTINGS);
+        } catch (Exception e) {
+            Toast.makeText(this, "Не найден выбор файлов", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openDiagnosticsExport() {
+        openCreateDocument(REQUEST_DIAGNOSTICS_FILE, "application/zip",
+                DiagnosticBundleExporter.suggestedFileName());
+    }
+
+    private void openCreateDocument(int requestCode, String type, String fileName) {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType(type);
+        intent.putExtra(Intent.EXTRA_TITLE, fileName);
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        try {
+            startActivityForResult(intent, requestCode);
+        } catch (Exception e) {
+            Toast.makeText(this, "Не найден выбор файлов", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void renderRctaSettingsTab(LinearLayout root) {
@@ -3080,7 +3649,9 @@ public final class MainActivity extends Activity {
         stageLp.setMargins(0, dp(12), 0, dp(10));
         preview.addView(stage, stageLp);
 
-        TextView status = text("CAN: BB A1 41 08 75 RL RR · 00 нет · 01 предупреждение · "
+        TextView status = text((AppSettings.expertMode(this)
+                        ? "CAN: BB A1 41 08 75 RL RR · 00 нет · 01 предупреждение · "
+                        : "Предпросмотр: левая и правая опасная зона · ")
                         + AppSettings.rctaStyleLabel(this) + " · "
                         + AppSettings.rctaColorLabel(this) + " · фон "
                         + rctaBackgroundPercent(AppSettings.rctaBackgroundAlpha(this)) + "%"
@@ -3200,9 +3771,9 @@ public final class MainActivity extends Activity {
 
     private int rctaPreviewHeight() {
         if (isLandscapeWindow()) {
-            return dp(screenWidthDp() >= 1100 ? 330 : 300);
+            return dp(screenWidthDp() >= 1100 ? 220 : 200);
         }
-        return isCompact() ? dp(240) : dp(300);
+        return isCompact() ? dp(180) : dp(220);
     }
 
     private int rctaStyleColor(int style) {
@@ -3376,6 +3947,9 @@ public final class MainActivity extends Activity {
         if (permissionSummary != null) {
             permissionSummary.setText(permissionSummaryText());
         }
+        if (healthSummary != null) {
+            healthSummary.setText(healthSummaryText());
+        }
         if (sasRatioStatus != null) {
             sasRatioStatus.setText(sasRatioText());
         }
@@ -3514,13 +4088,6 @@ public final class MainActivity extends Activity {
                 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
     }
 
-    private boolean mediaAudioPermissionGranted() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            return checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        }
-        return true;
-    }
-
     private boolean bluetoothPermissionGranted() {
         return Build.VERSION.SDK_INT < 31
                 || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
@@ -3540,14 +4107,29 @@ public final class MainActivity extends Activity {
         return locationPermissionGranted() && backgroundLocationPermissionGranted();
     }
 
-    private boolean writeSettingsGranted() {
-        return Build.VERSION.SDK_INT < 23 || Settings.System.canWrite(this);
-    }
-
     private boolean overlayPermissionReady() {
-        return (!AppSettings.navOverlayEnabled(this) && !AppSettings.mediaOverlayEnabled(this))
+        return !overlayRequired()
                 || Build.VERSION.SDK_INT < 23
                 || Settings.canDrawOverlays(this);
+    }
+
+    private boolean overlayRequired() {
+        return AppSettings.navOverlayEnabled(this)
+                || AppSettings.mediaOverlayEnabled(this)
+                || AppSettings.tpmsAlertsEnabled(this)
+                || AppSettings.rctaOverlayEnabled(this);
+    }
+
+    private boolean mediaListenerRequired() {
+        return AppSettings.universalMediaProfile(this);
+    }
+
+    private boolean gpsRequired() {
+        return AppSettings.navigationEnabled(this);
+    }
+
+    private boolean bluetoothRequired() {
+        return AppSettings.callEnabled(this);
     }
 
     private boolean notificationListenerEnabled() {
@@ -3560,10 +4142,10 @@ public final class MainActivity extends Activity {
     private int missingPermissionCount() {
         int count = 0;
         if (!notificationPermissionGranted()) count++;
-        if (!mediaAudioPermissionGranted() || !notificationListenerEnabled()) count++;
-        if (!bluetoothPermissionGranted()) count++;
-        if (!gpsPermissionReady()) count++;
-        if (!batteryOptimizationIgnored()) count++;
+        if (mediaListenerRequired() && !notificationListenerEnabled()) count++;
+        if (bluetoothRequired() && !bluetoothPermissionGranted()) count++;
+        if (gpsRequired() && !gpsPermissionReady()) count++;
+        if (AppSettings.autoStart(this) && !batteryOptimizationIgnored()) count++;
         if (!overlayPermissionReady()) count++;
         return count;
     }
@@ -3575,12 +4157,18 @@ public final class MainActivity extends Activity {
     }
 
     private String overlayPermissionHint() {
-        boolean nav = AppSettings.navOverlayEnabled(this);
-        boolean media = AppSettings.mediaOverlayEnabled(this);
-        if (nav && media) return "навигация и медиа";
-        if (nav) return "навигация";
-        if (media) return "медиа";
-        return "не нужно";
+        ArrayList<String> names = new ArrayList<>();
+        if (AppSettings.tpmsAlertsEnabled(this)) names.add("TPMS");
+        if (AppSettings.rctaOverlayEnabled(this)) names.add("RCTA");
+        if (AppSettings.navOverlayEnabled(this)) names.add("навигация");
+        if (AppSettings.mediaOverlayEnabled(this)) names.add("медиа");
+        if (names.isEmpty()) return "не нужно";
+        StringBuilder out = new StringBuilder();
+        for (String name : names) {
+            if (out.length() > 0) out.append(", ");
+            out.append(name);
+        }
+        return out.toString();
     }
 
     private static String yesNo(boolean value) {
@@ -3766,7 +4354,6 @@ public final class MainActivity extends Activity {
         out.append(" stations=").append(RadioStationStore.entries(this).size());
         out.append("\nnotify=").append(yesNo(notificationPermissionGranted()));
         out.append(" listener=").append(yesNo(notificationListenerEnabled()));
-        out.append(" audio=").append(yesNo(mediaAudioPermissionGranted()));
         out.append("\nusb=").append(StateStore.adapter().usbText);
         out.append(" rx=").append(timeText(StateStore.adapter().lastFrameAt));
         return out.toString();
@@ -4025,8 +4612,8 @@ public final class MainActivity extends Activity {
     }
 
     private void requestMissingPermissionsFromSettings() {
-        askedWriteSettings = false;
         askedOverlay = false;
+        askedBackgroundLocationSettings = false;
         askedBatteryOptimization = false;
         askedNotificationListener = false;
         specialPermissionWaiting = false;
@@ -4181,8 +4768,9 @@ public final class MainActivity extends Activity {
         View button = action("Микро до " + navMicroDistanceText(meters), hint,
                 enabled ? COLOR_ACCENT_BLUE : COLOR_MUTED, false, () -> {
                     if (!navNormalSettingsEnabled() || !AppSettings.navMicroManeuvers(this)) return;
-                    setNavMicroMaxDistanceMeters(nextValue(meters,
-                            100, 150, 200, 250, 300, 400, 500));
+                    showMeterChoice("Дистанция микроподсказки", meters,
+                            new int[]{100, 150, 200, 250, 300, 400, 500},
+                            this::setNavMicroMaxDistanceMeters);
                 });
         return navSettingsAction(button, enabled);
     }
@@ -4199,9 +4787,28 @@ public final class MainActivity extends Activity {
                     if (!navNormalSettingsEnabled()
                             || !AppSettings.yandexNavigationEnabled(this)
                             || !AppSettings.navStraightUntilMain(this)) return;
-                    setNavMainRevealDistanceMeters(nextValue(meters, 100, 200, 300, 400, 500));
+                    showMeterChoice("Когда показать основной манёвр", meters,
+                            new int[]{100, 200, 300, 400, 500},
+                            this::setNavMainRevealDistanceMeters);
                 });
         return navSettingsAction(button, enabled);
+    }
+
+    private void showMeterChoice(String title, int current, int[] values, IntSetter setter) {
+        String[] labels = new String[values.length];
+        int selected = -1;
+        for (int i = 0; i < values.length; i++) {
+            labels[i] = values[i] + " м";
+            if (values[i] == current) selected = i;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                    setter.set(values[which]);
+                    dialog.dismiss();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 
     private View navMicroHoldAfterCycleAction(boolean normalMode) {
@@ -4627,21 +5234,98 @@ public final class MainActivity extends Activity {
             openManualFirmwarePicker();
             return;
         }
+        if (!StateStore.adapter().usbConnected) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Адаптер не подключён")
+                    .setMessage("Подключите USB-адаптер и дождитесь появления UID и версии FW.")
+                    .setPositiveButton("Понятно", null)
+                    .show();
+            return;
+        }
+        if (pendingFirmwareLabel == null
+                || !pendingFirmwareLabel.toLowerCase(Locale.ROOT).endsWith(".bin")) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Неверный тип файла")
+                    .setMessage("Для ручной прошивки нужен файл с расширением .bin.")
+                    .setPositiveButton("Выбрать другой", (dialog, which) -> {
+                        pendingFirmwareUri = null;
+                        pendingFirmwareLabel = "";
+                        openManualFirmwarePicker();
+                    })
+                    .setNegativeButton("Отмена", null)
+                    .show();
+            return;
+        }
+        long size = firmwareFileSize(pendingFirmwareUri);
+        if (size == 0L || size > 112L * 1024L) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Файл прошивки не подходит")
+                    .setMessage("Допустимый размер BIN: от 1 байта до 112 КБ. Выбранный файл: "
+                            + formatFileSize(size) + ".")
+                    .setPositiveButton("Выбрать другой", (dialog, which) -> {
+                        pendingFirmwareUri = null;
+                        pendingFirmwareLabel = "";
+                        openManualFirmwarePicker();
+                    })
+                    .setNegativeButton("Отмена", null)
+                    .show();
+            return;
+        }
         Uri uri = pendingFirmwareUri;
         String label = pendingFirmwareLabel;
-        pendingFirmwareUri = null;
-        pendingFirmwareLabel = "";
-        firmwareUpdater.flashFile(uri, label);
-        refresh();
+        String message = "Файл: " + label
+                + "\nРазмер: " + formatFileSize(size)
+                + "\nАдаптер: UID " + emptyDash(StateStore.adapter().uid)
+                + " · FW " + emptyDash(StateStore.adapter().firmware)
+                + "\n\nНе выключайте питание и не отсоединяйте USB до завершения.";
+        new AlertDialog.Builder(this)
+                .setTitle("Начать прошивку адаптера?")
+                .setMessage(message)
+                .setPositiveButton("Начать прошивку", (dialog, which) -> {
+                    pendingFirmwareUri = null;
+                    pendingFirmwareLabel = "";
+                    firmwareUpdater.flashFile(uri, label);
+                    refresh();
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private long firmwareFileSize(Uri uri) {
+        if (uri == null) return -1L;
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.SIZE);
+                if (index >= 0 && !cursor.isNull(index)) return cursor.getLong(index);
+            }
+        } catch (Exception ignored) {
+        }
+        return -1L;
+    }
+
+    private static String formatFileSize(long value) {
+        if (value < 0L) return "не определён";
+        if (value < 1024L) return value + " Б";
+        return String.format(Locale.US, "%.1f КБ", value / 1024f);
     }
 
     private LinearLayout generalAppPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
-        addSettingsPanelHeader(panel, "Приложение",
-                "фоновые режимы без отдельного блока состояния", COLOR_ACCENT_BLUE);
+        addSettingsPanelHeader(panel, "Интерфейс и запуск",
+                "обычный режим скрывает сервисные и отладочные параметры", COLOR_ACCENT_BLUE);
 
         autoStartToggle = addInlineSwitch(panel, "Автозапуск", "старт сервиса после загрузки",
                 AppSettings.autoStart(this), this::toggleAutoStart);
+        panel.addView(settingsDivider());
+        addInlineSwitch(panel, "Экспертные настройки",
+                "прошивка адаптера, raw-диагностика, SAS и точные задержки",
+                AppSettings.expertMode(this), (button, checked) -> {
+                    AppSettings.setExpertMode(this, checked);
+                    AppLog.line(this, "Expert settings: " + checked);
+                    renderTab();
+                    refresh();
+                });
         return panel;
     }
 
@@ -4697,10 +5381,18 @@ public final class MainActivity extends Activity {
 
         View[] items = new View[]{
                 permissionTile("Уведомления", notificationPermissionGranted(), "фоновые события"),
-                permissionTile("Медиа", mediaAudioPermissionGranted() && notificationListenerEnabled(), "трек и артист"),
-                permissionTile("Bluetooth", bluetoothPermissionGranted(), "BT звонок"),
-                permissionTile("GPS", gpsPermissionReady(), "навигация в фоне"),
-                permissionTile("Батарея", batteryOptimizationIgnored(), "не выгружать"),
+                permissionTile("Медиа",
+                        !mediaListenerRequired() || notificationListenerEnabled(),
+                        mediaListenerRequired() ? "трек и артист" : "не требуется профилю"),
+                permissionTile("Bluetooth",
+                        !bluetoothRequired() || bluetoothPermissionGranted(),
+                        bluetoothRequired() ? "BT звонок" : "не требуется"),
+                permissionTile("GPS",
+                        !gpsRequired() || gpsPermissionReady(),
+                        gpsRequired() ? "навигация в фоне" : "не требуется"),
+                permissionTile("Батарея",
+                        !AppSettings.autoStart(this) || batteryOptimizationIgnored(),
+                        AppSettings.autoStart(this) ? "не выгружать" : "автозапуск выключен"),
                 permissionTile("Поверх окон", overlayPermissionReady(),
                         overlayPermissionHint())
         };
@@ -4786,6 +5478,8 @@ public final class MainActivity extends Activity {
         box.setMinimumHeight(isCompact() ? dp(74) : dp(94));
         box.setClickable(true);
         box.setFocusable(true);
+        box.setContentDescription(title + (hint == null || hint.isEmpty() ? "" : ". " + hint)
+                + (selected ? ". Выбрано" : ""));
         box.setBackground(settingsActionBackground(selected, color));
         View.OnClickListener click = v -> {
             rememberScrollPosition();
@@ -4818,7 +5512,7 @@ public final class MainActivity extends Activity {
 
     private View navSettingsAction(View view, boolean enabled) {
         view.setEnabled(enabled);
-        view.setAlpha(enabled ? 1f : 0.45f);
+        view.setAlpha(enabled ? 1f : 0.72f);
         if (!enabled) {
             view.setClickable(false);
             view.setFocusable(false);
@@ -4836,6 +5530,8 @@ public final class MainActivity extends Activity {
         box.setMinimumHeight(isCompact() ? dp(74) : dp(94));
         box.setClickable(true);
         box.setFocusable(true);
+        box.setContentDescription(title + (hint == null || hint.isEmpty() ? "" : ". " + hint)
+                + (selected ? ". Выбрано" : ""));
         box.setBackground(settingsActionBackground(selected, COLOR_ACCENT_BLUE));
         View.OnClickListener click = v -> {
             rememberScrollPosition();
@@ -4915,6 +5611,9 @@ public final class MainActivity extends Activity {
         panel.addView(texts, textsLp);
 
         CompoundButton toggle = checkBox("", checked);
+        toggle.setId(View.generateViewId());
+        toggle.setContentDescription(title);
+        name.setLabelFor(toggle.getId());
         toggle.setOnCheckedChangeListener(listener);
         panel.addView(toggle, switchLayout(false));
         root.addView(panel);
@@ -5138,8 +5837,10 @@ public final class MainActivity extends Activity {
             rememberScrollPosition();
             action.run();
         });
-        button.setMinWidth(isCompact() ? dp(42) : dp(46));
-        button.setMinHeight(isCompact() ? dp(42) : dp(46));
+        button.setMinWidth(dp(52));
+        button.setMinHeight(dp(52));
+        button.setContentDescription("-".equals(value)
+                ? "Уменьшить значение" : "Увеличить значение");
         return button;
     }
 
@@ -5445,7 +6146,7 @@ public final class MainActivity extends Activity {
     private void applyRootPadding() {
         if (rootLayout == null) return;
         if (!settingsMode && selectedTab == TAB_TPMS) {
-            rootLayout.setPadding(0, 0, 0, 0);
+            rootLayout.setPadding(0, rootInsetTop, 0, rootInsetBottom);
             return;
         }
         if (settingsMode) {
@@ -5465,7 +6166,7 @@ public final class MainActivity extends Activity {
     }
 
     private boolean tpmsWidgetLocksSettings() {
-        return screenWidthDp() < 560 && !isLandscapeWindow();
+        return false;
     }
 
     private void normalizeModeForWindow() {
@@ -5534,7 +6235,7 @@ public final class MainActivity extends Activity {
                 softColor(Color.WHITE, 42), dp(1), dp(8));
     }
 
-    private GradientDrawable glassButton(int tint) {
+    private Drawable glassButton(int tint) {
         if (settingsMode) return settingsButtonBackground(tint == COLOR_ACCENT);
         return gradient(softColor(tint, 64), softColor(COLOR_PANEL_SOFT, 132),
                 softColor(Color.WHITE, 36), dp(1), dp(8));
@@ -5546,7 +6247,7 @@ public final class MainActivity extends Activity {
 
     private GradientDrawable settingsPanelBackground(int tint) {
         return gradient(COLOR_SETTINGS_PANEL, Color.rgb(20, 28, 38),
-                Color.TRANSPARENT, 0, dp(12));
+                softColor(settingsAccent(tint), 72), dp(1), dp(12));
     }
 
     private GradientDrawable settingsInsetBackground() {
@@ -5555,22 +6256,26 @@ public final class MainActivity extends Activity {
 
     private GradientDrawable settingsInsetBackground(int tint) {
         return gradient(COLOR_SETTINGS_PANEL_ALT, Color.rgb(23, 29, 38),
-                Color.TRANSPARENT, 0, dp(10));
+                softColor(settingsAccent(tint), 52), dp(1), dp(10));
     }
 
-    private GradientDrawable settingsButtonBackground(boolean selected) {
+    private Drawable settingsButtonBackground(boolean selected) {
         return settingsActionBackground(selected, COLOR_ACCENT_BLUE);
     }
 
-    private GradientDrawable settingsActionBackground(boolean selected, int tint) {
+    private Drawable settingsActionBackground(boolean selected, int tint) {
         int accent = settingsAccent(tint);
         int start = selected ? softColor(accent, 66) : COLOR_SETTINGS_PANEL_ALT;
         int end = selected ? Color.rgb(22, 31, 48) : Color.rgb(21, 27, 36);
-        return gradient(start, end, Color.TRANSPARENT, 0, dp(10));
+        GradientDrawable content = gradient(start, end,
+                selected ? softColor(accent, 78) : Color.TRANSPARENT,
+                selected ? dp(1) : 0, dp(10));
+        return new RippleDrawable(ColorStateList.valueOf(softColor(accent, 88)),
+                content, null);
     }
 
     private int settingsAccent(int tint) {
-        return COLOR_ACCENT_BLUE;
+        return tint == Color.TRANSPARENT ? COLOR_ACCENT_BLUE : tint;
     }
 
     private int softColor(int color, int alpha) {
@@ -5743,6 +6448,13 @@ public final class MainActivity extends Activity {
         private void drawOverlay(Canvas canvas, float left, float top, float right, float bottom) {
             fill(canvas, 0xff442832, left, top, right, bottom, dp(8));
             fill(canvas, 0xff7d3b48, left, top, left + dp(10), bottom, dp(8));
+            if (right - left < dp(620)) {
+                label(canvas, "красная плашка · звук до ×", left + dp(14), top + dp(24),
+                        dp(11), Color.rgb(238, 232, 235), true);
+                center(canvas, "×", right - dp(22), top + (bottom - top) / 2f, dp(22),
+                        Color.rgb(238, 232, 235), true);
+                return;
+            }
             label(canvas, "красная плашка поверх экрана", left + dp(14), top + dp(24),
                     dp(12), Color.rgb(238, 232, 235), true);
             center(canvas, "×", right - dp(22), top + (bottom - top) / 2f, dp(22),
@@ -6189,15 +6901,13 @@ public final class MainActivity extends Activity {
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.POST_NOTIFICATIONS);
         }
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        if (gpsRequired()
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.ACCESS_FINE_LOCATION);
             missing.add(Manifest.permission.ACCESS_COARSE_LOCATION);
         }
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            missing.add(Manifest.permission.READ_MEDIA_AUDIO);
-        }
-        if (Build.VERSION.SDK_INT >= 31
+        if (bluetoothRequired() && Build.VERSION.SDK_INT >= 31
                 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.BLUETOOTH_CONNECT);
         }
@@ -6212,9 +6922,10 @@ public final class MainActivity extends Activity {
     }
 
     private boolean requestBackgroundLocationPermission() {
-        if (Build.VERSION.SDK_INT < 29) return false;
+        if (!gpsRequired() || Build.VERSION.SDK_INT < 29) return false;
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return false;
         if (checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED) return false;
+        if (Build.VERSION.SDK_INT >= 30) return false;
         requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION}, 11);
         return true;
     }
@@ -6235,27 +6946,34 @@ public final class MainActivity extends Activity {
     }
 
     private Intent nextSpecialPermissionIntent() {
-        if (Build.VERSION.SDK_INT >= 23 && !Settings.System.canWrite(this) && !askedWriteSettings) {
-            askedWriteSettings = true;
-            Intent intent = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS);
-            intent.setData(Uri.parse("package:" + getPackageName()));
-            return intent;
-        }
-        if ((AppSettings.navOverlayEnabled(this) || AppSettings.mediaOverlayEnabled(this))
+        if (overlayRequired()
                 && Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this) && !askedOverlay) {
             askedOverlay = true;
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
             intent.setData(Uri.parse("package:" + getPackageName()));
             return intent;
         }
-        if (!batteryOptimizationIgnored() && !askedBatteryOptimization) {
+        if (gpsRequired() && Build.VERSION.SDK_INT >= 30
+                && !backgroundLocationPermissionGranted()
+                && !askedBackgroundLocationSettings) {
+            askedBackgroundLocationSettings = true;
+            Toast.makeText(this,
+                    "В разрешении «Местоположение» выберите «Разрешать всегда»",
+                    Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            return intent;
+        }
+        if (AppSettings.autoStart(this)
+                && !batteryOptimizationIgnored() && !askedBatteryOptimization) {
             askedBatteryOptimization = true;
             Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
             intent.setData(Uri.parse("package:" + getPackageName()));
             AppSettings.setBatteryOptimizationRequested(this, true);
             return intent;
         }
-        if (!notificationListenerEnabled() && !askedNotificationListener) {
+        if (mediaListenerRequired()
+                && !notificationListenerEnabled() && !askedNotificationListener) {
             askedNotificationListener = true;
             return new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
         }

@@ -3,12 +3,12 @@
 Android source for `kia.app`.
 
 - `applicationId`: `kia.app`
-- `versionName`: `23.04`
-- `versionCode`: `358`
-- release APK name: `kia_358.apk`
+- `versionName`: `23.05`
+- `versionCode`: `359`
+- release APK name: `kia_359.apk`
 - min SDK: `29`
-- target SDK: `35`
-- compile SDK: `35`
+- target SDK: `36`
+- compile SDK: `36`
 
 ## Runtime flow
 

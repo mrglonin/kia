@@ -3,6 +3,8 @@ package kia.app.media.domain;
 import android.content.Context;
 import android.text.TextUtils;
 
+import java.util.Locale;
+
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.model.MediaState;
@@ -177,7 +179,7 @@ public final class MediaFeature {
 
     private String labelFromPackage(String packageName) {
         if (TextUtils.isEmpty(packageName)) return "Music";
-        String p = packageName.toLowerCase();
+        String p = packageName.toLowerCase(Locale.ROOT);
         if (p.contains("yandex")) return "Яндекс Музыка";
         if (p.contains("bluetooth") || p.contains("btmusic")) return "Bluetooth";
         if (p.contains("radio")) return "FM радио";
@@ -186,7 +188,7 @@ public final class MediaFeature {
     }
 
     private static boolean isRadioSource(String source, String packageName) {
-        String text = clean(source + " " + packageName).toLowerCase();
+        String text = clean(source + " " + packageName).toLowerCase(Locale.ROOT);
         return text.contains("fm") || text.contains("am") || text.contains("radio")
                 || text.contains("радио") || text.contains("com.spd.radio");
     }
