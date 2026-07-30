@@ -33,6 +33,10 @@ public final class TpmsDashboardView extends View {
     private float motionSpeedKmh;
     private float compactSpeedBadgeOffset = Float.NaN;
     private boolean widgetMode;
+    private final Runnable freshnessRefresh = () -> {
+        updateAccessibilitySummary();
+        invalidate();
+    };
 
     public TpmsDashboardView(Context context) {
         super(context);
@@ -41,6 +45,8 @@ public final class TpmsDashboardView extends View {
 
     public void setState(TpmsState value) {
         state = value == null ? TpmsState.empty() : value;
+        updateAccessibilitySummary();
+        scheduleFreshnessRefresh();
         invalidate();
     }
 
@@ -78,6 +84,7 @@ public final class TpmsDashboardView extends View {
         if ((widgetMode && portrait) || portrait || compactWindow) {
             drawDarkBackground(canvas);
             drawCompactDashboard(canvas, width, height);
+            scheduleFreshnessRefresh();
             if (moving()) postInvalidateOnAnimation();
             else if (hasAlert()) postInvalidateDelayed(360L);
             return;
@@ -90,8 +97,37 @@ public final class TpmsDashboardView extends View {
         drawRoad(canvas, ox, oy, scale);
         drawCar(canvas, ox, oy, scale);
         drawTires(canvas, ox, oy, scale);
+        // Wide dashboards used to omit navigation completely. Keep the hint
+        // inside the center lane so it never covers the tire cards.
+        drawNavigationHints(canvas,
+                ox + 408f * scale, ox + 872f * scale,
+                oy + 18f * scale);
+        scheduleFreshnessRefresh();
         if (moving()) postInvalidateOnAnimation();
         else if (hasAlert()) postInvalidateDelayed(360L);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        removeCallbacks(freshnessRefresh);
+        super.onDetachedFromWindow();
+    }
+
+    private void scheduleFreshnessRefresh() {
+        removeCallbacks(freshnessRefresh);
+        if (state == null || state.known == null || state.wheelUpdatedAt == null) return;
+        long now = System.currentTimeMillis();
+        long nextDelay = Long.MAX_VALUE;
+        for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
+            if (!known(wheel) || !state.isWheelFresh(wheel, now)) continue;
+            long expiresAt = state.wheelUpdatedAt[wheel] + TpmsState.WHEEL_STALE_AFTER_MS + 1L;
+            nextDelay = Math.min(nextDelay, Math.max(1L, expiresAt - now));
+        }
+        if (nextDelay != Long.MAX_VALUE) postDelayed(freshnessRefresh, nextDelay);
+    }
+
+    private void updateAccessibilitySummary() {
+        setContentDescription(state == null ? "TPMS: нет данных" : state.summary());
     }
 
     private void drawDarkBackground(Canvas canvas) {
@@ -122,9 +158,10 @@ public final class TpmsDashboardView extends View {
 
     private void drawTire(Canvas canvas, int wheel, String title, float x, float y, float w, float h, float scale) {
         boolean known = known(wheel);
+        boolean fresh = fresh(wheel);
         int warning = warning(wheel);
         int severity = severity(wheel);
-        boolean alert = known && severity != TpmsAlertController.SEVERITY_NONE;
+        boolean alert = fresh && severity != TpmsAlertController.SEVERITY_NONE;
         int alertColor = severityColor(severity);
         drawTireCardBackground(canvas, x, y, w, h, scale, severity);
         float leftPad = 30f * scale;
@@ -138,25 +175,27 @@ public final class TpmsDashboardView extends View {
         paint.setTextAlign(Paint.Align.LEFT);
         drawTextCenterY(canvas, title, x + leftPad, y + 31f * scale, paint);
 
-        drawStatusChip(canvas, known, warning, severity, x + w - 80f * scale, y + 31f * scale, scale);
+        drawStatusChip(canvas, known, fresh, warning, severity,
+                x + w - 80f * scale, y + 31f * scale, scale);
 
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         paint.setTextSize(58f * scale);
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setColor(0xfff4f1ea);
-        setTextShadow(scale);
+        paint.setColor(fresh ? 0xfff4f1ea : 0xff747d89);
+        if (fresh) setTextShadow(scale);
+        else paint.clearShadowLayer();
         drawTextBottom(canvas, known ? pressureText(wheel) : "__", x + leftPad, y + h - 42f * scale, paint);
 
         paint.clearShadowLayer();
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         paint.setTextSize(21f * scale);
-        paint.setColor(0xfff4f1ea);
+        paint.setColor(fresh ? 0xfff4f1ea : 0xff747d89);
         drawTextBottom(canvas, "Bar", x + leftPad + 5f * scale, y + h - 18f * scale, paint);
 
         paint.setTextAlign(Paint.Align.RIGHT);
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         paint.setTextSize(32f * scale);
-        paint.setColor(alert ? alertColor : 0xfff4f1ea);
+        paint.setColor(alert ? alertColor : (fresh ? 0xfff4f1ea : 0xff747d89));
         drawTextBottom(canvas, (known ? tempText(wheel) : "__") + "°C", x + w - rightPad, y + h - 74f * scale, paint);
 
         paint.clearShadowLayer();
@@ -170,7 +209,7 @@ public final class TpmsDashboardView extends View {
     private void drawCompactDashboard(Canvas canvas, int width, int height) {
         if (height <= 560 && width <= 900) {
             drawCompactGridOnly(canvas, width, height);
-        } else if (height < 500) {
+        } else if (width > height && height <= 680) {
             drawCompactWideDashboard(canvas, width, height);
         } else {
             drawCompactPortraitDashboard(canvas, width, height);
@@ -231,7 +270,8 @@ public final class TpmsDashboardView extends View {
         float roadTop = pad * 0.5f;
         float roadBottom = height - pad * 0.4f;
         drawCompactRoad(canvas, carCx, roadTop, roadBottom, width * 0.10f, width * 0.25f);
-        drawCompactNavigationHints(canvas, width, pad);
+        drawNavigationHints(canvas,
+                pad + cardW + gap, width - pad - cardW - gap, pad);
         drawFitAspect(canvas, carTopViewRes(), carCx, carCy,
                 Math.max(120f, width - cardW * 2f - pad * 5f), height * 0.96f);
         if (hasAlert()) {
@@ -256,9 +296,10 @@ public final class TpmsDashboardView extends View {
 
     private void drawCompactTireCard(Canvas canvas, int wheel, float x, float y, float w, float h) {
         boolean known = known(wheel);
+        boolean fresh = fresh(wheel);
         int warning = warning(wheel);
         int severity = severity(wheel);
-        boolean alert = known && severity != TpmsAlertController.SEVERITY_NONE;
+        boolean alert = fresh && severity != TpmsAlertController.SEVERITY_NONE;
         boolean tinyWidget = tinyWidgetMode();
         boolean narrowTall = narrowTallWidgetMode();
         float scale = clamp(Math.min(w / 300f, h / 170f), 0.64f, 1.12f);
@@ -282,16 +323,18 @@ public final class TpmsDashboardView extends View {
         if (tinyWidget && wheel == TpmsState.WHEEL_FR) {
             chipRight -= clamp(w * 0.12f, 42f, 54f);
         }
-        drawCompactStatusChip(canvas, known, warning, severity, chipRight, y + padY, scale);
+        drawCompactStatusChip(canvas, known, fresh, warning, severity,
+                chipRight, y + padY, scale);
 
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setColor(0xfff4f1ea);
+        paint.setColor(fresh ? 0xfff4f1ea : 0xff747d89);
         paint.setTextSize(tinyWidget
                 ? clamp(Math.min(w * 0.28f, h * 0.46f), 56f, 76f)
                 : (narrowTall ? clamp(Math.min(w * 0.20f, h * 0.32f), 38f, 48f)
                 : clamp(Math.min(w * 0.22f, h * 0.34f), 34f, 56f)));
-        setTextShadow(scale);
+        if (fresh) setTextShadow(scale);
+        else paint.clearShadowLayer();
         drawTextBottom(canvas, known ? pressureText(wheel) : "__",
                 x + padX, y + h - (tinyWidget ? clamp(h * 0.24f, 42f, 56f)
                         : clamp(h * 0.23f, 30f, 42f)), paint);
@@ -305,7 +348,7 @@ public final class TpmsDashboardView extends View {
 
         paint.setTextAlign(Paint.Align.RIGHT);
         paint.setTypeface(Typeface.DEFAULT_BOLD);
-        paint.setColor(alert ? severityColor(severity) : 0xfff4f1ea);
+        paint.setColor(alert ? severityColor(severity) : (fresh ? 0xfff4f1ea : 0xff747d89));
         paint.setTextSize(tinyWidget ? clamp(h * 0.39f, 55f, 75f)
                 : (narrowTall ? clamp(h * 0.265f, 35f, 44f) : clamp(h * 0.247f, 32f, 46f)));
         drawTextBottom(canvas, (known ? tempText(wheel) : "__") + "°C",
@@ -324,10 +367,11 @@ public final class TpmsDashboardView extends View {
                         : clamp(h * 0.10f, 14f, 19f))), paint);
     }
 
-    private void drawCompactStatusChip(Canvas canvas, boolean known, int warning, int severity,
+    private void drawCompactStatusChip(Canvas canvas, boolean known, boolean fresh,
+                                       int warning, int severity,
                                        float right, float cy, float scale) {
-        String text = !known ? "ОЖИД." : compactWarningText(warning);
-        boolean alert = severity != TpmsAlertController.SEVERITY_NONE;
+        String text = !known ? "ОЖИД." : (!fresh ? "УСТАР." : compactWarningText(warning));
+        boolean alert = fresh && severity != TpmsAlertController.SEVERITY_NONE;
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         boolean tinyWidget = tinyWidgetMode();
         boolean narrowTall = narrowTallWidgetMode();
@@ -339,7 +383,8 @@ public final class TpmsDashboardView extends View {
         float chipHalfH = tinyWidget ? 22f * scale : (narrowTall ? 18f : 17f * scale);
         dst.set(right - chipW, cy - chipHalfH, right, cy + chipHalfH);
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(alert ? severityColor(severity) : (known ? 0xff27313a : 0xff22272f));
+        paint.setColor(alert ? severityColor(severity)
+                : (fresh ? 0xff27313a : (known ? 0xff31343a : 0xff22272f)));
         canvas.drawRoundRect(dst, 7f * scale, 7f * scale, paint);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setColor(alert && severity == TpmsAlertController.SEVERITY_WARNING
@@ -402,20 +447,27 @@ public final class TpmsDashboardView extends View {
     }
 
     private void drawCompactNavigationHints(Canvas canvas, int width, float pad) {
+        drawNavigationHints(canvas, 0f, width, pad);
+    }
+
+    private void drawNavigationHints(Canvas canvas, float leftBound, float rightBound, float pad) {
         int limit = speedLimitKmh();
         int speed = currentSpeedKmh();
-        boolean hasLimit = limit > 0;
-        boolean hasSpeed = speed >= 0;
+        DashboardSpeedVisibilityPolicy.Decision speedVisibility =
+                DashboardSpeedVisibilityPolicy.resolve(moving(), speed, limit);
+        boolean hasLimit = speedVisibility.showSpeedLimit;
+        boolean hasSpeed = speedVisibility.showCurrentSpeed;
         boolean hasRoute = hasRouteHint();
         if (!hasLimit && !hasSpeed && !hasRoute) return;
 
+        float availableWidth = Math.max(0f, rightBound - leftBound);
         boolean narrowTall = narrowTallWidgetMode();
         float badgeRadius = narrowTall
-                ? clamp(width * 0.085f, 42f, 54f)
-                : width < 560
-                ? clamp(width * 0.105f, 46f, 62f)
-                : clamp(width * 0.115f, 64f, 88f);
-        float cx = pad + badgeRadius + 2f;
+                ? clamp(availableWidth * 0.085f, 42f, 54f)
+                : availableWidth < 560
+                ? clamp(availableWidth * 0.105f, 46f, 62f)
+                : clamp(availableWidth * 0.115f, 64f, 88f);
+        float cx = leftBound + pad + badgeRadius + 2f;
         float cy = pad + badgeRadius + (narrowTall ? 7f : 2f);
         float limitRadius = badgeRadius * 0.7225f;
         if (hasSpeed) {
@@ -435,7 +487,8 @@ public final class TpmsDashboardView extends View {
         }
         if (hasRoute) {
             float left = (hasLimit || hasSpeed) ? cx + badgeRadius + pad * (narrowTall ? 0.82f : 1.05f) : pad;
-            float right = width - pad - (narrowTall ? 46f : 0f);
+            if (!hasLimit && !hasSpeed) left += leftBound;
+            float right = rightBound - pad - (narrowTall ? 46f : 0f);
             if (right - left > 130f) {
                 float halfH = badgeRadius * (narrowTall ? 0.88f : 0.92f);
                 drawRouteHint(canvas, left, cy - halfH, right, cy + halfH);
@@ -507,9 +560,9 @@ public final class TpmsDashboardView extends View {
     }
 
     private void drawRouteHint(Canvas canvas, float left, float top, float right, float bottom) {
-        String distance = clean(navigation.maneuverDistance);
-        String text = !distance.isEmpty() ? distance : clean(navigation.routeDistance);
-        if (text.isEmpty()) text = clean(navigation.maneuverText);
+        DashboardNavigationSnapshot snapshot = navigationSnapshot();
+        String text = clean(snapshot.distance);
+        if (text.isEmpty()) text = clean(snapshot.presentation.fallbackLabel);
         if (text.length() > 16) text = text.substring(0, 16);
 
         paint.clearShadowLayer();
@@ -532,9 +585,12 @@ public final class TpmsDashboardView extends View {
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setColor(0xfff4f1ea);
-        paint.setTextSize(narrowTall ? clamp(boxH * 0.46f, 34f, 44f)
-                : clamp(boxH * 0.46f, 44f, 72f));
-        drawTextCenterY(canvas, maneuverGlyph(), iconCx, (top + bottom) / 2f, paint);
+        String glyph = maneuverGlyph();
+        setFittingTextSize(glyph, boxH * 0.48f,
+                narrowTall ? clamp(boxH * 0.46f, 34f, 44f)
+                        : clamp(boxH * 0.46f, 44f, 72f),
+                narrowTall ? 25f : 30f);
+        drawTextCenterY(canvas, glyph, iconCx, (top + bottom) / 2f, paint);
 
         paint.setTextAlign(Paint.Align.LEFT);
         paint.setTextSize(narrowTall ? clamp(boxH * 0.34f, 30f, 38f)
@@ -578,30 +634,33 @@ public final class TpmsDashboardView extends View {
 
     private boolean hasRouteHint() {
         if (navigation == null || !navigation.active || navigation.finishReached) return false;
-        boolean hasRoute = !clean(navigation.routeDistance).isEmpty()
-                || !clean(navigation.routeTime).isEmpty()
-                || !clean(navigation.arrivalTime).isEmpty();
-        boolean hasManeuver = !clean(navigation.maneuver).isEmpty()
-                || !clean(navigation.maneuverText).isEmpty()
-                || !clean(navigation.maneuverDistance).isEmpty();
-        return hasRoute && hasManeuver;
+        return !navigationSnapshot().maneuverId.isEmpty();
     }
 
     private String maneuverGlyph() {
-        String raw = clean(navigation == null ? "" : navigation.maneuver).toLowerCase(Locale.US);
-        if (raw.contains("left")) return "↰";
-        if (raw.contains("right")) return "↱";
-        if (raw.contains("finish")) return "✓";
-        if (raw.contains("round")) return "↻";
-        if (raw.contains("uturn") || raw.contains("u_turn")) return "⤴";
-        return "↑";
+        return navigationSnapshot().presentation.glyph;
     }
 
     private String maneuverLabel() {
+        DashboardNavigationSnapshot snapshot = navigationSnapshot();
+        DashboardManeuverPresentation presentation = snapshot.presentation;
+        if (snapshot.clusterBacked) {
+            String value = presentation.fallbackLabel;
+            return value.length() > 18 ? value.substring(0, 18) : value;
+        }
         String value = clean(navigation == null ? "" : navigation.maneuverText);
-        if (value.isEmpty()) value = "Манёвр";
+        if (presentation.roundaboutExit > 0
+                && (value.isEmpty() || !value.matches(".*\\d.*"))) {
+            value = presentation.fallbackLabel;
+        } else if (value.isEmpty()) {
+            value = presentation.fallbackLabel;
+        }
         if (value.length() > 18) value = value.substring(0, 18);
         return value;
+    }
+
+    private DashboardNavigationSnapshot navigationSnapshot() {
+        return DashboardNavigationSnapshot.resolve(navigation);
     }
 
     private void drawTireCardBackground(Canvas canvas, float x, float y, float w, float h, float scale, int severity) {
@@ -629,10 +688,11 @@ public final class TpmsDashboardView extends View {
         paint.setStyle(Paint.Style.FILL);
     }
 
-    private void drawStatusChip(Canvas canvas, boolean known, int warning, int severity,
+    private void drawStatusChip(Canvas canvas, boolean known, boolean fresh,
+                                int warning, int severity,
                                 float cx, float cy, float scale) {
-        String text = !known ? "ОЖИДАНИЕ" : warningText(warning);
-        boolean alert = severity != TpmsAlertController.SEVERITY_NONE;
+        String text = !known ? "ОЖИДАНИЕ" : (!fresh ? "ДАННЫЕ УСТАРЕЛИ" : warningText(warning));
+        boolean alert = fresh && severity != TpmsAlertController.SEVERITY_NONE;
         boolean critical = severity == TpmsAlertController.SEVERITY_CRITICAL;
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         paint.setTextSize(12f * scale);
@@ -641,7 +701,8 @@ public final class TpmsDashboardView extends View {
         float chipW = Math.max(92f * scale, tw + 22f * scale);
         dst.set(cx - chipW / 2f, cy - 12f * scale, cx + chipW / 2f, cy + 12f * scale);
         paint.setStyle(Paint.Style.FILL);
-        paint.setColor(alert ? severityColor(severity) : (known ? 0xff26303a : 0xff22272f));
+        paint.setColor(alert ? severityColor(severity)
+                : (fresh ? 0xff26303a : (known ? 0xff31343a : 0xff22272f)));
         canvas.drawRoundRect(dst, 8f * scale, 8f * scale, paint);
         paint.setColor(alert && !critical ? 0xff14110b : 0xfff4f1ea);
         paint.setTextAlign(Paint.Align.CENTER);
@@ -741,6 +802,10 @@ public final class TpmsDashboardView extends View {
     private boolean known(int wheel) {
         return state != null && state.known != null && wheel >= 0
                 && wheel < state.known.length && state.known[wheel];
+    }
+
+    private boolean fresh(int wheel) {
+        return state != null && state.isWheelFresh(wheel);
     }
 
     private int warning(int wheel) {

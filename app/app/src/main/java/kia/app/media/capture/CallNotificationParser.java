@@ -5,6 +5,8 @@ import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
 import android.text.TextUtils;
 
+import java.util.Locale;
+
 final class CallNotificationParser {
     private CallNotificationParser() {
     }
@@ -36,7 +38,7 @@ final class CallNotificationParser {
     }
 
     private static boolean looksLikeCallPackage(String packageName) {
-        String p = packageName.toLowerCase();
+        String p = packageName.toLowerCase(Locale.ROOT);
         return p.contains("phone")
                 || p.contains("dialer")
                 || p.contains("telecom")
@@ -54,7 +56,7 @@ final class CallNotificationParser {
 
     private static boolean usefulName(String value) {
         if (TextUtils.isEmpty(value)) return false;
-        String v = value.toLowerCase();
+        String v = value.toLowerCase(Locale.ROOT);
         return !v.contains("звон")
                 && !v.contains("call")
                 && !v.contains("bluetooth")
@@ -79,7 +81,7 @@ final class CallNotificationParser {
 
     private static boolean looksLikeMissedCall(String value) {
         if (TextUtils.isEmpty(value)) return false;
-        String v = value.toLowerCase();
+        String v = value.toLowerCase(Locale.ROOT);
         return v.contains("пропущ")
                 || v.contains("missed call")
                 || v.contains("missedcall");

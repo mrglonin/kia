@@ -10,9 +10,6 @@ import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
 
 public final class TpmsController {
-    private static final long BACKGROUND_POLL_MS = 120_000L;
-    private static final long WIDGET_POLL_MS = 30_000L;
-    private static final long FOREGROUND_POLL_MS = 5_000L;
     private static final long WARNING_POLL_MS = 5_000L;
     private static final long CRITICAL_POLL_MS = 1_000L;
     // Adapter 0x51 payload order is FR, FL, RR, RL.
@@ -28,13 +25,15 @@ public final class TpmsController {
     private final Context app;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean polling;
-    private boolean foregroundActive;
-    private boolean widgetForeground;
+    private TpmsPollingMode pollingMode = TpmsPollingMode.BACKGROUND;
 
     private final Runnable pollTick = new Runnable() {
         @Override
         public void run() {
             if (!polling) return;
+            // Re-evaluate age before every request so a warning cannot remain
+            // active only because no newer adapter frame has arrived.
+            TpmsAlertController.get(app).apply(StateStore.tpms());
             requestNow();
             scheduleNext();
         }
@@ -64,12 +63,27 @@ public final class TpmsController {
         setForegroundActive(active, false);
     }
 
+    /**
+     * Compatibility bridge for existing callers. New UI code should use
+     * {@link #setPollingMode(TpmsPollingMode)} so screen size cannot
+     * accidentally turn a full dashboard into a slow widget.
+     */
     public void setForegroundActive(boolean active, boolean widgetMode) {
-        boolean cleanWidget = active && widgetMode;
-        if (foregroundActive == active && widgetForeground == cleanWidget) return;
-        foregroundActive = active;
-        widgetForeground = cleanWidget;
+        setPollingMode(!active
+                ? TpmsPollingMode.BACKGROUND
+                : (widgetMode ? TpmsPollingMode.EMBEDDED_WIDGET
+                : TpmsPollingMode.FULL_DASHBOARD));
+    }
+
+    public void setPollingMode(TpmsPollingMode mode) {
+        TpmsPollingMode clean = mode == null ? TpmsPollingMode.BACKGROUND : mode;
+        if (pollingMode == clean) return;
+        pollingMode = clean;
         if (polling) scheduleImmediate();
+    }
+
+    public TpmsPollingMode pollingMode() {
+        return pollingMode;
     }
 
     public void requestNow() {
@@ -77,18 +91,19 @@ public final class TpmsController {
     }
 
     public void handleAdapterFrame(byte[] frame) {
-        TpmsState next = parseAdapterFrame(frame, StateStore.tpms());
+        long now = System.currentTimeMillis();
+        TpmsState next = parseAdapterFrame(frame, StateStore.tpms(), now);
         if (next == null) return;
         StateStore.setTpms(app, next);
         TpmsAlertController.get(app).apply(next);
         if (polling) scheduleNext();
     }
 
-    private TpmsState parseAdapterFrame(byte[] frame, TpmsState current) {
+    static TpmsState parseAdapterFrame(byte[] frame, TpmsState current, long observedAt) {
         int len = frame == null || frame.length < 6 ? 0 : Math.min(frame.length, frame[3] & 0xff);
         int id = u8(frame, 4);
         if (id == AdapterProtocol.CMD_TPMS && len >= 14) {
-            return parseNativeTpms(frame, len, current);
+            return parseNativeTpms(frame, len, current, observedAt);
         }
         if (id != AdapterProtocol.CMD_TPMS_LEGACY) return null;
         if (len < 23) return null;
@@ -102,25 +117,35 @@ public final class TpmsController {
             int pressureKpa = u16(frame, offset);
             int temperatureC = s8(frame, offset + 2);
             int flags = u8(frame, offset + 3);
-            next = next.withWheel(wheel, pressureKpa, temperatureC, flags, "adapter");
+            next = next.withWheelAt(wheel, pressureKpa, temperatureC, flags,
+                    "adapter", observedAt);
             changed = true;
         }
         return changed ? next : null;
     }
 
-    private TpmsState parseNativeTpms(byte[] frame, int len, TpmsState current) {
+    private static TpmsState parseNativeTpms(byte[] frame, int len, TpmsState current,
+                                             long observedAt) {
         if (len < 14) return null;
         TpmsState next = current == null ? TpmsState.empty() : current;
         boolean changed = false;
         for (int index = 0; index < TpmsState.WHEEL_COUNT; index++) {
             int wheel = NATIVE_TPMS_WHEEL_ORDER[index];
             int pressureRaw = u8(frame, 5 + index);
-            if (pressureRaw <= 0) continue;
+            if (pressureRaw <= 0) {
+                TpmsState stale = next.withWheelStale(wheel, "adapter 0x51", observedAt);
+                if (stale != next) {
+                    next = stale;
+                    changed = true;
+                }
+                continue;
+            }
             int tempRaw = u8(frame, 9 + index);
             float psi = pressureRaw * 0.25f;
             int pressureKpa = Math.round(psi * 6.894757f);
             int temperatureC = tempRaw - 55;
-            next = next.withWheel(wheel, pressureKpa, temperatureC, 0, "adapter 0x51");
+            next = next.withWheelAt(wheel, pressureKpa, temperatureC, 0,
+                    "adapter 0x51", observedAt);
             changed = true;
         }
         return changed ? next : null;
@@ -140,8 +165,7 @@ public final class TpmsController {
         int severity = maxSeverity(StateStore.tpms());
         if (severity == TpmsAlertController.SEVERITY_CRITICAL) return CRITICAL_POLL_MS;
         if (severity == TpmsAlertController.SEVERITY_WARNING) return WARNING_POLL_MS;
-        if (foregroundActive && widgetForeground) return WIDGET_POLL_MS;
-        return foregroundActive ? FOREGROUND_POLL_MS : BACKGROUND_POLL_MS;
+        return pollingMode.intervalMs();
     }
 
     private int maxSeverity(TpmsState state) {

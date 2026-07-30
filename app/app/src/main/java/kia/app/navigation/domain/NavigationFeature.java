@@ -8,6 +8,7 @@ import android.location.Location;
 import android.os.Handler;
 import android.os.Bundle;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -22,6 +23,9 @@ import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.model.NavigationState;
 import kia.app.navigation.cluster.NavigationClusterSender;
+import kia.app.navigation.capture.NavigationSourceArbitrator;
+import kia.app.navigation.capture.NavigationSourcePolicy;
+import kia.app.navigation.capture.TeyesIngressPolicy;
 import kia.app.navigation.capture.YandexCoreBridgeContract;
 import kia.app.core.settings.AppSettings;
 
@@ -96,12 +100,17 @@ public final class NavigationFeature {
     private static final long YANDEX_WATCHDOG_GPS_FRESH_MS = 15000L;
     private static final long YANDEX_WATCHDOG_NO_GPS_GRACE_MS = 300000L;
     private static final long YANDEX_WATCHDOG_RETRY_MS = 15000L;
+    private static final long AUTO_SOURCE_OWNER_FRESH_MS = 15000L;
 
     private static NavigationFeature instance;
 
     private final Context app;
     private final NavigationClusterSender sender;
     private final NavigationClusterTxController clusterTx;
+    private final NavigationSourceArbitrator sourceArbitrator =
+            new NavigationSourceArbitrator(AUTO_SOURCE_OWNER_FRESH_MS);
+    private boolean navigationEnabledSynced;
+    private boolean lastNavigationEnabled;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private NavigationState state = NavigationState.empty();
     private long lastDirectManeuverAt;
@@ -139,6 +148,8 @@ public final class NavigationFeature {
     private String lastTxMicroGuardKey = "";
     private String lastMicroTxHoldKey = "";
     private String lastMicroTxLogKey = "";
+    private String lastSourceGateLogKey = "";
+    private long lastSourceGateLogAt;
     private String pendingMicroRestoreSource = "";
     private String activeLaneHint = "";
     private String activeLaneSource = "";
@@ -280,11 +291,105 @@ public final class NavigationFeature {
         this.sender = new NavigationClusterSender(app);
         this.clusterTx = new NavigationClusterTxController(sender, this::applyClusterVisual);
         syncRouteStateFromStore();
+        syncNavigationEnabled(AppSettings.navigationEnabled(app));
     }
 
     public static synchronized NavigationFeature get(Context context) {
         if (instance == null) instance = new NavigationFeature(context);
         return instance;
+    }
+
+    /**
+     * Applies the global navigation switch to both capture ownership and the cluster state.
+     * Background clients call this while synchronizing their lifecycle, and ingress calls it
+     * defensively so a disabled feature cannot leave a previously active route on the cluster.
+     */
+    public synchronized void syncNavigationEnabled(boolean enabled) {
+        boolean changed = !navigationEnabledSynced || lastNavigationEnabled != enabled;
+        navigationEnabledSynced = true;
+        lastNavigationEnabled = enabled;
+        if (!enabled) {
+            if (changed || state.active || state.finishReached
+                    || state.speedExceeded || !TextUtils.isEmpty(state.speedLimit)
+                    || lastSentSpeedLimit > 0) {
+                forceInactive("navigation_disabled");
+            }
+            sourceArbitrator.reset();
+            if (changed) {
+                AppLog.navigation(app, "NAV_GLOBAL_GATE disabled; cluster state cleared");
+            }
+            return;
+        }
+        if (changed) {
+            seedSourceOwnerFromState();
+            AppLog.navigation(app, "NAV_GLOBAL_GATE enabled");
+        }
+    }
+
+    private void seedSourceOwnerFromState() {
+        int source = navigationSourceFamily(state == null ? "" : state.source);
+        if (state != null && state.active
+                && NavigationSourcePolicy.ingressAllowed(
+                AppSettings.navigationEnabled(app), AppSettings.navSourceMode(app), source)) {
+            sourceArbitrator.seed(source, SystemClock.elapsedRealtime());
+        } else {
+            sourceArbitrator.reset();
+        }
+    }
+
+    private boolean acceptNavigationSource(int source, int event, String reason) {
+        boolean navigationEnabled = AppSettings.navigationEnabled(app);
+        syncNavigationEnabled(navigationEnabled);
+        NavigationSourceArbitrator.Result result = sourceArbitrator.accept(
+                navigationEnabled,
+                AppSettings.navSourceMode(app),
+                source,
+                event,
+                SystemClock.elapsedRealtime());
+        if (!result.accepted) {
+            logSourceGate(source, result.decision, reason);
+            return false;
+        }
+        int stateSource = navigationSourceFamily(state == null ? "" : state.source);
+        boolean stateOwnedByOther = state != null && state.active
+                && stateSource != NavigationSourcePolicy.SOURCE_NONE
+                && stateSource != source;
+        if (event == NavigationSourcePolicy.EVENT_ROUTE_ACTIVE
+                && (result.switchedOwner || stateOwnedByOther)) {
+            AppLog.navigation(app, "NAV_SOURCE_HANDOFF "
+                    + NavigationSourcePolicy.sourceName(
+                    stateSource != NavigationSourcePolicy.SOURCE_NONE
+                            ? stateSource : result.previousOwner)
+                    + " -> " + NavigationSourcePolicy.sourceName(source)
+                    + " reason=" + clean(reason));
+            forceInactive("auto_source_handoff_" + NavigationSourcePolicy.sourceName(source));
+        }
+        return true;
+    }
+
+    private void logSourceGate(int source, int decision, String reason) {
+        String key = source + "|" + decision + "|" + clean(reason);
+        long now = SystemClock.elapsedRealtime();
+        if (key.equals(lastSourceGateLogKey) && now - lastSourceGateLogAt < 10000L) return;
+        lastSourceGateLogKey = key;
+        lastSourceGateLogAt = now;
+        AppLog.navigation(app, "NAV_SOURCE_IGNORED source="
+                + NavigationSourcePolicy.sourceName(source)
+                + " reason=" + NavigationSourcePolicy.decisionName(decision)
+                + " event=" + clean(reason)
+                + " owner=" + NavigationSourcePolicy.sourceName(sourceArbitrator.ownerSource()));
+    }
+
+    private static int navigationSourceFamily(String value) {
+        String source = clean(value).toLowerCase(Locale.US);
+        if (source.contains("2gis") || source.contains("dublgis")) {
+            return NavigationSourcePolicy.SOURCE_DGIS;
+        }
+        if (source.contains("yandex") || source.contains("teyes")
+                || source.contains(YandexCoreBridgeContract.SOURCE)) {
+            return NavigationSourcePolicy.SOURCE_YANDEX;
+        }
+        return NavigationSourcePolicy.SOURCE_NONE;
     }
 
     public synchronized boolean active() {
@@ -414,15 +519,16 @@ public final class NavigationFeature {
             AppLog.line(app, "Navigation ignored: non-Yandex source " + first(text(intent, "source"), action));
             return;
         }
-        if (!AppSettings.yandexNavigationEnabled(app)) {
-            AppLog.line(app, "Navigation ignored by source mode "
-                    + AppSettings.navSourceLabel(app) + ": yandex");
-            return;
-        }
         String source = first(text(intent, "source"), action);
         if (!YandexCoreBridgeContract.SOURCE.equals(clean(source))) {
             AppLog.line(app, "Navigation ignored legacy Yandex packet; Core Bridge required: "
                     + clean(source));
+            return;
+        }
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_YANDEX,
+                yandexIngressEvent(intent),
+                action)) {
             return;
         }
         rememberYandexRoutePose(intent, source);
@@ -470,6 +576,23 @@ public final class NavigationFeature {
         }
     }
 
+    private static int yandexIngressEvent(Intent intent) {
+        if (intent == null) return NavigationSourcePolicy.EVENT_PASSIVE;
+        String action = clean(intent.getAction());
+        if (ACTION_MANEUVER.equals(action) || KIA_ACTION_MANEUVER.equals(action)
+                || ACTION_ETA.equals(action) || KIA_ACTION_ETA.equals(action)) {
+            return NavigationSourcePolicy.EVENT_ROUTE_ACTIVE;
+        }
+        if (ACTION_NAVI_ON.equals(action) || KIA_ACTION_NAVI_ON.equals(action)) {
+            boolean active = bool(intent, "navi_on", false)
+                    || bool(intent, "active", false)
+                    || bool(intent, "is_active", false);
+            return active ? NavigationSourcePolicy.EVENT_ROUTE_ACTIVE
+                    : NavigationSourcePolicy.EVENT_PASSIVE;
+        }
+        return NavigationSourcePolicy.EVENT_PASSIVE;
+    }
+
     private boolean clearMicroForFullBridgeSnapshot(Intent intent, String source) {
         boolean hadMicro = !TextUtils.isEmpty(activeMicroManeuver)
                 || !TextUtils.isEmpty(activeMicroDistance)
@@ -492,16 +615,36 @@ public final class NavigationFeature {
     }
 
     public synchronized void handleTeyes(Intent intent) {
+        if (intent == null) return;
+        String stateText = text(intent, "state");
+        String direction = first(text(intent, "direction"), text(intent, "maneuver"), "forward");
+        String passiveText = passiveRoadEventText(intent, direction);
+        String fallbackManeuver = normalizeManeuver(
+                direction, intent.getIntExtra("direction_lr", 0));
+        boolean yandexRouteContext =
+                navigationSourceFamily(state.source) != NavigationSourcePolicy.SOURCE_DGIS;
+        boolean waitingForManeuver = state.loading()
+                || routeWaiting() || clusterVisualIsLoading();
+        int ingressEvent = TeyesIngressPolicy.event(
+                isOffState(stateText),
+                !TextUtils.isEmpty(passiveText),
+                state.active,
+                yandexRouteContext,
+                waitingForManeuver,
+                isUsableManeuver(fallbackManeuver));
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_YANDEX,
+                ingressEvent,
+                "teyes:" + clean(intent.getAction()))) {
+            return;
+        }
         String raw = rawExtras(intent);
         Log.i(TAG, intent.getAction() + " " + raw);
         AppLog.line(app, "Navigation raw: " + shortRaw(intent.getAction(), raw));
-        String stateText = text(intent, "state");
         if (isOffState(stateText)) {
             AppLog.line(app, "Navigation: ignored TEYES close state");
             return;
         }
-        String direction = first(text(intent, "direction"), text(intent, "maneuver"), "forward");
-        String passiveText = passiveRoadEventText(intent, direction);
         if (!TextUtils.isEmpty(passiveText)) {
             state = new NavigationState(state.active, state.finishReached, state.speedExceeded,
                     state.maneuver, state.maneuverText, state.maneuverDistance,
@@ -516,8 +659,8 @@ public final class NavigationFeature {
             if (!TextUtils.isEmpty(limit)) sendSpeed(limit);
             return;
         }
-        String fallbackManeuver = normalizeManeuver(direction, intent.getIntExtra("direction_lr", 0));
-        if (state.active && (state.loading() || routeWaiting() || clusterVisualIsLoading())
+        if (state.active && yandexRouteContext
+                && (state.loading() || routeWaiting() || clusterVisualIsLoading())
                 && isUsableManeuver(fallbackManeuver)) {
             long now = System.currentTimeMillis();
             waitingForRoute = false;
@@ -587,17 +730,18 @@ public final class NavigationFeature {
 
     public synchronized void handleDgisNotification(String imageId, String distance, String unit,
                                                     String street, String rawText) {
-        if (!AppSettings.dgisNavigationEnabled(app)) {
-            AppLog.line(app, "Navigation ignored by source mode "
-                    + AppSettings.navSourceLabel(app) + ": 2GIS notification");
-            return;
-        }
         String maneuver = normalizeManeuver(clean(imageId), 0);
         String normalizedDistance = distanceText(distance, unit);
         String normalizedStreet = normalizeStreetLabel(street);
         if (!isUsableManeuver(maneuver) && TextUtils.isEmpty(normalizedStreet)
                 && TextUtils.isEmpty(normalizedDistance)) {
             AppLog.line(app, "Navigation 2GIS ignored: " + clean(rawText));
+            return;
+        }
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_DGIS,
+                NavigationSourcePolicy.EVENT_ROUTE_ACTIVE,
+                "2gis_notification")) {
             return;
         }
         setActive(true, "2gis_notification");
@@ -656,11 +800,30 @@ public final class NavigationFeature {
     }
 
     public synchronized void handleDgisNotificationRemoved(String packageName) {
-        if (!AppSettings.dgisNavigationEnabled(app)) return;
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_DGIS,
+                NavigationSourcePolicy.EVENT_PASSIVE,
+                "2gis_notification_removed")) {
+            return;
+        }
         String source = clean(state.source).toLowerCase(Locale.US);
         if (!source.contains("2gis")) return;
         setActive(false, "2gis_notification_removed");
         AppLog.line(app, "Navigation 2GIS notification removed: " + clean(packageName));
+    }
+
+    public synchronized boolean touchDgisDashboardHeartbeat() {
+        int previousOwner = sourceArbitrator.ownerSource();
+        boolean replayNeeded = !state.active
+                || navigationSourceFamily(state.source) != NavigationSourcePolicy.SOURCE_DGIS
+                || previousOwner != NavigationSourcePolicy.SOURCE_DGIS;
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_DGIS,
+                NavigationSourcePolicy.EVENT_ROUTE_ACTIVE,
+                "2gis_dashboard_heartbeat")) {
+            return false;
+        }
+        return replayNeeded;
     }
 
     public synchronized void handleDgisDashboard(String activeMode, String maneuverIcon,
@@ -681,12 +844,6 @@ public final class NavigationFeature {
                                                  String speedLimit, boolean exceeded,
                                                  double destinationLat, double destinationLon,
                                                  String rawJson) {
-        if (!AppSettings.dgisNavigationEnabled(app)) {
-            AppLog.line(app, "Navigation ignored by source mode "
-                    + AppSettings.navSourceLabel(app) + ": 2GIS dashboard");
-            return;
-        }
-        rememberFinishPoint(destinationLat, destinationLon, "2gis_dashboard");
         String mode = clean(activeMode).toLowerCase(Locale.US);
         String routeDistance = dashboardDistance(totalDistance);
         String routeTime = clean(remainingTime);
@@ -699,6 +856,15 @@ public final class NavigationFeature {
                 || isUsableManeuver(maneuver);
         boolean routeMode = !TextUtils.isEmpty(mode) && !"unknown".equals(mode)
                 && !"freeroam".equals(mode);
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_DGIS,
+                routeMode || routeData
+                        ? NavigationSourcePolicy.EVENT_ROUTE_ACTIVE
+                        : NavigationSourcePolicy.EVENT_PASSIVE,
+                "2gis_dashboard:" + first(mode, "empty"))) {
+            return;
+        }
+        rememberFinishPoint(destinationLat, destinationLon, "2gis_dashboard");
         if (!TextUtils.isEmpty(speedLimit)) {
             if (exceeded) startOverspeedTextWindow();
             else clearOverspeedTextWindow();
@@ -782,9 +948,11 @@ public final class NavigationFeature {
                                             String destinationName, String destinationAddress,
                                             boolean navigationStarted, double destinationLat,
                                             double destinationLon, String rawJson) {
-        if (!AppSettings.dgisNavigationEnabled(app)) {
-            AppLog.line(app, "Navigation ignored by source mode "
-                    + AppSettings.navSourceLabel(app) + ": 2GIS car trip");
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_DGIS,
+                navigationStarted ? NavigationSourcePolicy.EVENT_ROUTE_ACTIVE
+                        : NavigationSourcePolicy.EVENT_PASSIVE,
+                navigationStarted ? "2gis_car_trip_active" : "2gis_car_trip_stop")) {
             return;
         }
         rememberFinishPoint(destinationLat, destinationLon, "2gis_car_trip");
@@ -832,7 +1000,12 @@ public final class NavigationFeature {
     }
 
     public synchronized void handleDgisStopped(String source) {
-        if (!AppSettings.dgisNavigationEnabled(app)) return;
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_DGIS,
+                NavigationSourcePolicy.EVENT_PASSIVE,
+                "2gis_stopped:" + clean(source))) {
+            return;
+        }
         if (!state.source.toLowerCase(Locale.US).contains("2gis") && !state.active) return;
         forceInactive(source);
     }
@@ -854,6 +1027,7 @@ public final class NavigationFeature {
                 AppLog.line(app, "Navigation finish hold ignores off: " + cleanSource);
                 return;
             }
+            sourceArbitrator.release(navigationSourceFamily(state.source));
             yandexWatchdogGeneration++;
             cancelFinishHold();
             routeLoadingFallbackGeneration++;
@@ -1320,7 +1494,17 @@ public final class NavigationFeature {
         }, Math.max(250L, delayMs));
     }
 
-    public synchronized void touchYandexCoreBridgeHeartbeat(boolean routeMetrics) {
+    public synchronized boolean touchYandexCoreBridgeHeartbeat(boolean routeMetrics) {
+        int previousOwner = sourceArbitrator.ownerSource();
+        boolean replayNeeded = !state.active
+                || navigationSourceFamily(state.source) != NavigationSourcePolicy.SOURCE_YANDEX
+                || previousOwner != NavigationSourcePolicy.SOURCE_YANDEX;
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_YANDEX,
+                NavigationSourcePolicy.EVENT_ROUTE_ACTIVE,
+                "core_bridge_heartbeat")) {
+            return false;
+        }
         long now = System.currentTimeMillis();
         touchYandexWatchdog(YandexCoreBridgeContract.SOURCE);
         if (routeMetrics) {
@@ -1328,10 +1512,17 @@ public final class NavigationFeature {
             lastRouteMetricsAt = now;
             cancelPendingInactive("core_bridge_heartbeat");
         }
+        return replayNeeded;
     }
 
     public synchronized void onYandexBackgroundGuidanceSuspended(String callback,
                                                                  boolean routePresent) {
+        if (!acceptNavigationSource(
+                NavigationSourcePolicy.SOURCE_YANDEX,
+                NavigationSourcePolicy.EVENT_PASSIVE,
+                "background_guidance_suspended")) {
+            return;
+        }
         if (!state.active || state.finishReached) return;
         cancelPendingInactive("background_guidance_suspended");
         touchYandexWatchdog(YandexCoreBridgeContract.SOURCE);
@@ -1346,6 +1537,7 @@ public final class NavigationFeature {
     }
 
     private void forceInactive(String source) {
+        sourceArbitrator.release(navigationSourceFamily(state.source));
         boolean clearRoadSpeedLimit = !TextUtils.isEmpty(state.speedLimit)
                 || lastSentSpeedLimit > 0;
         cancelPendingInactive("force " + clean(source));
@@ -5172,10 +5364,12 @@ public final class NavigationFeature {
         int selected = AppSettings.navSourceMode(app);
         String source = clean(state.source).toLowerCase(Locale.US);
         if (selected == AppSettings.NAV_SOURCE_YANDEX && source.contains("2gis")) {
-            setActive(false, "source_mode_yandex");
+            forceInactive("source_mode_yandex");
         } else if (selected == AppSettings.NAV_SOURCE_2GIS && isYandexSource(state.source)) {
-            setActive(false, "source_mode_2gis");
+            forceInactive("source_mode_2gis");
         }
+        sourceArbitrator.reset();
+        seedSourceOwnerFromState();
         AppLog.line(app, "Navigation source mode: " + AppSettings.navSourceLabel(app));
     }
 

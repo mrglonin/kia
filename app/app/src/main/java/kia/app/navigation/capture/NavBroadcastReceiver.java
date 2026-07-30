@@ -47,6 +47,11 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
             AppLog.navigation(context, "Yandex Core Bridge broadcast rejected: " + invalidReason);
             return;
         }
+        if (!sourceIngressAllowed(context, NavigationSourcePolicy.SOURCE_YANDEX)) {
+            AppLog.navigation(context,
+                    "Yandex Core Bridge broadcast ignored: navigation/source disabled");
+            return;
+        }
         keepCpuAwake(context);
         ensureServiceStarted(context);
         if (duplicate(intent)) return;
@@ -59,6 +64,11 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
         String action = intent.getAction();
         if (!knownLegacyAction(action)) {
             AppLog.navigation(context, "Navigation legacy broadcast rejected: action=" + action);
+            return;
+        }
+        if (!sourceIngressAllowed(context, NavigationSourcePolicy.SOURCE_YANDEX)) {
+            AppLog.navigation(context, "Navigation legacy broadcast ignored by source gate: action="
+                    + action);
             return;
         }
         keepCpuAwake(context);
@@ -205,5 +215,12 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
                     + " action=" + action);
         }
         return true;
+    }
+
+    private static boolean sourceIngressAllowed(Context context, int source) {
+        return context != null && NavigationSourcePolicy.ingressAllowed(
+                AppSettings.navigationEnabled(context),
+                AppSettings.navSourceMode(context),
+                source);
     }
 }

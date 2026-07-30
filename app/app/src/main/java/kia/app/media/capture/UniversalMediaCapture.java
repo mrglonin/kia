@@ -41,6 +41,7 @@ final class UniversalMediaCapture {
     }
 
     void stop() {
+        if (!running) return;
         running = false;
         handler.removeCallbacks(poll);
         radioMedia.stop();

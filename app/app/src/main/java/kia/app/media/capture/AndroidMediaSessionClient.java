@@ -10,9 +10,11 @@ import android.media.session.PlaybackState;
 import android.os.SystemClock;
 import android.text.TextUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import kia.app.core.AppLog;
+import kia.app.core.settings.AppSettings;
 
 final class AndroidMediaSessionClient {
     private static AndroidMediaSessionClient instance;
@@ -33,18 +35,19 @@ final class AndroidMediaSessionClient {
     }
 
     Snapshot readSnapshot() {
-        return readSnapshot(null, true, false);
+        return readSnapshot(null, true, false, false);
     }
 
     Snapshot readUniversalSnapshot() {
-        return readSnapshot(null, false, false);
+        return readSnapshot(null, false, false, true);
     }
 
     Snapshot readPackageSnapshot(String packageName) {
-        return readSnapshot(packageName, false, true);
+        return readSnapshot(packageName, false, true, false);
     }
 
-    private Snapshot readSnapshot(String packageName, boolean applyIgnore, boolean allowStopped) {
+    private Snapshot readSnapshot(String packageName, boolean applyIgnore, boolean allowStopped,
+                                  boolean applyUniversalSelection) {
         MediaSessionManager manager = (MediaSessionManager) app.getSystemService(Context.MEDIA_SESSION_SERVICE);
         if (manager == null) return null;
         List<MediaController> controllers;
@@ -60,18 +63,47 @@ final class AndroidMediaSessionClient {
         if (controllers == null || controllers.isEmpty()) return null;
 
         Snapshot fallback = null;
+        List<Snapshot> universalCandidates =
+                applyUniversalSelection ? new ArrayList<>() : null;
         for (MediaController controller : controllers) {
             if (!TextUtils.isEmpty(packageName) && !TextUtils.equals(packageName, controller.getPackageName())) continue;
             Snapshot snapshot = snapshot(controller, applyIgnore, allowStopped);
             if (snapshot == null) continue;
+            if (applyUniversalSelection) {
+                universalCandidates.add(snapshot);
+                continue;
+            }
             if (snapshot.isPlaying()) {
                 reportInfo(snapshot);
                 return snapshot;
             }
             if (fallback == null) fallback = snapshot;
         }
+        if (applyUniversalSelection) {
+            int selectedIndex = MediaSessionSelectionPolicy.selectIndex(
+                    selectionCandidates(universalCandidates),
+                    AppSettings.mediaPreferredSessionPackage(app),
+                    AppSettings.mediaBlockedSessionPackages(app));
+            Snapshot selected = selectedIndex >= 0 && selectedIndex < universalCandidates.size()
+                    ? universalCandidates.get(selectedIndex) : null;
+            reportInfo(selected);
+            return selected;
+        }
         reportInfo(fallback);
         return fallback;
+    }
+
+    private static List<MediaSessionSelectionPolicy.Candidate> selectionCandidates(
+            List<Snapshot> snapshots) {
+        List<MediaSessionSelectionPolicy.Candidate> candidates =
+                new ArrayList<>(snapshots == null ? 0 : snapshots.size());
+        if (snapshots == null) return candidates;
+        for (Snapshot snapshot : snapshots) {
+            candidates.add(new MediaSessionSelectionPolicy.Candidate(
+                    snapshot == null ? "" : snapshot.packageName,
+                    snapshot != null && snapshot.playing));
+        }
+        return candidates;
     }
 
     private Snapshot snapshot(MediaController controller) {

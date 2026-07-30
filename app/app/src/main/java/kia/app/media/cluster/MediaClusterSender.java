@@ -5,6 +5,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 
+import java.util.Locale;
+
 import kia.app.core.StateStore;
 import kia.app.core.settings.AppSettings;
 import kia.app.core.model.CallState;
@@ -352,7 +354,7 @@ public final class MediaClusterSender {
             case AdapterProtocol.CMD_CARPLAY_TEXT:
                 return "0x25 CarPlay";
             default:
-                return "0x" + Integer.toHexString(command).toUpperCase();
+                return "0x" + Integer.toHexString(command).toUpperCase(Locale.ROOT);
         }
     }
 
@@ -527,7 +529,7 @@ public final class MediaClusterSender {
     private static boolean isYandexMusic(MediaState state) {
         if (state == null) return false;
         String text = ((state.source == null ? "" : state.source) + " "
-                + (state.packageName == null ? "" : state.packageName)).toLowerCase();
+                + (state.packageName == null ? "" : state.packageName)).toLowerCase(Locale.ROOT);
         return text.contains("yandex") || text.contains("яндекс");
     }
 

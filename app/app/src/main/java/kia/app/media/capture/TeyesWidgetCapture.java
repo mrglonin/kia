@@ -70,6 +70,7 @@ final class TeyesWidgetCapture {
     }
 
     void stop() {
+        if (!running) return;
         running = false;
         handler.removeCallbacks(poll);
         spdMedia.stop();

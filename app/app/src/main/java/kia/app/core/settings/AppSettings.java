@@ -3,7 +3,12 @@ package kia.app.core.settings;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import kia.app.navigation.domain.NavigationOutputMode;
 
@@ -59,6 +64,10 @@ public final class AppSettings {
     private static final String KEY_MEDIA_UART_SOURCE_DELAY_MS = "media_uart_source_delay_ms";
     private static final String KEY_MEDIA_ARTIST_DELAY_MS = "media_artist_delay_ms";
     private static final String KEY_MEDIA_SOURCE_REASSERT = "media_source_reassert";
+    private static final String KEY_MEDIA_PREFERRED_SESSION_PACKAGE =
+            "media_preferred_session_package";
+    private static final String KEY_MEDIA_BLOCKED_SESSION_PACKAGES =
+            "media_blocked_session_packages";
     private static final String KEY_CALL_SOURCE_MODE = "call_source_mode";
     private static final String KEY_CANBUS_TEMP_SOURCE = "canbus_temp_source";
     private static final String KEY_FIRMWARE_SOURCE = "firmware_source";
@@ -66,6 +75,8 @@ public final class AppSettings {
     private static final String KEY_USB_PERMISSION_REQUEST_AT = "usb_permission_request_at";
     private static final String KEY_BATTERY_OPTIMIZATION_REQUESTED = "battery_optimization_requested";
     private static final String KEY_MEDIA_TAB_VISIBLE = "media_tab_visible";
+    private static final String KEY_EXPERT_MODE = "expert_mode";
+    private static final String KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at";
     public static final int OTHER_SOURCE_ANDROID = 0;
     public static final int OTHER_SOURCE_USB = 1;
     public static final int OTHER_SOURCE_BLUETOOTH = 2;
@@ -106,7 +117,7 @@ public final class AppSettings {
     public static final int RCTA_ARROW_COUNT_MIN = 3;
     public static final int RCTA_ARROW_COUNT_MAX = 6;
     public static final int RCTA_ARROW_COUNT_DEFAULT = RCTA_ARROW_COUNT_MIN;
-    private static final int SCHEMA = 49;
+    private static final int SCHEMA = 51;
     public static final int MEDIA_SOURCE_DELAY_MIN_MS = 0;
     public static final int MEDIA_SOURCE_DELAY_MAX_MS = 3000;
     public static final int MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS = 300;
@@ -186,9 +197,12 @@ public final class AppSettings {
                     .putInt(KEY_MEDIA_UART_SOURCE_DELAY_MS, MEDIA_UART_SOURCE_DELAY_DEFAULT_MS)
                     .putInt(KEY_MEDIA_ARTIST_DELAY_MS, MEDIA_ARTIST_DELAY_DEFAULT_MS)
                     .putBoolean(KEY_MEDIA_SOURCE_REASSERT, true)
+                    .putString(KEY_MEDIA_PREFERRED_SESSION_PACKAGE, "")
+                    .putStringSet(KEY_MEDIA_BLOCKED_SESSION_PACKAGES, Collections.emptySet())
                     .putInt(KEY_CALL_SOURCE_MODE, CALL_SOURCE_BLUETOOTH)
                     .putInt(KEY_CANBUS_TEMP_SOURCE, CANBUS_TEMP_OUTSIDE)
-                    .putInt(KEY_FIRMWARE_SOURCE, FIRMWARE_SOURCE_LATEST);
+                    .putInt(KEY_FIRMWARE_SOURCE, FIRMWARE_SOURCE_LATEST)
+                    .putBoolean(KEY_EXPERT_MODE, false);
         } else {
             if (schema < 2 || !prefs.contains(KEY_NAV_TEXT_MODE)) {
                 edit.putInt(KEY_NAV_TEXT_MODE, 4);
@@ -239,6 +253,12 @@ public final class AppSettings {
             }
             if (schema < 48 || !prefs.contains(KEY_MEDIA_SOURCE_REASSERT)) {
                 edit.putBoolean(KEY_MEDIA_SOURCE_REASSERT, true);
+            }
+            if (schema < 51 || !prefs.contains(KEY_MEDIA_PREFERRED_SESSION_PACKAGE)) {
+                edit.putString(KEY_MEDIA_PREFERRED_SESSION_PACKAGE, "");
+            }
+            if (schema < 51 || !prefs.contains(KEY_MEDIA_BLOCKED_SESSION_PACKAGES)) {
+                edit.putStringSet(KEY_MEDIA_BLOCKED_SESSION_PACKAGES, Collections.emptySet());
             }
             if (schema < 37 || !prefs.contains(KEY_MEDIA_PROFILE)) {
                 edit.putInt(KEY_MEDIA_PROFILE,
@@ -361,6 +381,9 @@ public final class AppSettings {
             if (schema < 49 || !prefs.contains(KEY_NAV_MAIN_REVEAL_DISTANCE_METERS)) {
                 edit.putInt(KEY_NAV_MAIN_REVEAL_DISTANCE_METERS,
                         DEFAULT_NAV_MAIN_REVEAL_DISTANCE_METERS);
+            }
+            if (schema < 50 || !prefs.contains(KEY_EXPERT_MODE)) {
+                edit.putBoolean(KEY_EXPERT_MODE, false);
             }
             if (schema < 20 || !prefs.contains(KEY_CALL)) {
                 edit.putBoolean(KEY_CALL, true);
@@ -905,6 +928,74 @@ public final class AppSettings {
         prefs(context).edit().putBoolean(KEY_MEDIA_SOURCE_REASSERT, value).apply();
     }
 
+    public static String mediaPreferredSessionPackage(Context context) {
+        return normalizeMediaSessionPackage(
+                prefs(context).getString(KEY_MEDIA_PREFERRED_SESSION_PACKAGE, ""));
+    }
+
+    public static void setMediaPreferredSessionPackage(Context context, String packageName) {
+        String clean = normalizeMediaSessionPackage(packageName);
+        Set<String> blocked = new LinkedHashSet<>(mediaBlockedSessionPackages(context));
+        blocked.remove(clean);
+        prefs(context).edit()
+                .putString(KEY_MEDIA_PREFERRED_SESSION_PACKAGE, clean)
+                .putStringSet(KEY_MEDIA_BLOCKED_SESSION_PACKAGES, blocked)
+                .apply();
+    }
+
+    public static void clearMediaPreferredSessionPackage(Context context) {
+        setMediaPreferredSessionPackage(context, "");
+    }
+
+    public static Set<String> mediaBlockedSessionPackages(Context context) {
+        Set<String> stored = prefs(context).getStringSet(
+                KEY_MEDIA_BLOCKED_SESSION_PACKAGES, Collections.emptySet());
+        TreeSet<String> sorted = new TreeSet<>();
+        if (stored != null) {
+            for (String packageName : stored) {
+                String clean = normalizeMediaSessionPackage(packageName);
+                if (!clean.isEmpty()) sorted.add(clean);
+            }
+        }
+        return Collections.unmodifiableSet(new LinkedHashSet<>(sorted));
+    }
+
+    public static boolean isMediaSessionPackageBlocked(Context context, String packageName) {
+        String clean = normalizeMediaSessionPackage(packageName);
+        return !clean.isEmpty() && mediaBlockedSessionPackages(context).contains(clean);
+    }
+
+    public static boolean setMediaSessionPackageBlocked(Context context, String packageName,
+                                                        boolean blocked) {
+        String clean = normalizeMediaSessionPackage(packageName);
+        if (clean.isEmpty()) return false;
+        Set<String> packages = new LinkedHashSet<>(mediaBlockedSessionPackages(context));
+        boolean changed = blocked ? packages.add(clean) : packages.remove(clean);
+        SharedPreferences.Editor edit = prefs(context).edit()
+                .putStringSet(KEY_MEDIA_BLOCKED_SESSION_PACKAGES, packages);
+        if (blocked && clean.equals(mediaPreferredSessionPackage(context))) {
+            edit.putString(KEY_MEDIA_PREFERRED_SESSION_PACKAGE, "");
+            changed = true;
+        }
+        edit.apply();
+        return changed;
+    }
+
+    public static String mediaPreferredSessionSummary(Context context) {
+        String packageName = mediaPreferredSessionPackage(context);
+        return packageName.isEmpty() ? "Автовыбор" : packageName;
+    }
+
+    public static String mediaBlockedSessionsSummary(Context context) {
+        Set<String> packages = mediaBlockedSessionPackages(context);
+        return packages.isEmpty() ? "Нет" : String.join(", ", packages);
+    }
+
+    public static String mediaSessionSelectionSummary(Context context) {
+        return "Приоритет: " + mediaPreferredSessionSummary(context)
+                + " · исключено: " + mediaBlockedSessionPackages(context).size();
+    }
+
     public static String mediaProfileLabel(Context context) {
         return mediaProfileLabel(mediaProfile(context));
     }
@@ -1035,6 +1126,22 @@ public final class AppSettings {
         prefs(context).edit().putBoolean(KEY_MEDIA_TAB_VISIBLE, value).apply();
     }
 
+    public static boolean expertMode(Context context) {
+        return prefs(context).getBoolean(KEY_EXPERT_MODE, false);
+    }
+
+    public static void setExpertMode(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_EXPERT_MODE, value).apply();
+    }
+
+    public static long lastUpdateCheckAt(Context context) {
+        return Math.max(0L, prefs(context).getLong(KEY_LAST_UPDATE_CHECK_AT, 0L));
+    }
+
+    public static void setLastUpdateCheckAt(Context context, long value) {
+        prefs(context).edit().putLong(KEY_LAST_UPDATE_CHECK_AT, Math.max(0L, value)).apply();
+    }
+
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
@@ -1063,6 +1170,20 @@ public final class AppSettings {
             return value;
         }
         return MEDIA_PROFILE_TEYES;
+    }
+
+    static String normalizeMediaSessionPackage(String value) {
+        if (value == null) return "";
+        String clean = value.trim().toLowerCase(Locale.US);
+        if (clean.isEmpty() || clean.length() > 200) return "";
+        for (int index = 0; index < clean.length(); index++) {
+            char c = clean.charAt(index);
+            boolean allowed = c >= 'a' && c <= 'z'
+                    || c >= '0' && c <= '9'
+                    || c == '.' || c == '_';
+            if (!allowed) return "";
+        }
+        return clean;
     }
 
     private static int normalizeRctaStyle(int value) {

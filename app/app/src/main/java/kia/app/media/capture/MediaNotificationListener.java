@@ -4,8 +4,10 @@ import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 
 import kia.app.core.AppLog;
+import kia.app.core.settings.AppSettings;
 import kia.app.media.domain.CallFeature;
 import kia.app.navigation.capture.DgisNotificationParser;
+import kia.app.navigation.capture.NavigationSourcePolicy;
 import kia.app.navigation.domain.NavigationFeature;
 
 public final class MediaNotificationListener extends NotificationListenerService {
@@ -30,7 +32,8 @@ public final class MediaNotificationListener extends NotificationListenerService
         if (sbn != null && CallNotificationParser.isCallLikePackage(sbn.getPackageName())) {
             CallFeature.get(this).reportEnded("notification removed " + sbn.getPackageName());
         }
-        if (sbn != null && DgisNotificationParser.isDgisPackage(sbn.getPackageName())) {
+        if (sbn != null && DgisNotificationParser.isDgisPackage(sbn.getPackageName())
+                && dgisIngressAllowed(this)) {
             if (!scanActiveDgis(this)) {
                 NavigationFeature.get(this).handleDgisNotificationRemoved(sbn.getPackageName());
             }
@@ -70,6 +73,7 @@ public final class MediaNotificationListener extends NotificationListenerService
 
     private static boolean handleNavigationNotification(MediaNotificationListener listener,
                                                         StatusBarNotification sbn) {
+        if (!dgisIngressAllowed(listener)) return false;
         DgisNotificationParser.Parsed parsed = DgisNotificationParser.parse(sbn);
         if (parsed == null) {
             logIgnoredDgis(listener, sbn);
@@ -79,6 +83,13 @@ public final class MediaNotificationListener extends NotificationListenerService
         NavigationFeature.get(listener).handleDgisNotification(parsed.maneuver, parsed.distance,
                 parsed.unit, parsed.street, parsed.raw);
         return true;
+    }
+
+    private static boolean dgisIngressAllowed(MediaNotificationListener listener) {
+        return listener != null && NavigationSourcePolicy.ingressAllowed(
+                AppSettings.navigationEnabled(listener),
+                AppSettings.navSourceMode(listener),
+                NavigationSourcePolicy.SOURCE_DGIS);
     }
 
     private static void logIgnoredDgis(MediaNotificationListener listener, StatusBarNotification sbn) {
