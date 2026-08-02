@@ -20,6 +20,7 @@ import kia.app.core.AppLog;
 import kia.app.core.settings.AppSettings;
 import kia.app.navigation.domain.ManeuverProgressRolloverPolicy;
 import kia.app.navigation.domain.NavigationFeature;
+import kia.app.navigation.domain.YandexSpeedSnapshotPolicy;
 
 public final class YandexCoreBridgeClient {
     private static final long ACTIVE_POLL_MS = 250L;
@@ -29,6 +30,7 @@ public final class YandexCoreBridgeClient {
     private static final long MAX_ACTIVE_FRESHNESS_MS = 2500L;
     private static final long MISSING_PROVIDER_LOG_MS = 30000L;
     private static final long SPEED_SNAPSHOT_MIN_MS = 1000L;
+    private static final long HEARTBEAT_LOG_INTERVAL_MS = 10000L;
     private static final long BROADCAST_PROVIDER_SUPPRESS_MS = 5000L;
     private static final long BROADCAST_APPLY_MIN_MS = 200L;
     private static final long FINISH_MAX_REMAINING_METERS = 35L;
@@ -116,6 +118,7 @@ public final class YandexCoreBridgeClient {
     private final ArrayDeque<Bundle> pendingBroadcastSnapshots = new ArrayDeque<>();
     private boolean broadcastApplyPosted;
     private long lastBroadcastApplyAt = -1L;
+    private long lastHeartbeatBroadcastLogAt = -1L;
     private String lastAppliedCoalescingIdentity = "";
     private long lastAppliedCoalescingManeuverMeters = -1L;
     private String lastBackgroundSuspensionIdentity = "";
@@ -319,11 +322,20 @@ public final class YandexCoreBridgeClient {
             if (result.accepted) {
                 lastBroadcastSnapshotAt = SystemClock.elapsedRealtime();
             }
-            AppLog.line(app, "Yandex Core Bridge v2 broadcast "
-                    + (result.accepted ? "accepted" : "ignored") + " state="
-                    + firstString(snapshot, "state", "status")
-                    + " seq=" + longValue(snapshot, "seq", -1L)
-                    + " nextPoll=" + result.delayMs);
+            String callback = lower(firstString(snapshot, "last_callback", "callback",
+                    "event_type", "bridge_reason", "reason"));
+            long now = SystemClock.elapsedRealtime();
+            boolean heartbeat = "heartbeat".equals(callback);
+            if (!heartbeat || !result.accepted || lastHeartbeatBroadcastLogAt < 0L
+                    || now - lastHeartbeatBroadcastLogAt >= HEARTBEAT_LOG_INTERVAL_MS) {
+                if (heartbeat) lastHeartbeatBroadcastLogAt = now;
+                AppLog.line(app, "Yandex Core Bridge v2 broadcast "
+                        + (result.accepted ? "accepted" : "ignored") + " state="
+                        + firstString(snapshot, "state", "status")
+                        + " seq=" + longValue(snapshot, "seq", -1L)
+                        + " callback=" + callback
+                        + " nextPoll=" + result.delayMs);
+            }
         } catch (Exception e) {
             logError("v2_broadcast_apply", e);
         }
@@ -406,17 +418,26 @@ public final class YandexCoreBridgeClient {
         boolean recentLiveRoute = lastLiveRouteMetricsAt > 0L
                 && nowElapsed - lastLiveRouteMetricsAt
                 <= BACKGROUND_SUSPENSION_ROUTE_EVIDENCE_MS;
-        if (YandexBridgeLifecyclePolicy.shouldPreserveActiveRoute(
+        boolean preserveBackgroundRoute = YandexBridgeLifecyclePolicy.shouldPreserveActiveRoute(
                 state, callback, recentLiveRoute, hasRouteMetrics(snapshot),
-                routePresentKnown, routePresent)) {
+                routePresentKnown, routePresent);
+        if (preserveBackgroundRoute) {
+            // The lifecycle callback is still a full, fresh road-context snapshot. Apply its
+            // speed fields before holding the route; otherwise the limit expires while Yandex is
+            // merely moving to background operation.
+            if (freshness <= MAX_ACTIVE_FRESHNESS_MS) {
+                sendSpeedSnapshot(snapshot, freshness);
+            }
             clearPendingManeuverRollover();
-            String suspensionIdentity = lower(callback) + "|" + seq + "|"
-                    + timestampElapsed + "|"
+            String suspensionIdentity = lower(callback) + "|"
+                    + (routePresentKnown ? String.valueOf(routePresent) : "unknown") + "|"
                     + firstString(snapshot, "route_id", "routeId");
-            if (!suspensionIdentity.equals(lastBackgroundSuspensionIdentity)) {
-                lastBackgroundSuspensionIdentity = suspensionIdentity;
-                NavigationFeature.get(app).onYandexBackgroundGuidanceSuspended(
-                        callback, routePresentKnown && routePresent);
+            boolean suspensionTransition =
+                    !suspensionIdentity.equals(lastBackgroundSuspensionIdentity);
+            lastBackgroundSuspensionIdentity = suspensionIdentity;
+            NavigationFeature.get(app).onYandexBackgroundGuidanceSuspended(
+                    callback, routePresentKnown && routePresent, suspensionTransition);
+            if (suspensionTransition) {
                 AppLog.line(app, "Yandex Core Bridge: held route during background suspension"
                         + " callback=" + callback
                         + " routePresent="
@@ -632,17 +653,30 @@ public final class YandexCoreBridgeClient {
                 "speed_limit_kmh", "speed_limit", "road_speed_limit", -1L);
         boolean hasRoadLimit = containsAnyKey(snapshot,
                 "speed_limit_kmh", "speed_limit", "road_speed_limit");
+        String cameraLimit = firstString(snapshot,
+                "camera_speed_limit", "first_camera_speed_limit_kmh");
         boolean hasExceeded = snapshot != null
                 && (snapshot.containsKey("speed_exceeded") || snapshot.containsKey("exceeded"));
-        if (speed < 0 && limit <= 0 && !hasExceeded && !hasRoadLimit) return false;
+        int speedKmh = (int) Math.max(-1L, Math.min(Integer.MAX_VALUE, speed));
+        int limitKmh = (int) Math.max(-1L, Math.min(Integer.MAX_VALUE, limit));
+        // The bridge always carries exceeded=false, including completely empty free-drive
+        // snapshots. That flag alone must not create a one-second StateStore/UI update loop.
+        if (!YandexSpeedSnapshotPolicy.meaningfulPayload(
+                speedKmh, hasRoadLimit, cameraLimit)) {
+            NavigationFeature.get(app).observeYandexTransportHeartbeat();
+            return false;
+        }
 
         boolean exceeded = bool(snapshot, "speed_exceeded", bool(snapshot, "exceeded", false));
         String signature = speed + "|" + limit + "|" + hasRoadLimit + "|"
-                + (hasExceeded ? String.valueOf(exceeded) : "-");
+                + cameraLimit + "|" + (hasExceeded ? String.valueOf(exceeded) : "-");
         long now = SystemClock.elapsedRealtime();
-        if (signature.equals(lastSpeedSignature)
-                && now - lastSpeedSnapshotSentAt < SPEED_SNAPSHOT_MIN_MS) {
-            return false;
+        if (signature.equals(lastSpeedSignature)) {
+            if (NavigationFeature.get(app).refreshMatchingYandexSpeedContext(
+                    speedKmh, hasRoadLimit, limitKmh, hasExceeded, exceeded)) {
+                return false;
+            }
+            if (now - lastSpeedSnapshotSentAt < SPEED_SNAPSHOT_MIN_MS) return false;
         }
         lastSpeedSignature = signature;
         lastSpeedSnapshotSentAt = now;
@@ -657,8 +691,7 @@ public final class YandexCoreBridgeClient {
         } else if (hasRoadLimit) {
             speedIntent.putExtra("speed_limit_clear", true);
         }
-        putString(speedIntent, "camera_speed_limit", firstString(snapshot,
-                "camera_speed_limit", "first_camera_speed_limit_kmh"));
+        putString(speedIntent, "camera_speed_limit", cameraLimit);
         if (hasExceeded) speedIntent.putExtra("exceeded", exceeded);
         NavigationFeature.get(app).handle(speedIntent);
         return true;
@@ -1205,6 +1238,7 @@ public final class YandexCoreBridgeClient {
         lastSpeedSignature = "";
         lastSpeedSnapshotSentAt = 0L;
         lastBroadcastSnapshotAt = -1L;
+        lastHeartbeatBroadcastLogAt = -1L;
         synchronized (broadcastLock) {
             lastAppliedCoalescingIdentity = "";
             lastAppliedCoalescingManeuverMeters = -1L;

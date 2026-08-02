@@ -7,12 +7,12 @@ import static org.junit.Assert.assertTrue;
 
 public final class DashboardSpeedVisibilityPolicyTest {
     @Test
-    public void standstillHidesBothBadgesEvenWithFreshValues() {
+    public void standstillKeepsFreshLimitButHidesCurrentSpeed() {
         DashboardSpeedVisibilityPolicy.Decision value =
                 DashboardSpeedVisibilityPolicy.resolve(false, 52, 60);
 
         assertFalse(value.showCurrentSpeed);
-        assertFalse(value.showSpeedLimit);
+        assertTrue(value.showSpeedLimit);
     }
 
     @Test
@@ -34,11 +34,20 @@ public final class DashboardSpeedVisibilityPolicyTest {
     }
 
     @Test
-    public void currentSpeedIsHiddenWhenLimitIsUnavailable() {
+    public void movingCurrentSpeedDoesNotDependOnLimitAvailability() {
         DashboardSpeedVisibilityPolicy.Decision value =
                 DashboardSpeedVisibilityPolicy.resolve(true, 52, -1);
 
-        assertFalse(value.showCurrentSpeed);
+        assertTrue(value.showCurrentSpeed);
         assertFalse(value.showSpeedLimit);
+    }
+
+    @Test
+    public void standstillWithZeroSpeedStillKeepsFreshLimit() {
+        DashboardSpeedVisibilityPolicy.Decision value =
+                DashboardSpeedVisibilityPolicy.resolve(false, 0, 60);
+
+        assertFalse(value.showCurrentSpeed);
+        assertTrue(value.showSpeedLimit);
     }
 }

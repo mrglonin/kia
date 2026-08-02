@@ -1,24 +1,24 @@
 {
   "app": {
-    "version_name": "23.07",
-    "version_code": 361,
-    "asset_name": "kia_361.apk",
-    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.07-361/kia_361.apk",
-    "sha256": "400107e2b350b0b91d4507ffa6ca75c1ec44d04c166e449b3931d34f84555afd",
-    "size": 6014699
+    "version_name": "23.08",
+    "version_code": 362,
+    "asset_name": "kia_362.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.08-362/kia_362.apk",
+    "sha256": "90041771384011d91ca19ee63a372763b0e3cf5a2768dde1ae914cdefd19e4d5",
+    "size": 6022183
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
-    "version": "7.10-kia.20260723",
+    "version": "7.10-kia.20260723-heartbeat",
     "version_code": 71011062,
     "package": "ru.yandex.yandexnavi",
     "apk_dir": "updates/yandex",
     "files": [
       {
-        "name": "yandex_navi-7_10-universal-kia-mod-bgfix.apk",
-        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.04-358/yandex_navi-7_10-universal-kia-mod-bgfix.apk",
-        "sha256": "ff34e9f25eeee2ee5a7c95b4b1585586e5c8c5b68f2dce18d10790e8a5d043f1",
-        "size": 115101951
+        "name": "yandex_navi-7_10-universal-kia-mod-heartbeat.apk",
+        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.08-362/yandex_navi-7_10-universal-kia-mod-heartbeat.apk",
+        "sha256": "21fb15289695e7913b8e3e62902212ad0c06dd93f6f16c642c027a41b484ba37",
+        "size": 115302487
       }
     ]
   },

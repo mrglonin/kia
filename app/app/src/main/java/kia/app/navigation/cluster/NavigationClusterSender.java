@@ -103,18 +103,20 @@ public final class NavigationClusterSender {
         recordTx("text=" + clean(text) + " bytes=" + AdapterProtocol.hex(frame), outcome);
     }
 
-    public void sendSpeedLimit(int kmh) {
+    public AdapterTxOutcome sendSpeedLimit(int kmh) {
         byte[] frame = AdapterProtocol.speedLimit(kmh);
         AdapterTxOutcome outcome = AdapterGateway.get(app).send(
                 AdapterCommand.loud("nav speed", frame));
         recordTx("speedLimit=" + kmh + " bytes=" + AdapterProtocol.hex(frame), outcome);
+        return outcome;
     }
 
-    public void sendCompassStep(int uiStep) {
+    public AdapterTxOutcome sendCompassStep(int uiStep) {
         byte[] frame = AdapterProtocol.compassStep(uiStep);
         AdapterTxOutcome outcome = AdapterGateway.get(app).send(
                 AdapterCommand.quiet("nav compass", frame));
         recordTx("compass step=" + uiStep + " bytes=" + AdapterProtocol.hex(frame), outcome);
+        return outcome;
     }
 
     public void sendDirectionToFinish(int uiStep, float distance, boolean km) {
