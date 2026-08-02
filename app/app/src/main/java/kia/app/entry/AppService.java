@@ -52,6 +52,7 @@ public final class AppService extends Service {
     private static final int NOTIFICATION_ID = 51;
     private static final long WAKE_LOCK_TIMEOUT_MS = 10L * 60L * 1000L;
     private static final long WAKE_LOCK_RENEW_MS = 9L * 60L * 1000L;
+    private static volatile boolean serviceRunning;
 
     private AdapterGateway gateway;
     private HealthMonitor healthMonitor;
@@ -86,6 +87,10 @@ public final class AppService extends Service {
             AppLog.line(context, "Service: start blocked " + e.getClass().getSimpleName()
                     + " " + safeMessage(e));
         }
+    }
+
+    public static boolean isRunning() {
+        return serviceRunning;
     }
 
     @Override
@@ -125,6 +130,7 @@ public final class AppService extends Service {
         mediaOverlay.start();
         rctaOverlay = RctaOverlayController.get(this);
         rctaOverlay.start();
+        serviceRunning = true;
     }
 
     @Override
@@ -174,6 +180,7 @@ public final class AppService extends Service {
 
     @Override
     public void onDestroy() {
+        serviceRunning = false;
         if (healthMonitor != null) healthMonitor.stop();
         if (mediaCapture != null) mediaCapture.stop();
         MediaClusterSender.get(this).stopSynchronizedPath();
@@ -240,6 +247,7 @@ public final class AppService extends Service {
     }
 
     private void stopAfterForegroundFailure(String stage) {
+        serviceRunning = false;
         terminalForegroundFailure = true;
         String health = foregroundFailureHealth(stage);
         StateStore.setAdapter(this, StateStore.adapter().withHealth(health));

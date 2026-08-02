@@ -7,8 +7,8 @@ public final class DashboardSpeedVisibilityPolicy {
     private DashboardSpeedVisibilityPolicy() {}
 
     public static Decision resolve(boolean moving, int currentSpeedKmh, int speedLimitKmh) {
-        boolean showLimit = moving && speedLimitKmh > 0;
-        boolean showCurrent = showLimit && currentSpeedKmh > 0;
+        boolean showLimit = speedLimitKmh > 0;
+        boolean showCurrent = moving && currentSpeedKmh > 0;
         return new Decision(showCurrent, showLimit);
     }
 

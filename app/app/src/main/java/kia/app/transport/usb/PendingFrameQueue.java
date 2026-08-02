@@ -12,7 +12,8 @@ import kia.app.protocol.adapter.AdapterProtocol;
  *
  * <p>Vehicle/media commands retain FIFO ordering. Navigation frames describe current UI state, so
  * replaying every historical distance or maneuver after reconnect is actively harmful. They are
- * coalesced by command id, and navigation-off invalidates every older navigation frame.
+ * coalesced by command id, and navigation-off invalidates every older route frame. The road speed
+ * limit is an independent latest-only state and survives route shutdown for replay after reconnect.
  */
 final class PendingFrameQueue {
     private final int maxSize;
@@ -26,9 +27,7 @@ final class PendingFrameQueue {
         if (frame == null || frame.length == 0) return;
         if (isNavigationFrame(frame)) {
             if (isNavigationOff(frame)) {
-                byte[] terminalSpeedClear = latestSpeedLimitClear();
                 invalidateNavigation();
-                if (terminalSpeedClear != null) frames.offerLast(terminalSpeedClear);
             } else {
                 removeSemantic(frame);
             }
@@ -69,16 +68,11 @@ final class PendingFrameQueue {
     void invalidateNavigation() {
         Iterator<byte[]> iterator = frames.iterator();
         while (iterator.hasNext()) {
-            if (isNavigationFrame(iterator.next())) iterator.remove();
+            byte[] queued = iterator.next();
+            if (isNavigationFrame(queued) && !isSpeedLimitFrame(queued)) {
+                iterator.remove();
+            }
         }
-    }
-
-    private byte[] latestSpeedLimitClear() {
-        byte[] latest = null;
-        for (byte[] queued : frames) {
-            if (isSpeedLimitClear(queued)) latest = queued;
-        }
-        return latest;
     }
 
     private void removeSemantic(byte[] incoming) {
@@ -106,10 +100,8 @@ final class PendingFrameQueue {
                 && (frame[5] & 0xff) == 0;
     }
 
-    static boolean isSpeedLimitClear(byte[] frame) {
-        return command(frame) == AdapterProtocol.CMD_SPEED_LIMIT
-                && frame.length > 6
-                && (frame[6] & 0xff) == 0;
+    static boolean isSpeedLimitFrame(byte[] frame) {
+        return command(frame) == AdapterProtocol.CMD_SPEED_LIMIT;
     }
 
     private static int command(byte[] frame) {

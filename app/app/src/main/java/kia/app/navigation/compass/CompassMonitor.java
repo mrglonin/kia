@@ -16,6 +16,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.view.Surface;
 import android.view.WindowManager;
 
@@ -26,6 +27,7 @@ import kia.app.core.settings.AppSettings;
 import kia.app.navigation.cluster.NavigationClusterSender;
 import kia.app.navigation.domain.NavigationFeature;
 import kia.app.protocol.adapter.AdapterGateway;
+import kia.app.protocol.adapter.AdapterTxOutcome;
 
 public final class CompassMonitor implements LocationListener, SensorEventListener {
     private static final long MIN_TIME_MS = 500L;
@@ -35,6 +37,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private static final long REREGISTER_MS = 15000L;
     private static final long STARTUP_NAV_GRACE_MS = 3000L;
     private static final long STALE_LOCATION_MS = 2500L;
+    private static final long LAST_KNOWN_MAX_AGE_MS = STALE_LOCATION_MS;
     private static final long SENSOR_STALE_MS = 1500L;
     private static final long SENSOR_PUBLISH_MS = 120L;
     private static final long WAKE_LOCK_TIMEOUT_MS = 15000L;
@@ -52,34 +55,34 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private final float[] orientation = new float[3];
     private int displayedStep = -1;
     private int targetStep = -1;
-    private long lastLocationAt;
-    private long lastAnyLocationAt;
     private long lastSensorHeadingAt;
     private long lastSensorPublishAt;
     private long lastRegisterAt;
     private long startedAt;
+    private long lastUsbEpoch = -1L;
+    private long lastCachedLocationElapsedNanos;
     private int lastTransmittedStep = -1;
     private float smoothedSensorHeading = Float.NaN;
     private float lastPublishedSensorHeading = Float.NaN;
-    private int sensorAccuracy = SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM;
+    private int sensorAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE;
     private boolean running;
     private boolean registered;
     private boolean sensorRegistered;
     private boolean animationRunning;
-    private boolean lastUsbReady;
+    private boolean lastCompassSendAllowed;
     private Location lastLocation;
 
     private final Runnable animate = new Runnable() {
         @Override
         public void run() {
             animationRunning = false;
-            if (!running || targetStep < 0) return;
+            if (!running || targetStep < 0 || !canSendCompass()) return;
             if (displayedStep < 0) {
                 sendStep(targetStep);
                 return;
             }
             if (displayedStep == targetStep) return;
-            sendStep(nextStep(displayedStep, targetStep));
+            if (!sendStep(nextStep(displayedStep, targetStep))) return;
             if (displayedStep != targetStep) {
                 animationRunning = true;
                 handler.postDelayed(this, ANIMATION_STEP_MS);
@@ -91,27 +94,19 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         @Override
         public void run() {
             if (!running) return;
-            long now = System.currentTimeMillis();
+            long now = SystemClock.elapsedRealtime();
             if (!locationNeeded()) {
                 unregisterLocation();
                 releaseWakeLock();
                 updateHeadingSensorRegistration();
-                handler.postDelayed(this, WATCHDOG_MS);
-                return;
+            } else {
+                acquireWakeLock();
+                updateHeadingSensorRegistration();
+                if (!registered || now - lastRegisterAt > REREGISTER_MS) {
+                    registerLocation(true);
+                }
             }
-            acquireWakeLock();
-            updateHeadingSensorRegistration();
-            if (!registered || now - lastRegisterAt > REREGISTER_MS
-                    || (lastAnyLocationAt > 0L && now - lastAnyLocationAt > STALE_LOCATION_MS)) {
-                registerLocation(true);
-            }
-            Location last = bestLastKnownLocation();
-            if (last != null) onLocationChanged(last);
-            boolean usbReady = AdapterGateway.get(app).usbReady();
-            if (usbReady && !lastUsbReady && displayedStep >= 0 && canSendCompass()) {
-                sendStep(displayedStep);
-            }
-            lastUsbReady = usbReady;
+            refreshCompassTxContext();
             handler.postDelayed(this, WATCHDOG_MS);
         }
     };
@@ -137,8 +132,10 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
             return;
         }
         running = true;
-        startedAt = System.currentTimeMillis();
-        lastUsbReady = AdapterGateway.get(app).usbReady();
+        startedAt = SystemClock.elapsedRealtime();
+        AdapterGateway gateway = AdapterGateway.get(app);
+        lastUsbEpoch = gateway.connectionEpoch();
+        lastCompassSendAllowed = false;
         if (locationNeeded()) acquireWakeLock();
         registerLocation(true);
         updateHeadingSensorRegistration();
@@ -153,12 +150,12 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         running = false;
         displayedStep = -1;
         targetStep = -1;
-        lastLocationAt = 0L;
-        lastAnyLocationAt = 0L;
         startedAt = 0L;
+        lastUsbEpoch = -1L;
+        lastCachedLocationElapsedNanos = 0L;
         lastTransmittedStep = -1;
         animationRunning = false;
-        lastUsbReady = false;
+        lastCompassSendAllowed = false;
         lastSensorHeadingAt = 0L;
         lastSensorPublishAt = 0L;
         smoothedSensorHeading = Float.NaN;
@@ -172,15 +169,36 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
 
     @Override
     public void onLocationChanged(Location location) {
+        acceptLocation(location, false);
+    }
+
+    private void acceptLocation(Location location, boolean lastKnown) {
         if (location == null) return;
-        lastAnyLocationAt = System.currentTimeMillis();
+        if (lastKnown && !acceptLastKnownSample(location)) return;
         lastLocation = new Location(location);
         NavigationFeature.get(app).updateGpsLocation(location);
-        if (!location.hasBearing()) return;
-        lastLocationAt = lastAnyLocationAt;
-        if (!canSendCompass()) return;
         if (sensorHeadingFresh()) return;
+        if (!CompassLocationPolicy.usableGpsBearing(
+                location.hasBearing(), location.getBearing(),
+                location.hasSpeed(), location.hasSpeed() ? location.getSpeed() : Float.NaN)) {
+            return;
+        }
         updateTargetStep(normalize(location.getBearing()));
+    }
+
+    private boolean acceptLastKnownSample(Location location) {
+        long nowElapsedNanos = SystemClock.elapsedRealtimeNanos();
+        long fixElapsedNanos = location.getElapsedRealtimeNanos();
+        if (!CompassLocationPolicy.freshLastKnown(
+                nowElapsedNanos, fixElapsedNanos, LAST_KNOWN_MAX_AGE_MS)) {
+            return false;
+        }
+        if (CompassLocationPolicy.sameLastKnownSample(
+                fixElapsedNanos, lastCachedLocationElapsedNanos)) {
+            return false;
+        }
+        lastCachedLocationElapsedNanos = fixElapsedNanos;
+        return true;
     }
 
     @Override
@@ -194,7 +212,10 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         float heading = headingFromRotationVector(event.values);
         if (Float.isNaN(heading)) return;
         heading = trueNorthHeading(heading);
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
+        sensorAccuracy = CompassLocationPolicy.effectiveSensorAccuracy(
+                sensorAccuracy, event.accuracy);
+        if (sensorAccuracy == SensorManager.SENSOR_STATUS_UNRELIABLE) return;
         smoothedSensorHeading = Float.isNaN(smoothedSensorHeading)
                 ? heading : blendDegrees(smoothedSensorHeading, heading, 0.32f);
         lastSensorHeadingAt = now;
@@ -206,7 +227,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
             NavigationFeature.get(app).updateDeviceHeading(smoothedSensorHeading,
                     sensorAccuracyDegrees(), event.sensor.getName());
         }
-        if (canSendCompass()) updateTargetStep(smoothedSensorHeading);
+        updateTargetStep(smoothedSensorHeading);
     }
 
     @Override
@@ -233,7 +254,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
             unregisterLocation();
             return;
         }
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (!force && registered && now - lastRegisterAt < REREGISTER_MS) return;
         unregisterLocation();
         try {
@@ -244,7 +265,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
             registered = any;
             lastRegisterAt = now;
             Location last = bestLastKnownLocation();
-            if (last != null) onLocationChanged(last);
+            if (last != null) acceptLocation(last, true);
         } catch (Exception e) {
             registered = false;
             AppLog.line(app, "Compass: GPS start failed " + e.getClass().getSimpleName());
@@ -280,6 +301,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         if (!running || sensorManager == null) return;
         if (!force && sensorRegistered) return;
         unregisterHeadingSensor();
+        sensorAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE;
         headingSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         if (headingSensor == null) {
             headingSensor = sensorManager.getDefaultSensor(Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR);
@@ -404,8 +426,9 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     }
 
     private boolean sensorHeadingFresh() {
-        return lastSensorHeadingAt > 0L
-                && System.currentTimeMillis() - lastSensorHeadingAt <= SENSOR_STALE_MS;
+        return sensorAccuracy != SensorManager.SENSOR_STATUS_UNRELIABLE
+                && lastSensorHeadingAt > 0L
+                && SystemClock.elapsedRealtime() - lastSensorHeadingAt <= SENSOR_STALE_MS;
     }
 
     private float sensorAccuracyDegrees() {
@@ -418,12 +441,15 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private void updateTargetStep(float heading) {
         int step = Math.round(normalize(heading) / 30f) * 3;
         if (step == 36) step = 0;
-        restoreDisplayedStepFromStore(step);
-        if (step == targetStep && displayedStep >= 0) {
+        boolean sameTarget = step == targetStep;
+        targetStep = step;
+        restoreDisplayedStepFromStore();
+        if (!canSendCompass()) return;
+        if (sameTarget && displayedStep >= 0) {
             sendCurrentStepIfNeeded();
+            startAnimationIfNeeded();
             return;
         }
-        targetStep = step;
         if (displayedStep < 0) {
             sendStep(step);
             return;
@@ -432,10 +458,8 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
             sendCurrentStepIfNeeded();
             return;
         }
-        if (!animationRunning) {
-            animationRunning = true;
-            handler.post(animate);
-        }
+        sendCurrentStepIfNeeded();
+        startAnimationIfNeeded();
     }
 
     private float normalize(float value) {
@@ -454,54 +478,37 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         return normalize(from + signedDelta(to, from) * Math.max(0f, Math.min(1f, toWeight)));
     }
 
-    private void restoreDisplayedStepFromStore(int target) {
+    private void restoreDisplayedStepFromStore() {
         if (displayedStep >= 0) return;
         int stored = lastCompassStepFromStore();
         if (stored < 0) return;
         displayedStep = stored;
         AppLog.line(app, "Compass: restored step=" + displayedStep
-                + " target=" + normalizeStep(target));
+                + (targetStep >= 0 ? " target=" + normalizeStep(targetStep) : ""));
     }
 
     private static int lastCompassStepFromStore() {
         NavigationState navigation = StateStore.navigation();
         if (navigation == null) return -1;
-        String line = lastLineStarting(navigation.clusterTx, "compass step=");
-        String value = tokenAfter(line, "compass step=");
-        if (value.isEmpty()) return -1;
-        try {
-            return normalizeStep(Integer.parseInt(value));
-        } catch (RuntimeException ignored) {
-            return -1;
+        return CompassTxPolicy.storedStep(navigation.clusterTx);
+    }
+
+    private boolean sendStep(int step) {
+        if (!canSendCompass()) return false;
+        AdapterGateway gateway = AdapterGateway.get(app);
+        if (!gateway.usbReady()) return false;
+        int normalizedStep = normalizeStep(step);
+        AdapterTxOutcome outcome = sender.sendCompassStep(normalizedStep);
+        if (outcome == AdapterTxOutcome.WRITTEN) {
+            displayedStep = normalizedStep;
+            lastTransmittedStep = normalizedStep;
+            lastCompassSendAllowed = true;
+            lastUsbEpoch = gateway.connectionEpoch();
+            return true;
+        } else {
+            lastTransmittedStep = -1;
+            return false;
         }
-    }
-
-    private static String lastLineStarting(String value, String prefix) {
-        String text = value == null ? "" : value.trim();
-        if (text.isEmpty() || prefix == null || prefix.isEmpty()) return "";
-        String[] lines = text.split("\\n");
-        for (int i = lines.length - 1; i >= 0; i--) {
-            String line = lines[i] == null ? "" : lines[i].trim();
-            if (line.startsWith(prefix)) return line;
-        }
-        return "";
-    }
-
-    private static String tokenAfter(String value, String marker) {
-        String text = value == null ? "" : value.trim();
-        String needle = marker == null ? "" : marker;
-        int start = text.indexOf(needle);
-        if (start < 0) return "";
-        String tail = text.substring(start + needle.length()).trim();
-        int space = tail.indexOf(' ');
-        return space >= 0 ? tail.substring(0, space).trim() : tail;
-    }
-
-    private void sendStep(int step) {
-        if (!canSendCompass()) return;
-        displayedStep = normalizeStep(step);
-        lastTransmittedStep = displayedStep;
-        sender.sendCompassStep(displayedStep);
     }
 
     private void sendCurrentStepIfNeeded() {
@@ -509,8 +516,41 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         sendStep(displayedStep);
     }
 
+    private void startAnimationIfNeeded() {
+        if (targetStep < 0 || displayedStep < 0 || displayedStep == targetStep
+                || animationRunning || !canSendCompass()) {
+            return;
+        }
+        if (!AdapterGateway.get(app).usbReady()) return;
+        animationRunning = true;
+        handler.post(animate);
+    }
+
+    private void refreshCompassTxContext() {
+        AdapterGateway gateway = AdapterGateway.get(app);
+        boolean sendAllowed = canSendCompass();
+        boolean usbReady = gateway.usbReady();
+        long usbEpoch = gateway.connectionEpoch();
+        boolean reassert = CompassTxPolicy.shouldReassert(
+                sendAllowed, lastCompassSendAllowed,
+                usbReady, usbEpoch, lastUsbEpoch);
+        if (!sendAllowed && lastCompassSendAllowed) {
+            lastTransmittedStep = -1;
+            animationRunning = false;
+            handler.removeCallbacks(animate);
+        }
+        lastCompassSendAllowed = sendAllowed;
+        lastUsbEpoch = usbEpoch;
+        if (!reassert) return;
+        lastTransmittedStep = -1;
+        restoreDisplayedStepFromStore();
+        if (displayedStep < 0 && targetStep >= 0) displayedStep = normalizeStep(targetStep);
+        sendCurrentStepIfNeeded();
+        startAnimationIfNeeded();
+    }
+
     private boolean canSendCompass() {
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (startedAt > 0L && now - startedAt < STARTUP_NAV_GRACE_MS) return false;
         return compassDirectionNeeded();
     }
@@ -525,7 +565,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
 
     private boolean compassDirectionNeeded() {
         NavigationFeature navigation = NavigationFeature.get(app);
-        return (!navigation.active() && !navigation.finishCompassSuppressed())
+        return (!navigation.activeForCompassSuppression() && !navigation.finishCompassSuppressed())
                 || AppSettings.compassForceEnabled(app);
     }
 

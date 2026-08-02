@@ -99,6 +99,36 @@ public final class PendingFrameQueueTest {
         assertEquals(0, clear[6] & 0xff);
     }
 
+    @Test
+    public void navigationOffKeepsPositiveSpeedLimitForReconnect() {
+        PendingFrameQueue queue = new PendingFrameQueue(80);
+
+        queue.offer(speedLimitFrame(60));
+        queue.offer(frame(AdapterProtocol.CMD_MANEUVER, 4));
+        queue.offer(frame(AdapterProtocol.CMD_NAV_ON, 0));
+
+        assertEquals(2, queue.size());
+        assertEquals(AdapterProtocol.CMD_NAV_ON, command(queue.poll()));
+        byte[] limit = queue.poll();
+        assertEquals(AdapterProtocol.CMD_SPEED_LIMIT, command(limit));
+        assertEquals(60, limit[6] & 0xff);
+    }
+
+    @Test
+    public void speedLimitRemainsLatestOnlyAcrossRouteInvalidation() {
+        PendingFrameQueue queue = new PendingFrameQueue(80);
+
+        queue.offer(speedLimitFrame(60));
+        queue.offer(speedLimitFrame(80));
+        queue.offer(frame(AdapterProtocol.CMD_MANEUVER, 4));
+        queue.invalidateNavigation();
+
+        assertEquals(1, queue.size());
+        byte[] limit = queue.poll();
+        assertEquals(AdapterProtocol.CMD_SPEED_LIMIT, command(limit));
+        assertEquals(80, limit[6] & 0xff);
+    }
+
     private static byte[] frame(int command, int value) {
         return new byte[]{(byte) 0xBB, 0x41, (byte) 0xA1, 7,
                 (byte) command, (byte) value, 0};

@@ -211,6 +211,14 @@ public final class QaReceiver extends BroadcastReceiver {
                     AppLog.line(appContext, "QA nav speed clear state: "
                             + StateStore.navigation().summary()), 1800L);
             AppLog.line(context, "QA nav speed limit one-shot clear scheduled");
+        } else if ("nav_speed_limit_idle_sample".equals(scenario)) {
+            Context appContext = context.getApplicationContext();
+            NavigationFeature feature = NavigationFeature.get(appContext);
+            feature.setActive(false, "navigation_disabled");
+            feature.handle(qaNavSpeedIntent(60, false));
+            feature.setActive(false, "qa_yandex_route_off");
+            AppLog.line(appContext, "QA nav idle speed state: "
+                    + StateStore.navigation().summary());
         } else if ("nav_roundabout_exit_continuity_sample".equals(scenario)) {
             int exit = Math.max(1, Math.min(4, intent.getIntExtra("exit", 2)));
             boolean tbt = intent.getBooleanExtra("tbt", false);

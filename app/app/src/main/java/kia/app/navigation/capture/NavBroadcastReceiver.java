@@ -52,8 +52,7 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
                     "Yandex Core Bridge broadcast ignored: navigation/source disabled");
             return;
         }
-        keepCpuAwake(context);
-        ensureServiceStarted(context);
+        prepareService(context);
         if (duplicate(intent)) return;
         lastCoreBridgeSnapshotAt = SystemClock.elapsedRealtime();
         YandexCoreBridgeClient.get(context).acceptBroadcastSnapshot(extras);
@@ -71,8 +70,7 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
                     + action);
             return;
         }
-        keepCpuAwake(context);
-        ensureServiceStarted(context);
+        prepareService(context);
         if (duplicate(intent)) return;
         if (legacyFallbackSuppressed(context, action)) return;
         NavigationFeature feature = NavigationFeature.get(context);
@@ -146,12 +144,21 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
     }
 
     private static void ensureServiceStarted(Context context) {
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         synchronized (NavBroadcastReceiver.class) {
-            if (now - lastServiceStartAt < SERVICE_START_MIN_INTERVAL_MS) return;
+            if (!NavServiceStartPolicy.shouldStart(
+                    AppService.isRunning(), now, lastServiceStartAt,
+                    SERVICE_START_MIN_INTERVAL_MS)) {
+                return;
+            }
             lastServiceStartAt = now;
         }
         AppService.start(context.getApplicationContext());
+    }
+
+    private static void prepareService(Context context) {
+        if (!AppService.isRunning()) keepCpuAwake(context);
+        ensureServiceStarted(context);
     }
 
     private static void keepCpuAwake(Context context) {

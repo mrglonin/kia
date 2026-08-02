@@ -28,6 +28,8 @@ import kia.app.navigation.capture.NavigationSourcePolicy;
 import kia.app.navigation.capture.TeyesIngressPolicy;
 import kia.app.navigation.capture.YandexCoreBridgeContract;
 import kia.app.core.settings.AppSettings;
+import kia.app.protocol.adapter.AdapterGateway;
+import kia.app.protocol.adapter.AdapterTxOutcome;
 
 public final class NavigationFeature {
     private static final String TAG = "KiaNav";
@@ -99,6 +101,7 @@ public final class NavigationFeature {
     private static final long YANDEX_WATCHDOG_GPS_FRESH_MS = 15000L;
     private static final long YANDEX_WATCHDOG_NO_GPS_GRACE_MS = 300000L;
     private static final long YANDEX_WATCHDOG_RETRY_MS = 15000L;
+    private static final long RESTORED_ROUTE_CONFIRM_MS = 2500L;
     private static final long AUTO_SOURCE_OWNER_FRESH_MS = 15000L;
 
     private static NavigationFeature instance;
@@ -128,7 +131,9 @@ public final class NavigationFeature {
     private int routeReroutingGeneration;
     private int yandexWatchdogGeneration;
     private int speedLimitExpiryGeneration;
+    private int restoredRouteConfirmationGeneration;
     private int lastSentSpeedLimit = -1;
+    private long lastSpeedLimitWrittenUsbEpoch = -1L;
     private final ManeuverProgressTracker maneuverProgressTracker =
             new ManeuverProgressTracker();
     private final ManeuverProgressRolloverMarker maneuverProgressRolloverMarker =
@@ -183,6 +188,7 @@ public final class NavigationFeature {
     private long yandexSpeedLimitClearCandidateAt;
     private long lastYandexNavigationPacketAt;
     private long lastYandexWatchdogHoldLogAt;
+    private boolean restoredRouteAwaitingConfirmation;
     private long lastFinishDirectionAt;
     private long lastRoundaboutExitUntil;
     private long lastRouteGuidanceAt;
@@ -292,6 +298,7 @@ public final class NavigationFeature {
         this.clusterTx = new NavigationClusterTxController(sender, this::applyClusterVisual);
         syncRouteStateFromStore();
         syncNavigationEnabled(AppSettings.navigationEnabled(app));
+        scheduleRestoredRouteConfirmationIfNeeded();
     }
 
     public static synchronized NavigationFeature get(Context context) {
@@ -394,6 +401,14 @@ public final class NavigationFeature {
 
     public synchronized boolean active() {
         return state.active;
+    }
+
+    /**
+     * A route restored from disk must not suppress the compass until a live producer confirms it.
+     * The logical route snapshot is retained briefly so a running navigator can resume atomically.
+     */
+    public synchronized boolean activeForCompassSuppression() {
+        return state.active && !restoredRouteAwaitingConfirmation;
     }
 
     public synchronized boolean finishCompassSuppressed() {
@@ -690,8 +705,12 @@ public final class NavigationFeature {
         long now = System.currentTimeMillis();
         if (now - lastBackgroundResendAt < BACKGROUND_RESEND_MIN_MS) return;
         syncRouteStateFromStore();
-        if (!state.active || state.finishReached) return;
         lastBackgroundResendAt = now;
+        expireStaleYandexRoadSpeedLimit(now, "background_resend");
+        if (!state.active || state.finishReached) {
+            reassertKnownRoadSpeedLimit("background_" + clean(reason));
+            return;
+        }
         resetNavigationSendCache();
         resetNavigationTextCache();
         sender.resetNavigationRoute();
@@ -711,6 +730,8 @@ public final class NavigationFeature {
     public synchronized void resendAfterTransportRecovery(String reason) {
         syncRouteStateFromStore();
         if (!state.active || state.finishReached) {
+            expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "transport_recovery");
+            reassertKnownRoadSpeedLimit("transport_" + clean(reason));
             AppLog.navigation(app, "NAV_TRANSPORT_RESYNC skipped reason=" + clean(reason)
                     + " active=" + state.active + " finished=" + state.finishReached);
             return;
@@ -1015,10 +1036,20 @@ public final class NavigationFeature {
     public synchronized void setActive(boolean active, String source) {
         boolean wasActive = state.active;
         long now = System.currentTimeMillis();
+        boolean reassertRoadSpeedLimit = false;
+        boolean clearRoadSpeedLimit = false;
+        String inactiveReason = "";
+        if (active) confirmRestoredRoute(source);
         if (!active) {
             String cleanSource = clean(source);
-            boolean clearRoadSpeedLimit = !TextUtils.isEmpty(state.speedLimit)
-                    || lastSentSpeedLimit > 0;
+            inactiveReason = cleanSource;
+            boolean preserveRoadContext = shouldPreserveRoadContext(cleanSource, now);
+            String retainedSpeedLimit = preserveRoadContext ? state.speedLimit : "";
+            String retainedSource = preserveRoadContext ? state.source : cleanSource;
+            boolean retainedExceeded = preserveRoadContext && state.speedExceeded;
+            clearRoadSpeedLimit = !preserveRoadContext
+                    && (!TextUtils.isEmpty(state.speedLimit) || lastSentSpeedLimit > 0);
+            reassertRoadSpeedLimit = preserveRoadContext;
             cancelPendingInactive("off " + cleanSource);
             if (state.finishReached && finishHoldUntil > now && !"finish_hold".equals(cleanSource)) {
                 sendNavigationText("Финиш");
@@ -1049,23 +1080,20 @@ public final class NavigationFeature {
             resetManeuverProgress();
             resetNavigationTextCache();
             resetNavigationSendCache();
-            speedLimitExpiryGeneration++;
-            lastYandexRoadSpeedLimitAt = 0L;
-            yandexSpeedLimitClearCandidateAt = 0L;
-            clearOverspeedTextWindow();
+            if (!preserveRoadContext) {
+                speedLimitExpiryGeneration++;
+                lastYandexRoadSpeedLimitAt = 0L;
+                yandexSpeedLimitClearCandidateAt = 0L;
+                clearOverspeedTextWindow();
+            }
             clusterTx.clear();
             lastNavigationDecisionKey = "";
             lastTxMicroGuardKey = "";
-            state = new NavigationState(false, false, false,
+            state = new NavigationState(false, false, retainedExceeded,
                     "", "", "", "", "", "",
-                    state.currentStreet, "", "", "", state.currentSpeed,
-                    cleanSource, now);
-            if (clearRoadSpeedLimit) {
-                lastSentSpeedLimit = 0;
-                sender.sendSpeedLimit(0);
-                AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=route_off_"
-                        + clean(cleanSource));
-            }
+                    state.currentStreet, "", "", retainedSpeedLimit, state.currentSpeed,
+                    retainedSource, now);
+            cancelRestoredRouteConfirmation();
         } else if (!wasActive) {
             yandexFinishSuppressed = false;
             cancelPendingInactive("active " + clean(source));
@@ -1109,6 +1137,16 @@ public final class NavigationFeature {
         }
         publishNavigationState();
         sender.sendActive(active);
+        if (!active && reassertRoadSpeedLimit) {
+            reassertKnownRoadSpeedLimit("route_off_" + inactiveReason);
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_PRESERVED reason=route_off_"
+                    + clean(inactiveReason) + " value=" + clean(state.speedLimit));
+        } else if (!active && clearRoadSpeedLimit) {
+            lastSentSpeedLimit = 0;
+            sendSpeedLimitFrame(0);
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=route_off_"
+                    + clean(inactiveReason));
+        }
         if (active && !wasActive) {
             sendRouteLoadingVisual();
             scheduleRouteLoadingFallback();
@@ -1448,9 +1486,54 @@ public final class NavigationFeature {
 
     private void touchYandexWatchdog(String source) {
         if (!isYandexSource(source)) return;
+        confirmRestoredRoute(source);
         lastYandexNavigationPacketAt = System.currentTimeMillis();
         int generation = ++yandexWatchdogGeneration;
         scheduleYandexWatchdog(generation, YANDEX_WATCHDOG_STALE_MS);
+    }
+
+    private void scheduleRestoredRouteConfirmationIfNeeded() {
+        if (!state.active || state.finishReached) return;
+        restoredRouteAwaitingConfirmation = true;
+        int generation = ++restoredRouteConfirmationGeneration;
+        handler.postDelayed(() -> {
+            synchronized (NavigationFeature.this) {
+                if (generation != restoredRouteConfirmationGeneration
+                        || !restoredRouteAwaitingConfirmation) {
+                    return;
+                }
+                restoredRouteAwaitingConfirmation = false;
+                if (!state.active || state.finishReached) return;
+                AppLog.navigation(app, "NAV_RESTORED_ROUTE_EXPIRED source="
+                        + clean(state.source));
+                forceInactive("restored_route_unconfirmed");
+            }
+        }, RESTORED_ROUTE_CONFIRM_MS);
+    }
+
+    private void confirmRestoredRoute(String source) {
+        if (!restoredRouteAwaitingConfirmation) return;
+        restoredRouteAwaitingConfirmation = false;
+        restoredRouteConfirmationGeneration++;
+        AppLog.navigation(app, "NAV_RESTORED_ROUTE_CONFIRMED source=" + clean(source));
+    }
+
+    private void cancelRestoredRouteConfirmation() {
+        if (!restoredRouteAwaitingConfirmation) return;
+        restoredRouteAwaitingConfirmation = false;
+        restoredRouteConfirmationGeneration++;
+    }
+
+    private boolean shouldPreserveRoadContext(String reason, long now) {
+        String cleanReason = clean(reason).toLowerCase(Locale.US);
+        boolean hardReset = cleanReason.equals("navigation_disabled")
+                || cleanReason.startsWith("auto_source_handoff_")
+                || cleanReason.startsWith("source_mode_")
+                || cleanReason.contains("navigator_process_stopped");
+        return YandexRoadContextPolicy.shouldPreserve(
+                state.speedLimit, isYandexSource(state.source),
+                lastYandexRoadSpeedLimitAt, now,
+                YANDEX_ROAD_SPEED_LIMIT_HOLD_MS, hardReset);
     }
 
     private void scheduleYandexWatchdog(int generation, long delayMs) {
@@ -1514,7 +1597,8 @@ public final class NavigationFeature {
     }
 
     public synchronized void onYandexBackgroundGuidanceSuspended(String callback,
-                                                                 boolean routePresent) {
+                                                                 boolean routePresent,
+                                                                 boolean semanticTransition) {
         if (!acceptNavigationSource(
                 NavigationSourcePolicy.SOURCE_YANDEX,
                 NavigationSourcePolicy.EVENT_PASSIVE,
@@ -1526,19 +1610,27 @@ public final class NavigationFeature {
         touchYandexWatchdog(YandexCoreBridgeContract.SOURCE);
         expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(),
                 "background_guidance_suspended");
-        AppLog.navigation(app, "NAV_YANDEX_BACKGROUND_SUSPENDED"
-                + " callback=" + clean(callback)
-                + " routePresent=" + routePresent
-                + " route=" + clean(state.routeDistance)
-                + " maneuver=" + clean(state.maneuver)
-                + " distance=" + clean(state.maneuverDistance));
+        if (semanticTransition) {
+            AppLog.navigation(app, "NAV_YANDEX_BACKGROUND_SUSPENDED"
+                    + " callback=" + clean(callback)
+                    + " routePresent=" + routePresent
+                    + " route=" + clean(state.routeDistance)
+                    + " maneuver=" + clean(state.maneuver)
+                    + " distance=" + clean(state.maneuverDistance));
+        }
     }
 
     private void forceInactive(String source) {
+        long now = System.currentTimeMillis();
+        String cleanSource = clean(source);
         sourceArbitrator.release(navigationSourceFamily(state.source));
-        boolean clearRoadSpeedLimit = !TextUtils.isEmpty(state.speedLimit)
-                || lastSentSpeedLimit > 0;
-        cancelPendingInactive("force " + clean(source));
+        boolean preserveRoadContext = shouldPreserveRoadContext(cleanSource, now);
+        String retainedSpeedLimit = preserveRoadContext ? state.speedLimit : "";
+        String retainedSource = preserveRoadContext ? state.source : cleanSource;
+        boolean retainedExceeded = preserveRoadContext && state.speedExceeded;
+        boolean clearRoadSpeedLimit = !preserveRoadContext
+                && (!TextUtils.isEmpty(state.speedLimit) || lastSentSpeedLimit > 0);
+        cancelPendingInactive("force " + cleanSource);
         cancelFinishHold();
         yandexWatchdogGeneration++;
         waitingForRoute = false;
@@ -1559,25 +1651,32 @@ public final class NavigationFeature {
         resetManeuverProgress();
         resetNavigationTextCache();
         resetNavigationSendCache();
-        speedLimitExpiryGeneration++;
-        lastYandexRoadSpeedLimitAt = 0L;
-        yandexSpeedLimitClearCandidateAt = 0L;
-        clearOverspeedTextWindow();
-        clusterTx.clear();
-        clearFinalSegmentFinishDirection("force inactive " + clean(source));
-        state = new NavigationState(false, false, false,
-                "", "", "", "", "", "",
-                state.currentStreet, "", "", "", state.currentSpeed,
-                clean(source), System.currentTimeMillis());
-        publishNavigationState();
-        if (clearRoadSpeedLimit) {
-            lastSentSpeedLimit = 0;
-            sender.sendSpeedLimit(0);
-            AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=force_inactive_"
-                    + clean(source));
+        if (!preserveRoadContext) {
+            speedLimitExpiryGeneration++;
+            lastYandexRoadSpeedLimitAt = 0L;
+            yandexSpeedLimitClearCandidateAt = 0L;
+            clearOverspeedTextWindow();
         }
+        clusterTx.clear();
+        clearFinalSegmentFinishDirection("force inactive " + cleanSource);
+        state = new NavigationState(false, false, retainedExceeded,
+                "", "", "", "", "", "",
+                state.currentStreet, "", "", retainedSpeedLimit, state.currentSpeed,
+                retainedSource, now);
+        cancelRestoredRouteConfirmation();
+        publishNavigationState();
         sender.sendActive(false);
-        AppLog.line(app, "Navigation forced off: " + clean(source));
+        if (preserveRoadContext) {
+            reassertKnownRoadSpeedLimit("force_inactive_" + cleanSource);
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_PRESERVED reason=force_inactive_"
+                    + cleanSource + " value=" + clean(state.speedLimit));
+        } else if (clearRoadSpeedLimit) {
+            lastSentSpeedLimit = 0;
+            sendSpeedLimitFrame(0);
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=force_inactive_"
+                    + cleanSource);
+        }
+        AppLog.line(app, "Navigation forced off: " + cleanSource);
     }
 
     public synchronized void sendManeuver(String imageId, String distance, String unit, String street) {
@@ -3421,6 +3520,37 @@ public final class NavigationFeature {
         }
     }
 
+    /**
+     * Refreshes volatile Yandex freshness without rewriting StateStore or rebroadcasting an
+     * identical dashboard state. Value changes deliberately fail this check and take the normal
+     * {@link #handle(Intent)} path immediately.
+     */
+    public synchronized boolean refreshMatchingYandexSpeedContext(
+            int currentSpeedKmh, boolean roadLimitPresent, int roadLimitKmh,
+            boolean exceededPresent, boolean exceeded) {
+        if (!YandexSpeedSnapshotPolicy.matchesStoredState(
+                isYandexSource(state.source), speedNumber(state.currentSpeed), currentSpeedKmh,
+                speedNumber(state.speedLimit), roadLimitPresent, roadLimitKmh,
+                state.speedExceeded, exceededPresent, exceeded)) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (currentSpeedKmh >= 0) lastYandexCurrentSpeedAt = now;
+        if (roadLimitPresent && roadLimitKmh > 0) {
+            lastYandexRoadSpeedLimitAt = now;
+            yandexSpeedLimitClearCandidateAt = 0L;
+            scheduleYandexRoadSpeedLimitExpiry();
+        }
+        maybeReassertRoadSpeedLimitForTransport("yandex_snapshot_refresh");
+        return true;
+    }
+
+    /** Checks only transport epoch/expiry; an empty heartbeat must not extend road-data TTL. */
+    public synchronized void observeYandexTransportHeartbeat() {
+        expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "empty_heartbeat");
+        maybeReassertRoadSpeedLimitForTransport("empty_heartbeat");
+    }
+
     private boolean yandexCurrentSpeedFresh(long now) {
         return lastYandexCurrentSpeedAt > 0L
                 && now - lastYandexCurrentSpeedAt <= YANDEX_CURRENT_SPEED_HOLD_MS;
@@ -3502,7 +3632,7 @@ public final class NavigationFeature {
         clearOverspeedTextWindow();
         if (lastSentSpeedLimit != 0) {
             lastSentSpeedLimit = 0;
-            sender.sendSpeedLimit(0);
+            sendSpeedLimitFrame(0);
             AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=" + clean(reason));
         }
         sendConfiguredText();
@@ -3523,8 +3653,10 @@ public final class NavigationFeature {
         if (changed) {
             lastSentSpeedLimit = kmh;
             speedLimitTextUntil = now + SPEED_LIMIT_TEXT_MS;
-            sender.sendSpeedLimit(kmh);
+            sendSpeedLimitFrame(kmh);
             AppLog.line(app, "Navigation speed limit: " + kmh);
+        } else {
+            maybeReassertRoadSpeedLimitForTransport("same_speed_limit");
         }
         sendConfiguredText();
     }
@@ -5784,17 +5916,49 @@ public final class NavigationFeature {
     }
 
     public synchronized void resendKnownRouteData() {
-        if (!state.active) return;
         expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "resend");
+        if (!TextUtils.isEmpty(state.speedLimit)) {
+            sendSpeed(state.speedLimit);
+        }
+        if (!state.active) return;
         if (!TextUtils.isEmpty(state.routeDistance)) {
             sendEtaIfChanged(distanceValue(state.routeDistance), isKm(state.routeDistance));
         }
         if (!TextUtils.isEmpty(state.arrivalTime) || !TextUtils.isEmpty(state.routeTime)) {
             sendEtaTimeIfChanged();
         }
-        if (!TextUtils.isEmpty(state.speedLimit)) {
-            sendSpeed(state.speedLimit);
+    }
+
+    private void reassertKnownRoadSpeedLimit(String reason) {
+        int kmh = speedNumber(state.speedLimit);
+        if (kmh <= 0) return;
+        lastSentSpeedLimit = kmh;
+        sendSpeedLimitFrame(kmh);
+        AppLog.navigation(app, "NAV_SPEED_LIMIT_REASSERT reason=" + clean(reason)
+                + " value=" + kmh);
+    }
+
+    private AdapterTxOutcome sendSpeedLimitFrame(int kmh) {
+        AdapterTxOutcome outcome = sender.sendSpeedLimit(Math.max(0, kmh));
+        if (outcome == AdapterTxOutcome.WRITTEN) {
+            lastSpeedLimitWrittenUsbEpoch = AdapterGateway.get(app).connectionEpoch();
         }
+        return outcome;
+    }
+
+    private void maybeReassertRoadSpeedLimitForTransport(String reason) {
+        int kmh = speedNumber(state.speedLimit);
+        AdapterGateway gateway = AdapterGateway.get(app);
+        long connectionEpoch = gateway.connectionEpoch();
+        if (!YandexRoadContextPolicy.shouldReassertTx(
+                kmh, gateway.usbReady(), connectionEpoch,
+                lastSpeedLimitWrittenUsbEpoch)) {
+            return;
+        }
+        AdapterTxOutcome outcome = sendSpeedLimitFrame(kmh);
+        AppLog.navigation(app, "NAV_SPEED_LIMIT_REASSERT reason=" + clean(reason)
+                + " value=" + kmh + " epoch=" + connectionEpoch
+                + " outcome=" + outcome);
     }
 
     private void sendRouteLoadingVisual() {
@@ -6274,26 +6438,36 @@ public final class NavigationFeature {
 
     private void markFinishReached(String source) {
         long now = System.currentTimeMillis();
-        boolean clearRoadSpeedLimit = !TextUtils.isEmpty(state.speedLimit)
-                || lastSentSpeedLimit > 0;
+        boolean preserveRoadContext = shouldPreserveRoadContext(source, now);
+        String retainedSpeedLimit = preserveRoadContext ? state.speedLimit : "";
+        boolean clearRoadSpeedLimit = !preserveRoadContext
+                && (!TextUtils.isEmpty(state.speedLimit) || lastSentSpeedLimit > 0);
         yandexFinishSuppressed = true;
         yandexWatchdogGeneration++;
         resetMainManeuverPreview("finish");
         clearFinalSegmentFinishDirection("finish reached " + clean(source));
         finishRecoverySuppressUntil = confirmedFinishHoldSource(source) ? now + FINISH_HOLD_MS : 0L;
-        speedLimitExpiryGeneration++;
-        lastYandexRoadSpeedLimitAt = 0L;
-        yandexSpeedLimitClearCandidateAt = 0L;
-        clearOverspeedTextWindow();
-        state = new NavigationState(true, true, false,
+        if (!preserveRoadContext) {
+            speedLimitExpiryGeneration++;
+            lastYandexRoadSpeedLimitAt = 0L;
+            yandexSpeedLimitClearCandidateAt = 0L;
+            clearOverspeedTextWindow();
+        }
+        state = new NavigationState(true, true,
+                preserveRoadContext && state.speedExceeded,
                 "context_ra_finish", maneuverLabel("context_ra_finish"), "",
                 state.routeDistance, state.routeTime, state.arrivalTime,
                 state.currentStreet, state.nextStreet, state.finishStreet,
-                "", state.currentSpeed, clean(source), now);
+                retainedSpeedLimit, state.currentSpeed,
+                preserveRoadContext ? state.source : clean(source), now);
         publishNavigationState();
-        if (clearRoadSpeedLimit) {
+        if (preserveRoadContext) {
+            sendSpeedLimitFrame(speedNumber(retainedSpeedLimit));
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_PRESERVED reason=finish_"
+                    + clean(source) + " value=" + clean(retainedSpeedLimit));
+        } else if (clearRoadSpeedLimit) {
             lastSentSpeedLimit = 0;
-            sender.sendSpeedLimit(0);
+            sendSpeedLimitFrame(0);
             AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=finish_"
                     + clean(source));
         }
@@ -6735,6 +6909,7 @@ public final class NavigationFeature {
         String current = clean(state.source);
         String next = clean(incoming);
         if (TextUtils.isEmpty(current)) return first(next, "gps_speed");
+        if (!state.active && (isYandexSource(next) || isDgisSource(next))) return next;
         if (isGpsSpeedSource(current) && (isYandexSource(next) || isDgisSource(next))) return next;
         return current;
     }
