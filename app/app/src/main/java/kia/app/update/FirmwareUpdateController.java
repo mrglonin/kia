@@ -23,7 +23,6 @@ import java.util.concurrent.Executors;
 
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
-import kia.app.core.model.UpdateState;
 import kia.app.navigation.domain.NavigationFeature;
 import kia.app.protocol.adapter.AdapterCommand;
 import kia.app.protocol.adapter.AdapterGateway;
@@ -466,8 +465,8 @@ public final class FirmwareUpdateController {
     private void setFirmware(String status, String asset, String url, String sha256,
                              long done, long total, boolean checking, boolean downloading,
                              boolean downloaded, boolean flashing) {
-        UpdateState current = StateStore.updates();
-        StateStore.setUpdates(app, current.withFirmware(status, asset, url, sha256, done,
+        StateStore.updateUpdates(app, current -> current.withFirmware(
+                status, asset, url, sha256, done,
                 total, checking, downloading, downloaded, flashing));
     }
 

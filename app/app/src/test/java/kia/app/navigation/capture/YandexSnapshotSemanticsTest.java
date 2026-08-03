@@ -12,6 +12,10 @@ public class YandexSnapshotSemanticsTest {
         assertTrue(YandexSnapshotSemantics.isEnvelopeKey("seq"));
         assertTrue(YandexSnapshotSemantics.isEnvelopeKey("wall_time_ms"));
         assertTrue(YandexSnapshotSemantics.isEnvelopeKey("snapshot_json"));
+        assertTrue(YandexSnapshotSemantics.isEnvelopeKey(
+                "location_relative_timestamp_ms"));
+        assertTrue(YandexSnapshotSemantics.isEnvelopeKey(
+                "location_absolute_timestamp_ms"));
         assertFalse(YandexSnapshotSemantics.isEnvelopeKey("maneuver"));
     }
 

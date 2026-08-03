@@ -7,6 +7,7 @@ import android.os.Build;
 import android.os.UserManager;
 
 import kia.app.core.settings.AppSettings;
+import kia.app.update.UpdateRuntimeStore;
 
 public final class BootReceiver extends BroadcastReceiver {
     @Override
@@ -15,6 +16,14 @@ public final class BootReceiver extends BroadcastReceiver {
         if (Build.VERSION.SDK_INT >= 24) {
             UserManager userManager = (UserManager) context.getSystemService(Context.USER_SERVICE);
             if (userManager != null && !userManager.isUserUnlocked()) return;
+        }
+        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+            AppSettings.resetUpdateCheckTimes(context);
+        }
+        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())
+                || Intent.ACTION_USER_UNLOCKED.equals(intent.getAction())
+                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+            UpdateRuntimeStore.resetPostedNotification(context);
         }
         if (!AppSettings.autoStart(context)) return;
         AppService.start(context);

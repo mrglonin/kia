@@ -1,6 +1,8 @@
 package kia.app.update;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -17,5 +19,29 @@ public class AppUpdateControllerTest {
     public void rejectsUnsupportedOrMalformedDigest() {
         assertEquals("", AppUpdateController.githubSha256("sha1:1234"));
         assertEquals("", AppUpdateController.githubSha256("sha256:not-a-digest"));
+    }
+
+    @Test
+    public void newerGithubReleaseWinsOverStaleManifest() {
+        assertTrue(AppUpdateController.preferGithubRelease(362, true, 363, true));
+        assertFalse(AppUpdateController.preferGithubRelease(363, true, 363, true));
+        assertFalse(AppUpdateController.preferGithubRelease(363, true, 362, true));
+    }
+
+    @Test
+    public void githubReleaseIsFallbackWhenManifestIsUnavailable() {
+        assertTrue(AppUpdateController.preferGithubRelease(0, false, 363, true));
+        assertFalse(AppUpdateController.preferGithubRelease(0, false, 0, false));
+    }
+
+    @Test
+    public void installableReleaseRequiresDigestAndSize() {
+        String sha = "07f4979ee2df95b62ce8c1a44f8ecc6a9892b9481951ab780962fe06508f8be7";
+        assertTrue(AppUpdateController.validReleaseMetadata(
+                363, "kia_363.apk", "https://example.test/kia_363.apk", sha, 123L));
+        assertFalse(AppUpdateController.validReleaseMetadata(
+                363, "kia_363.apk", "https://example.test/kia_363.apk", "", 123L));
+        assertFalse(AppUpdateController.validReleaseMetadata(
+                363, "kia_363.apk", "https://example.test/kia_363.apk", sha, 0L));
     }
 }

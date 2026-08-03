@@ -21,4 +21,18 @@ public final class YandexSpeedLimitFreshnessPolicyTest {
         assertFalse(YandexSpeedLimitFreshnessPolicy.shouldClear(
                 "", 0L, 20_000L, 12_000L));
     }
+
+    @Test
+    public void confirmedLimitSurvivesWhileFreshGpsSaysStationary() {
+        assertFalse(YandexSpeedLimitFreshnessPolicy.shouldClear(
+                "60", 10_000L, 40_000L, 12_000L, true));
+        assertTrue(YandexSpeedLimitFreshnessPolicy.shouldClear(
+                "60", 10_000L, 40_000L, 12_000L, false));
+    }
+
+    @Test
+    public void stationaryCannotRescueLimitThatWasNeverConfirmed() {
+        assertTrue(YandexSpeedLimitFreshnessPolicy.shouldClear(
+                "60", 0L, 40_000L, 12_000L, true));
+    }
 }

@@ -77,6 +77,9 @@ public final class AppSettings {
     private static final String KEY_MEDIA_TAB_VISIBLE = "media_tab_visible";
     private static final String KEY_EXPERT_MODE = "expert_mode";
     private static final String KEY_LAST_UPDATE_CHECK_AT = "last_update_check_at";
+    private static final String KEY_LAST_APP_UPDATE_CHECK_AT = "last_app_update_check_at";
+    private static final String KEY_LAST_NAVIGATOR_UPDATE_CHECK_AT =
+            "last_navigator_update_check_at";
     public static final int OTHER_SOURCE_ANDROID = 0;
     public static final int OTHER_SOURCE_USB = 1;
     public static final int OTHER_SOURCE_BLUETOOTH = 2;
@@ -1140,6 +1143,51 @@ public final class AppSettings {
 
     public static void setLastUpdateCheckAt(Context context, long value) {
         prefs(context).edit().putLong(KEY_LAST_UPDATE_CHECK_AT, Math.max(0L, value)).apply();
+    }
+
+    public static long lastAppUpdateCheckAt(Context context) {
+        SharedPreferences prefs = updateCheckPrefs(context);
+        return Math.max(0L, prefs.getLong(KEY_LAST_APP_UPDATE_CHECK_AT, 0L));
+    }
+
+    public static void setLastAppUpdateCheckAt(Context context, long value) {
+        long clean = Math.max(0L, value);
+        updateCheckPrefs(context).edit()
+                .putLong(KEY_LAST_APP_UPDATE_CHECK_AT, clean)
+                .apply();
+    }
+
+    public static long lastNavigatorUpdateCheckAt(Context context) {
+        SharedPreferences prefs = updateCheckPrefs(context);
+        return Math.max(0L, prefs.getLong(KEY_LAST_NAVIGATOR_UPDATE_CHECK_AT, 0L));
+    }
+
+    public static void setLastNavigatorUpdateCheckAt(Context context, long value) {
+        long clean = Math.max(0L, value);
+        updateCheckPrefs(context).edit()
+                .putLong(KEY_LAST_NAVIGATOR_UPDATE_CHECK_AT, clean)
+                .apply();
+    }
+
+    public static void resetUpdateCheckTimes(Context context) {
+        prefs(context).edit()
+                .putLong(KEY_LAST_UPDATE_CHECK_AT, 0L)
+                .putLong(KEY_LAST_APP_UPDATE_CHECK_AT, 0L)
+                .putLong(KEY_LAST_NAVIGATOR_UPDATE_CHECK_AT, 0L)
+                .apply();
+    }
+
+    private static synchronized SharedPreferences updateCheckPrefs(Context context) {
+        SharedPreferences prefs = prefs(context);
+        boolean appMigrated = prefs.contains(KEY_LAST_APP_UPDATE_CHECK_AT);
+        boolean navigatorMigrated = prefs.contains(KEY_LAST_NAVIGATOR_UPDATE_CHECK_AT);
+        if (appMigrated && navigatorMigrated) return prefs;
+        long legacy = Math.max(0L, prefs.getLong(KEY_LAST_UPDATE_CHECK_AT, 0L));
+        SharedPreferences.Editor editor = prefs.edit();
+        if (!appMigrated) editor.putLong(KEY_LAST_APP_UPDATE_CHECK_AT, legacy);
+        if (!navigatorMigrated) editor.putLong(KEY_LAST_NAVIGATOR_UPDATE_CHECK_AT, legacy);
+        editor.apply();
+        return prefs;
     }
 
     private static int clamp(int value, int min, int max) {

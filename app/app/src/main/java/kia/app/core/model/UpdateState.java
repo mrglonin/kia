@@ -15,6 +15,7 @@ public final class UpdateState {
     public final String navigatorVersion;
     public final String navigatorPackageName;
     public final String navigatorAsset;
+    public final String navigatorFingerprint;
     public final long navigatorDownloadedBytes;
     public final long navigatorTotalBytes;
     public final boolean navigatorAvailable;
@@ -38,7 +39,8 @@ public final class UpdateState {
                        long appDownloadedBytes, long appTotalBytes, boolean appAvailable,
                        boolean appChecking, boolean appDownloading, boolean appDownloaded,
                        String navigatorStatus, String navigatorVersion, String navigatorPackageName,
-                       String navigatorAsset, long navigatorDownloadedBytes, long navigatorTotalBytes,
+                       String navigatorAsset, String navigatorFingerprint,
+                       long navigatorDownloadedBytes, long navigatorTotalBytes,
                        boolean navigatorAvailable, boolean navigatorChecking,
                        boolean navigatorDownloading, boolean navigatorDownloaded,
                        boolean navigatorInstalling,
@@ -61,6 +63,7 @@ public final class UpdateState {
         this.navigatorVersion = safe(navigatorVersion);
         this.navigatorPackageName = safe(navigatorPackageName);
         this.navigatorAsset = safe(navigatorAsset);
+        this.navigatorFingerprint = safe(navigatorFingerprint);
         this.navigatorDownloadedBytes = navigatorDownloadedBytes;
         this.navigatorTotalBytes = navigatorTotalBytes;
         this.navigatorAvailable = navigatorAvailable;
@@ -84,7 +87,7 @@ public final class UpdateState {
     public static UpdateState empty() {
         return new UpdateState("App update: ожидание", "", "", "", 0, 0,
                 false, false, false, false,
-                "Navigator update: ожидание", "", "", "", 0, 0,
+                "Navigator update: ожидание", "", "", "", "", 0, 0,
                 false, false, false, false, false,
                 "Firmware update: ожидание", "", "", "", 0, 0,
                 false, false, false, false, false);
@@ -96,6 +99,7 @@ public final class UpdateState {
         return new UpdateState(status, asset, url, sha256, done, total, available,
                 checking, downloading, downloaded,
                 navigatorStatus, navigatorVersion, navigatorPackageName, navigatorAsset,
+                navigatorFingerprint,
                 navigatorDownloadedBytes, navigatorTotalBytes, navigatorAvailable,
                 navigatorChecking, navigatorDownloading, navigatorDownloaded,
                 navigatorInstalling,
@@ -106,14 +110,14 @@ public final class UpdateState {
     }
 
     public UpdateState withNavigator(String status, String version, String packageName,
-                                     String asset, long done, long total,
+                                     String asset, String fingerprint, long done, long total,
                                      boolean available, boolean checking,
                                      boolean downloading, boolean downloaded,
                                      boolean installing) {
         return new UpdateState(appStatus, appAsset, appUrl, appSha256,
                 appDownloadedBytes, appTotalBytes, appAvailable, appChecking,
                 appDownloading, appDownloaded,
-                status, version, packageName, asset, done, total, available,
+                status, version, packageName, asset, fingerprint, done, total, available,
                 checking, downloading, downloaded, installing,
                 firmwareStatus, firmwareAsset, firmwareUrl, firmwareSha256,
                 firmwareDownloadedBytes, firmwareTotalBytes, firmwareChecking,
@@ -127,6 +131,7 @@ public final class UpdateState {
         return new UpdateState(appStatus, appAsset, appUrl, appSha256, appDownloadedBytes,
                 appTotalBytes, appAvailable, appChecking, appDownloading, appDownloaded,
                 navigatorStatus, navigatorVersion, navigatorPackageName, navigatorAsset,
+                navigatorFingerprint,
                 navigatorDownloadedBytes, navigatorTotalBytes, navigatorAvailable,
                 navigatorChecking, navigatorDownloading, navigatorDownloaded,
                 navigatorInstalling,
@@ -138,6 +143,7 @@ public final class UpdateState {
         return new UpdateState(appStatus, appAsset, appUrl, appSha256, appDownloadedBytes,
                 appTotalBytes, appAvailable, appChecking, appDownloading, appDownloaded,
                 navigatorStatus, navigatorVersion, navigatorPackageName, navigatorAsset,
+                navigatorFingerprint,
                 navigatorDownloadedBytes, navigatorTotalBytes, navigatorAvailable,
                 navigatorChecking, navigatorDownloading, navigatorDownloaded,
                 navigatorInstalling,

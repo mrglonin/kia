@@ -129,6 +129,18 @@ public final class PendingFrameQueueTest {
         assertEquals(80, limit[6] & 0xff);
     }
 
+    @Test
+    public void acknowledgementOwnedActionsAreNeverReplayed() {
+        PendingFrameQueue queue = new PendingFrameQueue(80);
+
+        queue.offer(frame(AdapterProtocol.CMD_FIRMWARE, 1));
+        queue.offer(frame(AdapterProtocol.CMD_RAW_CAN_TX, 2));
+        queue.offer(frame(AdapterProtocol.CMD_NAV_ON, 1));
+
+        assertEquals(1, queue.size());
+        assertEquals(AdapterProtocol.CMD_NAV_ON, command(queue.poll()));
+    }
+
     private static byte[] frame(int command, int value) {
         return new byte[]{(byte) 0xBB, 0x41, (byte) 0xA1, 7,
                 (byte) command, (byte) value, 0};

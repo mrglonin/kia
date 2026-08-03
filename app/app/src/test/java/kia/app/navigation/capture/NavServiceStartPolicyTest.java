@@ -23,4 +23,11 @@ public final class NavServiceStartPolicyTest {
     public void elapsedClockResetDoesNotBlockRecovery() {
         assertTrue(NavServiceStartPolicy.shouldStart(false, 10L, 50_000L, 5_000L));
     }
+
+    @Test
+    public void receiverWakeLockIsOnlyForAnAcceptedColdStartAttempt() {
+        assertTrue(NavServiceStartPolicy.shouldAcquireReceiverWakeLock(false, true));
+        assertFalse(NavServiceStartPolicy.shouldAcquireReceiverWakeLock(false, false));
+        assertFalse(NavServiceStartPolicy.shouldAcquireReceiverWakeLock(true, true));
+    }
 }

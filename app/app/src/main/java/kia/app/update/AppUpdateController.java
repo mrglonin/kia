@@ -24,10 +24,11 @@ import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
-import kia.app.core.model.UpdateState;
+import kia.app.core.settings.AppSettings;
 
 public final class AppUpdateController {
     private static final String LATEST_MANIFEST_URL =
@@ -36,10 +37,11 @@ public final class AppUpdateController {
             "https://api.github.com/repos/mrglonin/kia/releases/latest";
     private static final String APK_MIME = "application/vnd.android.package-archive";
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor();
+    private static final AtomicBoolean CHECK_BUSY = new AtomicBoolean();
 
     private final Context app;
     private volatile boolean busy;
-    private ReleaseInfo latest = new ReleaseInfo();
+    private static volatile ReleaseInfo latest = new ReleaseInfo();
 
     public AppUpdateController(Context context) {
         this.app = context.getApplicationContext();
@@ -50,7 +52,7 @@ public final class AppUpdateController {
     }
 
     public void checkAsync(Activity activity) {
-        if (busy) {
+        if (busy || !CHECK_BUSY.compareAndSet(false, true)) {
             if (activity != null) Toast.makeText(activity, "Проверка уже идёт", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -77,6 +79,10 @@ public final class AppUpdateController {
                 }
                 setApp(status, info.assetName, info.downloadUrl, info.sha256, 0,
                         info.assetSize, available, false, false, downloaded);
+                if (releaseReady(info)) {
+                    AppSettings.setLastAppUpdateCheckAt(app, System.currentTimeMillis());
+                }
+                UpdateNotificationController.refresh(app);
                 AppLog.line(app, "App update: currentCode=" + installed.versionCode
                         + " latestCode=" + info.versionCode
                         + " currentSize=" + installed.sourceSize
@@ -86,9 +92,11 @@ public final class AppUpdateController {
             } catch (Exception e) {
                 setApp("App update: ошибка " + e.getClass().getSimpleName(), "", "", "",
                         0, 0, false, false, false, false);
+                UpdateNotificationController.refresh(app);
                 AppLog.line(app, "App update: " + e.getClass().getSimpleName() + " " + e.getMessage());
             } finally {
                 busy = false;
+                CHECK_BUSY.set(false);
             }
         });
     }
@@ -96,7 +104,7 @@ public final class AppUpdateController {
     public void downloadAndInstall(Activity activity) {
         if (activity == null) return;
         ReleaseInfo source = latest;
-        if (TextUtils.isEmpty(source.downloadUrl)) {
+        if (!releaseReady(source)) {
             checkAsync(activity);
             Toast.makeText(activity, "Сначала проверяю обновление", Toast.LENGTH_SHORT).show();
             return;
@@ -195,13 +203,52 @@ public final class AppUpdateController {
     }
 
     private ReleaseInfo loadLatestRelease() throws Exception {
+        ReleaseInfo manifest = null;
+        ReleaseInfo github = null;
+        Exception manifestFailure = null;
+        Exception githubFailure = null;
         try {
-            ReleaseInfo manifest = loadManifestRelease();
-            if (!TextUtils.isEmpty(manifest.downloadUrl)) return manifest;
+            manifest = loadManifestRelease();
         } catch (Exception e) {
+            manifestFailure = e;
             AppLog.line(app, "App update manifest fallback: " + e.getClass().getSimpleName());
         }
-        return loadGithubRelease();
+        try {
+            github = loadGithubRelease();
+        } catch (Exception e) {
+            githubFailure = e;
+            AppLog.line(app, "App update release fallback: " + e.getClass().getSimpleName());
+        }
+        if (preferGithubRelease(manifest == null ? 0 : manifest.versionCode,
+                releaseReady(manifest), github == null ? 0 : github.versionCode,
+                releaseReady(github))) {
+            return github;
+        }
+        if (releaseReady(manifest)) return manifest;
+        if (releaseReady(github)) return github;
+        if (manifestFailure != null) throw manifestFailure;
+        if (githubFailure != null) throw githubFailure;
+        return manifest == null ? new ReleaseInfo() : manifest;
+    }
+
+    static boolean preferGithubRelease(int manifestCode, boolean manifestReady,
+                                       int githubCode, boolean githubReady) {
+        return githubReady && (!manifestReady || githubCode > manifestCode);
+    }
+
+    private static boolean releaseReady(ReleaseInfo info) {
+        return info != null && validReleaseMetadata(info.versionCode, info.assetName,
+                info.downloadUrl, info.sha256, info.assetSize);
+    }
+
+    static boolean validReleaseMetadata(int versionCode, String assetName, String downloadUrl,
+                                        String sha256, long assetSize) {
+        return versionCode > 0
+                && assetName != null && !assetName.trim().isEmpty()
+                && assetName.toLowerCase(Locale.US).endsWith(".apk")
+                && downloadUrl != null && !downloadUrl.trim().isEmpty()
+                && sha256 != null && sha256.matches("(?i)[0-9a-f]{64}")
+                && assetSize > 0L;
     }
 
     private ReleaseInfo loadManifestRelease() throws Exception {
@@ -375,8 +422,8 @@ public final class AppUpdateController {
     private void setApp(String status, String asset, String url, String sha256, long done,
                         long total, boolean available, boolean checking, boolean downloading,
                         boolean downloaded) {
-        UpdateState current = StateStore.updates();
-        StateStore.setUpdates(app, current.withApp(status, asset, url, sha256, done, total,
+        StateStore.updateUpdates(app, current -> current.withApp(
+                status, asset, url, sha256, done, total,
                 available, checking, downloading, downloaded));
     }
 

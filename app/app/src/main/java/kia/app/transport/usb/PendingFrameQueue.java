@@ -23,8 +23,9 @@ final class PendingFrameQueue {
         this.maxSize = Math.max(1, maxSize);
     }
 
-    void offer(byte[] frame) {
-        if (frame == null || frame.length == 0) return;
+    boolean offer(byte[] frame) {
+        if (frame == null || frame.length == 0) return false;
+        if (!isReplaySafe(frame)) return false;
         if (isNavigationFrame(frame)) {
             if (isNavigationOff(frame)) {
                 invalidateNavigation();
@@ -34,6 +35,7 @@ final class PendingFrameQueue {
         }
         while (frames.size() >= maxSize) frames.pollFirst();
         frames.offerLast(frame);
+        return true;
     }
 
     byte[] poll() {
@@ -102,6 +104,13 @@ final class PendingFrameQueue {
 
     static boolean isSpeedLimitFrame(byte[] frame) {
         return command(frame) == AdapterProtocol.CMD_SPEED_LIMIT;
+    }
+
+    /** Firmware blocks and raw CAN actions have their own acknowledgement/retry owners. */
+    static boolean isReplaySafe(byte[] frame) {
+        int command = command(frame);
+        return command != AdapterProtocol.CMD_FIRMWARE
+                && command != AdapterProtocol.CMD_RAW_CAN_TX;
     }
 
     private static int command(byte[] frame) {

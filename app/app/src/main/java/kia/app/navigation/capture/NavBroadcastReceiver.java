@@ -143,22 +143,26 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
         }
     }
 
-    private static void ensureServiceStarted(Context context) {
+    private static boolean ensureServiceStarted(Context context) {
         long now = SystemClock.elapsedRealtime();
         synchronized (NavBroadcastReceiver.class) {
             if (!NavServiceStartPolicy.shouldStart(
                     AppService.isRunning(), now, lastServiceStartAt,
                     SERVICE_START_MIN_INTERVAL_MS)) {
-                return;
+                return false;
             }
             lastServiceStartAt = now;
         }
-        AppService.start(context.getApplicationContext());
+        return AppService.start(context.getApplicationContext());
     }
 
     private static void prepareService(Context context) {
-        if (!AppService.isRunning()) keepCpuAwake(context);
-        ensureServiceStarted(context);
+        boolean running = AppService.isRunning();
+        boolean startAccepted = running ? false : ensureServiceStarted(context);
+        if (NavServiceStartPolicy.shouldAcquireReceiverWakeLock(
+                running, startAccepted)) {
+            keepCpuAwake(context);
+        }
     }
 
     private static void keepCpuAwake(Context context) {

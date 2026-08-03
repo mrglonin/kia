@@ -12,6 +12,26 @@ final class CompassTxPolicy {
                 && (!previouslySendAllowed || connectionEpoch != previousConnectionEpoch);
     }
 
+    static boolean shouldKeepAlive(boolean sendAllowed, boolean usbReady,
+                                   long nowElapsedMs, long lastSuccessfulTxElapsedMs,
+                                   long keepAliveMs) {
+        return sendAllowed && usbReady
+                && nowElapsedMs > 0L
+                && lastSuccessfulTxElapsedMs > 0L
+                && lastSuccessfulTxElapsedMs <= nowElapsedMs
+                && keepAliveMs >= 0L
+                && nowElapsedMs - lastSuccessfulTxElapsedMs >= keepAliveMs;
+    }
+
+    static boolean retryAllowed(int step, int lastAttemptedStep,
+                                long nowElapsedMs, long lastAttemptElapsedMs,
+                                long retryIntervalMs) {
+        if (step != lastAttemptedStep || lastAttemptElapsedMs <= 0L) return true;
+        return retryIntervalMs >= 0L
+                && lastAttemptElapsedMs <= nowElapsedMs
+                && nowElapsedMs - lastAttemptElapsedMs >= retryIntervalMs;
+    }
+
     static int storedStep(String clusterTx) {
         String text = clusterTx == null ? "" : clusterTx.trim();
         if (text.isEmpty()) return -1;

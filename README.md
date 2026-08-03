@@ -2,30 +2,30 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-[![Скачать KIA 23.08 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.08%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.08-362/kia_362.apk)
+[![Скачать KIA 23.09 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.09%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.09-363/kia_363.apk)
 
-- APK KIA: [kia_362.apk](https://github.com/mrglonin/kia/releases/download/v23.08-362/kia_362.apk)
-- APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-heartbeat.apk](https://github.com/mrglonin/kia/releases/download/v23.08-362/yandex_navi-7_10-universal-kia-mod-heartbeat.apk)
+- APK KIA: [kia_363.apk](https://github.com/mrglonin/kia/releases/download/v23.09-363/kia_363.apk)
+- APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-freshness.apk](https://github.com/mrglonin/kia/releases/download/v23.09-363/yandex_navi-7_10-universal-kia-mod-freshness.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.08-362`](https://github.com/mrglonin/kia/releases/tag/v23.08-362)
-- Текущий публичный релиз: `23.08` / `362`
+- GitHub Release: [`v23.09-363`](https://github.com/mrglonin/kia/releases/tag/v23.09-363)
+- Текущий публичный релиз: `23.09` / `363`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.08` / `362` | `updates/kia_362.apk`, 6 022 183 байт | `90041771384011d91ca19ee63a372763b0e3cf5a2768dde1ae914cdefd19e4d5` |
-| Yandex Navigator Kia mod | `7.10-kia.20260723-heartbeat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-heartbeat.apk`](https://github.com/mrglonin/kia/releases/download/v23.08-362/yandex_navi-7_10-universal-kia-mod-heartbeat.apk), 115 302 487 байт | `21fb15289695e7913b8e3e62902212ad0c06dd93f6f16c642c027a41b484ba37` |
+| KIA app | `23.09` / `363` | `updates/kia_363.apk`, 6 062 771 байт | `8aed01c8bfbc0cb71a107d7d5789ce75cc7fb3ee6e092133c7ba88093999e75f` |
+| Yandex Navigator Kia mod | `7.10-kia.20260723-freshness` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-freshness.apk`](https://github.com/mrglonin/kia/releases/download/v23.09-363/yandex_navi-7_10-universal-kia-mod-freshness.apk), 115 302 487 байт | `0b6e336aaeb0211cd011de28ba66567e9c1e879b5aa6fb449ebf11fef14a71fd` |
 
-В `23.08` компас возвращает последнее достоверное направление сразу после стартовой паузы и без начала движения. GPS-course ниже `1,4 м/с` не может заменить его ложным севером, а запуск, завершение маршрута и новая USB-сессия принудительно переотправляют тот же compass TX.
+В `23.09` устранены зависания компаса, текущей скорости и дорожного ограничения. Компас контролирует не только наличие датчика, но и поступление реальных samples, переключается на геомагнитный fallback и повторяет актуальный TX после новой USB-сессии. Текущая скорость использует свежий Yandex/GPS sample, а при истечении TTL очищается; дорожный лимит обновляется и остаётся видимым независимо от остановки и наличия маршрута.
 
-Дорожное ограничение теперь не зависит ни от скорости автомобиля, ни от наличия маршрута: свежий лимит остаётся после `NAV OFF`, финиша и reconnect. Текущая скорость — отдельный знак: он скрыт при `0`, но не скрывает лимит. Подтверждённый ноль, истёкшая свежесть, выключение навигации или смена источника по-прежнему очищают его.
+USB-путь получил защиту от зависшего reader thread, старого поколения callbacks, нарушения порядка записи и reconnect-цикла без паузы. Очередь сохраняет только актуальные latest-only кадры, а health-monitor различает новую сессию и действительно остановившийся обмен. Запуск foreground service на Android 16 больше не удерживает wake-lock, если ОС отклонила сам запуск.
 
-Yandex mod теперь отправляет свежий Core Bridge snapshot раз в секунду, в том числе без маршрута и после ухода в фон. Это даёт KIA реально обновлять лимит, а не просто долго держать старое значение. Для полного исправления нужно обновить и KIA, и Yandex mod. Медиа-профиль `TEYES / CC4` не изменялся.
+Yandex mod передаёт отдельные monotonic timestamps источников и восстанавливает подписку Core Bridge после паузы/фона. KIA не принимает переставший обновляться speed/limit как свежий heartbeat. Для полного исправления фоновой свежести нужно обновить и KIA, и Yandex mod. Медиа-профиль `TEYES / CC4` не изменялся.
 
-Одинаковый heartbeat не перезапускает фоновый сервис и не перезаписывает UI/настройки: он только освежает freshness и проверяет USB-сессию. Изменения скорости/лимита применяются сразу, а свежий лимит повторяется после нового `connectionEpoch`.
+OTA теперь проверяется фоновым сервисом, а не только открытым Activity: успешная проверка повторяется раз в час, сетевой retry запускается каждые 15 минут. Реальное системное уведомление объединяет KIA/Yandex, восстанавливается после перезагрузки магнитолы, открывает раздел обновлений и не показывает модальное окно при движении либо неизвестной/устаревшей скорости. Успех одного источника больше не подавляет повтор другого, stale `latest.json` сравнивается с GitHub Releases, а SHA/размер обязательны до предложения установки.
 
-Проверено: `275` unit-тестов, `0 failures/errors/skips`; `lintRelease` — `0 errors` / `72 warnings`; оба APK прошли ZIP/zipalign/signature. На Android 15 проверены обновления KIA `23.07 → 23.08` и прежнего Yandex mod на heartbeat-сборку с той же подписью; heartbeat и его приём KIA подтверждены в foreground и background.
+Проверено: `337` unit-тестов, `0 failures/errors/skips`; `lintDebug` и `lintRelease` — по `0 errors` / `72 warnings`; clean release build, ZIP, zipalign и APK Signature Scheme v2. На физическом Android 16 проверены восстановление после остановки sensor samples, 90 секунд Doze, Yandex в фоне более 100 секунд, expiry скорости и безопасный отказ запуска foreground service. Физический USB CAN-адаптер в этот прогон не подключался.
 
 ## Что работает
 
@@ -68,19 +68,19 @@ Yandex mod теперь отправляет свежий Core Bridge snapshot �
 ADB:
 
 ```bash
-adb install -r updates/kia_362.apk
-curl -L -o /tmp/yandex_navi-7_10-universal-kia-mod-heartbeat.apk \
-  https://github.com/mrglonin/kia/releases/download/v23.08-362/yandex_navi-7_10-universal-kia-mod-heartbeat.apk
-adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-heartbeat.apk
+adb install -r updates/kia_363.apk
+curl -L -o /tmp/yandex_navi-7_10-universal-kia-mod-freshness.apk \
+  https://github.com/mrglonin/kia/releases/download/v23.09-363/yandex_navi-7_10-universal-kia-mod-freshness.apk
+adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-freshness.apk
 ```
 
 На магнитоле:
 
-1. Установить `kia_362.apk`.
+1. Установить `kia_363.apk`.
 2. Выдать runtime permissions: уведомления, геолокация и Bluetooth — только для используемых функций.
 3. Включить специальные права: поверх окон, доступ к уведомлениям и игнор оптимизации батареи.
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
-5. Установить или обновить Yandex Navigator mod до `yandex_navi-7_10-universal-kia-mod-heartbeat.apk`. Package/versionCode остаются `ru.yandex.yandexnavi` / `71011062`; KIA распознаёт новую сборку по SHA-256 и размеру.
+5. Установить или обновить Yandex Navigator mod до `yandex_navi-7_10-universal-kia-mod-freshness.apk`. Package/versionCode остаются `ru.yandex.yandexnavi` / `71011062`; KIA распознаёт новую сборку по SHA-256 и размеру.
 
 С уже установленного Kia mod обновление ставится поверх и сохраняет данные. Официальный либо иначе подписанный Yandex Android не разрешит заменить этим APK: сначала сохраните нужные данные, удалите прежнее приложение и затем установите mod.
 
@@ -103,7 +103,7 @@ Release-сборка подписывается публичным debug-keystor
 
 ```bash
 ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
-$ADB -s emulator-5554 install -r updates/kia_362.apk
+$ADB -s emulator-5554 install -r updates/kia_363.apk
 $ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning
@@ -132,7 +132,7 @@ adb pull /sdcard/Android/data/kia.app/files/navigation-logs/
 
 - `app/` - Android Gradle project для `kia.app`.
 - `updates/` - публичные APK и `latest.json`.
-- `updates/yandex/` - installable Yandex Navigator Kia mod APK.
+- `updates/yandex/` - прежний совместимый ARM7-артефакт; актуальный universal Yandex mod публикуется в assets текущего GitHub Release.
 - `signing/` - публичный debug release keystore.
 - `tools/` - CAN/UART/navigation/APK utilities.
 - `docs/screenshots/` - скриншоты текущего публичного релиза.
