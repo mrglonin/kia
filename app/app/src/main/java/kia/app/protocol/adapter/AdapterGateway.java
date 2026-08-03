@@ -43,6 +43,18 @@ public final class AdapterGateway {
         return transport.connectionEpoch();
     }
 
+    public long connectedAtElapsedRealtime() {
+        return transport.connectedAtElapsedRealtime();
+    }
+
+    public long lastRxAtElapsedRealtime() {
+        return transport.lastRxAtElapsedRealtime();
+    }
+
+    public void reconnect(String reason) {
+        transport.reconnect(reason);
+    }
+
     public AdapterTxOutcome send(AdapterCommand command) {
         if (command == null || command.frame == null) return AdapterTxOutcome.BLOCKED;
         boolean importantMedia = isImportantMediaCommand(command.label);
@@ -73,13 +85,13 @@ public final class AdapterGateway {
 
     public void beginExclusiveUpdate() {
         exclusiveUpdateMode = true;
-        StateStore.setUpdates(app, StateStore.updates().withExclusiveUsbMode(true));
+        StateStore.updateUpdates(app, current -> current.withExclusiveUsbMode(true));
         AppLog.line(app, "Adapter: exclusive firmware update mode on");
     }
 
     public void endExclusiveUpdate() {
         exclusiveUpdateMode = false;
-        StateStore.setUpdates(app, StateStore.updates().withExclusiveUsbMode(false));
+        StateStore.updateUpdates(app, current -> current.withExclusiveUsbMode(false));
         AppLog.line(app, "Adapter: exclusive firmware update mode off");
     }
 

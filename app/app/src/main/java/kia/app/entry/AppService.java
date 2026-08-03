@@ -42,6 +42,9 @@ import kia.app.navigation.overlay.NavigationOverlayController;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.rcta.RctaOverlayController;
 import kia.app.tpms.TpmsController;
+import kia.app.update.AppUpdateCheckPolicy;
+import kia.app.update.AppUpdateController;
+import kia.app.update.NavigatorUpdateController;
 
 public final class AppService extends Service {
     private static final String CHANNEL = "kia_canbus_connection";
@@ -69,23 +72,52 @@ public final class AppService extends Service {
     private PowerManager.WakeLock serviceWakeLock;
     private final Handler wakeLockHandler = new Handler(Looper.getMainLooper());
     private final Runnable renewWakeLock = this::acquireServiceWakeLock;
+    private final Handler updateCheckHandler = new Handler(Looper.getMainLooper());
+    private final Runnable backgroundUpdateCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (!serviceRunning || terminalForegroundFailure) return;
+            long now = System.currentTimeMillis();
+            boolean appDue = AppUpdateCheckPolicy.shouldCheck(
+                    now, AppSettings.lastAppUpdateCheckAt(AppService.this));
+            boolean navigatorDue = AppUpdateCheckPolicy.shouldCheck(
+                    now, AppSettings.lastNavigatorUpdateCheckAt(AppService.this));
+            if (appDue || navigatorDue) {
+                if (appUpdater == null) appUpdater = new AppUpdateController(AppService.this);
+                if (navigatorUpdater == null) {
+                    navigatorUpdater = new NavigatorUpdateController(AppService.this);
+                }
+                AppLog.line(AppService.this, "Background update check: Kia=" + appDue
+                        + " Yandex=" + navigatorDue);
+                if (appDue) appUpdater.checkAsync();
+                if (navigatorDue) navigatorUpdater.checkAsync();
+            }
+            updateCheckHandler.postDelayed(this, AppUpdateCheckPolicy.BACKGROUND_POLL_MS);
+        }
+    };
+    private AppUpdateController appUpdater;
+    private NavigatorUpdateController navigatorUpdater;
     private boolean navReceiverRegistered;
     private boolean bluetoothCallReceiverRegistered;
     private boolean locationProviderReceiverRegistered;
     private boolean terminalForegroundFailure;
     private long lastLocationProviderRefreshAt;
 
-    public static void start(Context context) {
+    /** Returns whether Android accepted the service launch request. */
+    public static boolean start(Context context) {
         Intent intent = new Intent(context, AppService.class);
         try {
-            if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent);
-            else context.startService(intent);
+            if (Build.VERSION.SDK_INT >= 26) {
+                return context.startForegroundService(intent) != null;
+            }
+            return context.startService(intent) != null;
         } catch (Exception e) {
             String stage = "launch " + e.getClass().getSimpleName();
             String health = foregroundFailureHealth(stage);
             StateStore.setAdapter(context, StateStore.adapter().withHealth(health));
             AppLog.line(context, "Service: start blocked " + e.getClass().getSimpleName()
                     + " " + safeMessage(e));
+            return false;
         }
     }
 
@@ -131,6 +163,7 @@ public final class AppService extends Service {
         rctaOverlay = RctaOverlayController.get(this);
         rctaOverlay.start();
         serviceRunning = true;
+        updateCheckHandler.postDelayed(backgroundUpdateCheck, 10_000L);
     }
 
     @Override
@@ -181,6 +214,7 @@ public final class AppService extends Service {
     @Override
     public void onDestroy() {
         serviceRunning = false;
+        updateCheckHandler.removeCallbacks(backgroundUpdateCheck);
         if (healthMonitor != null) healthMonitor.stop();
         if (mediaCapture != null) mediaCapture.stop();
         MediaClusterSender.get(this).stopSynchronizedPath();

@@ -1,23 +1,23 @@
 {
   "app": {
-    "version_name": "23.08",
-    "version_code": 362,
-    "asset_name": "kia_362.apk",
-    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.08-362/kia_362.apk",
-    "sha256": "90041771384011d91ca19ee63a372763b0e3cf5a2768dde1ae914cdefd19e4d5",
-    "size": 6022183
+    "version_name": "23.09",
+    "version_code": 363,
+    "asset_name": "kia_363.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.09-363/kia_363.apk",
+    "sha256": "8aed01c8bfbc0cb71a107d7d5789ce75cc7fb3ee6e092133c7ba88093999e75f",
+    "size": 6062771
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
-    "version": "7.10-kia.20260723-heartbeat",
+    "version": "7.10-kia.20260723-freshness",
     "version_code": 71011062,
     "package": "ru.yandex.yandexnavi",
     "apk_dir": "updates/yandex",
     "files": [
       {
-        "name": "yandex_navi-7_10-universal-kia-mod-heartbeat.apk",
-        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.08-362/yandex_navi-7_10-universal-kia-mod-heartbeat.apk",
-        "sha256": "21fb15289695e7913b8e3e62902212ad0c06dd93f6f16c642c027a41b484ba37",
+        "name": "yandex_navi-7_10-universal-kia-mod-freshness.apk",
+        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.09-363/yandex_navi-7_10-universal-kia-mod-freshness.apk",
+        "sha256": "0b6e336aaeb0211cd011de28ba66567e9c1e879b5aa6fb449ebf11fef14a71fd",
         "size": 115302487
       }
     ]

@@ -27,7 +27,13 @@ final class YandexSnapshotSemantics {
                 || "snapshotjson".equals(clean)
                 || "rawsnapshotjson".equals(clean)
                 || "broadcastreceivedat".equals(clean)
-                || "receivedatelapsedms".equals(clean);
+                || "receivedatelapsedms".equals(clean)
+                || "locationrelativetimestampms".equals(clean)
+                || "locationrelativetimestamp".equals(clean)
+                || "locationelapsedrealtimems".equals(clean)
+                || "locationabsolutetimestampms".equals(clean)
+                || "locationabsolutetimestamp".equals(clean)
+                || "locationtimestampms".equals(clean);
     }
 
     static boolean isMicroKey(String key) {

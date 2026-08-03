@@ -27,6 +27,30 @@ public final class CompassTxPolicyTest {
     }
 
     @Test
+    public void keepAliveIsBoundedAndRequiresCurrentCompassOwnership() {
+        assertFalse(CompassTxPolicy.shouldKeepAlive(
+                true, true, 14_999L, 10_000L, 5000L));
+        assertTrue(CompassTxPolicy.shouldKeepAlive(
+                true, true, 15_000L, 10_000L, 5000L));
+        assertFalse(CompassTxPolicy.shouldKeepAlive(
+                false, true, 20_000L, 10_000L, 5000L));
+        assertFalse(CompassTxPolicy.shouldKeepAlive(
+                true, false, 20_000L, 10_000L, 5000L));
+        assertFalse(CompassTxPolicy.shouldKeepAlive(
+                true, true, 20_000L, 0L, 5000L));
+    }
+
+    @Test
+    public void failedSameStepRetryIsRateLimitedButNewStepIsImmediate() {
+        assertFalse(CompassTxPolicy.retryAllowed(
+                12, 12, 10_999L, 10_000L, 1000L));
+        assertTrue(CompassTxPolicy.retryAllowed(
+                12, 12, 11_000L, 10_000L, 1000L));
+        assertTrue(CompassTxPolicy.retryAllowed(
+                15, 12, 10_001L, 10_000L, 1000L));
+    }
+
+    @Test
     public void startupCanRestoreLatestPersistedCompassStepWithoutNewHeading() {
         String tx = "compass step=9 bytes=old outcome=WRITTEN\n"
                 + "speedLimit=60 bytes=speed outcome=WRITTEN\n"

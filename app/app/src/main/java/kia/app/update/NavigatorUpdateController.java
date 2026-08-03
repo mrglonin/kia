@@ -16,6 +16,7 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.lang.ref.WeakReference;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -30,10 +31,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
-import kia.app.core.model.UpdateState;
+import kia.app.core.settings.AppSettings;
 
 public final class NavigatorUpdateController {
     private static final String LATEST_MANIFEST_URL =
@@ -42,12 +44,14 @@ public final class NavigatorUpdateController {
             "https://raw.githubusercontent.com/mrglonin/kia/main/";
     private static final String DEFAULT_PACKAGE = "ru.yandex.yandexnavi";
     private static final ExecutorService EXEC = Executors.newSingleThreadExecutor();
+    private static final AtomicBoolean CHECK_BUSY = new AtomicBoolean();
     private static final int INSTALL_REQUEST = 29032;
 
     private final Context app;
     private volatile boolean busy;
-    private volatile boolean installAfterCheck;
-    private NavigatorInfo latest = new NavigatorInfo();
+    private static volatile NavigatorInfo latest = new NavigatorInfo();
+    private static volatile WeakReference<Activity> installAfterCheckActivity =
+            new WeakReference<>(null);
 
     public NavigatorUpdateController(Context context) {
         this.app = context.getApplicationContext();
@@ -58,7 +62,7 @@ public final class NavigatorUpdateController {
     }
 
     public void checkAsync(Activity activity) {
-        if (busy) {
+        if (busy || !CHECK_BUSY.compareAndSet(false, true)) {
             if (activity != null) Toast.makeText(activity, "Проверка Navigator уже идёт", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -70,7 +74,7 @@ public final class NavigatorUpdateController {
                 NavigatorInfo info = loadManifestNavigator();
                 latest = info;
                 InstalledApkInfo installed = installedNavigator(info.packageName);
-                boolean manifestReady = !info.files.isEmpty();
+                boolean manifestReady = info.installable();
                 boolean canInstall = manifestReady && shouldInstall(info, installed);
                 boolean downloaded = canInstall && allDownloaded(info);
                 String status;
@@ -83,27 +87,34 @@ public final class NavigatorUpdateController {
                 else status = "Navigator update: установлена новее";
                 setNavigator(status, info.version, info.packageName, info.displayAsset(), 0,
                         info.totalSize(), canInstall, false, false, downloaded, false);
+                if (manifestReady && info.versionCode > 0) {
+                    AppSettings.setLastNavigatorUpdateCheckAt(app, System.currentTimeMillis());
+                }
+                UpdateNotificationController.refresh(app);
                 AppLog.line(app, "Navigator update: installedCode=" + installed.versionCode
                         + " latestCode=" + info.versionCode
                         + " installedSize=" + installed.sourceSize
                         + " latestSize=" + info.totalSize()
                         + " installedSha=" + installed.shortSha()
                         + " files=" + info.files.size());
-                if (installAfterCheck) {
-                    installAfterCheck = false;
-                    if (activity != null && canInstall) {
+                Activity pendingActivity = installAfterCheckActivity.get();
+                installAfterCheckActivity = new WeakReference<>(null);
+                if (pendingActivity != null && canInstall
+                        && !pendingActivity.isFinishing() && !pendingActivity.isDestroyed()) {
                         busy = false;
-                        activity.runOnUiThread(() -> downloadAndInstall(activity));
+                        pendingActivity.runOnUiThread(
+                                () -> downloadAndInstall(pendingActivity));
                         return;
-                    }
                 }
             } catch (Exception e) {
-                installAfterCheck = false;
+                installAfterCheckActivity = new WeakReference<>(null);
                 setNavigator("Navigator update: ошибка " + e.getClass().getSimpleName(), "",
                         DEFAULT_PACKAGE, "", 0, 0, false, false, false, false, false);
+                UpdateNotificationController.refresh(app);
                 AppLog.line(app, "Navigator update check: " + e.getClass().getSimpleName() + " " + e.getMessage());
             } finally {
                 busy = false;
+                CHECK_BUSY.set(false);
             }
         });
     }
@@ -111,8 +122,8 @@ public final class NavigatorUpdateController {
     public void downloadAndInstall(Activity activity) {
         if (activity == null) return;
         NavigatorInfo source = latest;
-        if (source.files.isEmpty()) {
-            installAfterCheck = true;
+        if (!source.installable()) {
+            installAfterCheckActivity = new WeakReference<>(activity);
             checkAsync(activity);
             Toast.makeText(activity, "Проверяю Yandex Navigator и начну установку", Toast.LENGTH_SHORT).show();
             return;
@@ -303,7 +314,10 @@ public final class NavigatorUpdateController {
         if (files == null) return info;
         for (int i = 0; i < files.length(); i++) {
             JSONObject item = files.optJSONObject(i);
-            if (item == null) continue;
+            if (item == null) {
+                info.filesMetadataValid = false;
+                continue;
+            }
             NavFile file = new NavFile();
             file.name = item.optString("name", "");
             file.size = item.optLong("size", 0);
@@ -313,16 +327,19 @@ public final class NavigatorUpdateController {
             if (parts != null) {
                 for (int j = 0; j < parts.length(); j++) {
                     JSONObject p = parts.optJSONObject(j);
-                    if (p == null) continue;
+                    if (p == null) {
+                        file.partsMetadataValid = false;
+                        continue;
+                    }
                     NavPart part = new NavPart();
                     part.name = p.optString("name", "");
                     part.size = p.optLong("size", 0);
                     part.sha256 = p.optString("sha256", "");
                     part.url = downloadUrl(p.optString("download_url", ""), info.apkDir, part.name);
-                    if (!TextUtils.isEmpty(part.name)) file.parts.add(part);
+                    file.parts.add(part);
                 }
             }
-            if (!TextUtils.isEmpty(file.name)) info.files.add(file);
+            info.files.add(file);
         }
         return info;
     }
@@ -407,6 +424,23 @@ public final class NavigatorUpdateController {
                 && !installed.matchesArchive(file.sha256, file.size);
     }
 
+    static boolean validFileMetadata(String name, String url, String sha256, long size) {
+        return name != null && !name.trim().isEmpty()
+                && name.toLowerCase(Locale.US).endsWith(".apk")
+                && validArchiveMetadata(url, sha256, size);
+    }
+
+    static boolean validPartMetadata(String name, String url, String sha256, long size) {
+        return name != null && !name.trim().isEmpty()
+                && validArchiveMetadata(url, sha256, size);
+    }
+
+    private static boolean validArchiveMetadata(String url, String sha256, long size) {
+        return url != null && !url.trim().isEmpty()
+                && sha256 != null && sha256.matches("(?i)[0-9a-f]{64}")
+                && size > 0L;
+    }
+
     private static boolean canInstallPackages(Activity activity) {
         return Build.VERSION.SDK_INT < 26 || activity.getPackageManager().canRequestPackageInstalls();
     }
@@ -464,17 +498,18 @@ public final class NavigatorUpdateController {
     private void setNavigator(String status, String version, String packageName, String asset,
                               long done, long total, boolean available, boolean checking,
                               boolean downloading, boolean downloaded, boolean installing) {
-        UpdateState current = StateStore.updates();
-        StateStore.setUpdates(app, current.withNavigator(status, version, packageName, asset,
+        StateStore.updateUpdates(app, current -> current.withNavigator(
+                status, version, packageName, asset, latest.manifestFingerprint(),
                 done, total, available, checking, downloading, downloaded, installing));
     }
 
-    private static final class NavigatorInfo {
+    static final class NavigatorInfo {
         String name = "Yandex Navigator Kia hook";
         String version = "";
         int versionCode;
         String packageName = DEFAULT_PACKAGE;
         String apkDir = "";
+        boolean filesMetadataValid = true;
         final List<NavFile> files = new ArrayList<>();
 
         long totalSize() {
@@ -491,13 +526,43 @@ public final class NavigatorUpdateController {
         NavFile singleFile() {
             return files.size() == 1 ? files.get(0) : null;
         }
+
+        boolean installable() {
+            if (versionCode <= 0 || files.isEmpty() || !filesMetadataValid) return false;
+            for (NavFile file : files) {
+                if (!validFileMetadata(file.name, file.url, file.sha256, file.size)) {
+                    return false;
+                }
+                if (!file.partsMetadataValid) return false;
+                for (NavPart part : file.parts) {
+                    if (!validPartMetadata(part.name, part.url, part.sha256, part.size)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        String manifestFingerprint() {
+            StringBuilder out = new StringBuilder();
+            for (NavFile file : files) {
+                out.append(file.name).append(':').append(file.sha256)
+                        .append(':').append(file.size).append(';');
+                for (NavPart part : file.parts) {
+                    out.append(part.name).append(':').append(part.sha256)
+                            .append(':').append(part.size).append(';');
+                }
+            }
+            return out.toString();
+        }
     }
 
-    private static final class NavFile {
+    static final class NavFile {
         String name = "";
         String url = "";
         String sha256 = "";
         long size;
+        boolean partsMetadataValid = true;
         final List<NavPart> parts = new ArrayList<>();
 
         boolean hasParts() {
@@ -505,7 +570,7 @@ public final class NavigatorUpdateController {
         }
     }
 
-    private static final class NavPart {
+    static final class NavPart {
         String name = "";
         String url = "";
         String sha256 = "";

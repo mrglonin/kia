@@ -11,4 +11,9 @@ final class NavServiceStartPolicy {
         if (lastStartElapsed <= 0L || nowElapsed < lastStartElapsed) return true;
         return nowElapsed - lastStartElapsed >= Math.max(0L, minIntervalMs);
     }
+
+    static boolean shouldAcquireReceiverWakeLock(boolean serviceWasRunning,
+                                                 boolean startRequestAccepted) {
+        return !serviceWasRunning && startRequestAccepted;
+    }
 }

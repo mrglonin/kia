@@ -7,17 +7,20 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
+import android.os.SystemClock;
 
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
@@ -35,6 +38,8 @@ public final class UsbTransport {
     private static final int STM_VENDOR_ID = 1155;
     private static final int STM_CDC_PRODUCT_ID = 22336;
     private static final int MAX_QUEUE = 80;
+    private static final long QUIET_CONNECT_MIN_INTERVAL_MS = 1500L;
+    private static final long RECONNECT_BACKOFF_MS = 1000L;
     private static final Set<String> REQUESTED_USB_PERMISSIONS = new HashSet<>();
 
     public interface Listener {
@@ -45,12 +50,26 @@ public final class UsbTransport {
     private final UsbManager usbManager;
     private final Listener listener;
     private final PendingFrameQueue pending = new PendingFrameQueue(MAX_QUEUE);
-    private final ByteArrayOutputStream incoming = new ByteArrayOutputStream();
+    private final UsbIncomingBuffer incoming = new UsbIncomingBuffer();
+    private final UsbWriteOrderGate writeOrder = new UsbWriteOrderGate();
+    private final ScheduledExecutorService maintenanceExecutor =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "kia-canbus-usb-maintenance");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     private UsbSerialPort port;
     private Thread readThread;
-    private volatile boolean readRunning;
+    private boolean readRunning;
+    private boolean desiredConnection;
+    private boolean connectScheduled;
+    private boolean connecting;
     private long connectionEpoch;
+    private long readerGeneration;
+    private long connectedAtElapsed;
+    private long lastRxAtElapsed;
+    private long reconnectNotBeforeElapsed;
     private long lastQuietConnectAt;
     private long lastBadChecksumAt;
 
@@ -61,17 +80,82 @@ public final class UsbTransport {
     }
 
     public synchronized boolean ready() {
-        return port != null;
+        return port != null && readRunning;
     }
 
     public synchronized long connectionEpoch() {
         return connectionEpoch;
     }
 
-    public synchronized void connect() {
-        if (port != null || usbManager == null) return;
+    public synchronized long connectedAtElapsedRealtime() {
+        return connectedAtElapsed;
+    }
+
+    public synchronized long lastRxAtElapsedRealtime() {
+        return lastRxAtElapsed;
+    }
+
+    /** Starts connection work on the dedicated maintenance thread. */
+    public void connect() {
+        synchronized (this) {
+            desiredConnection = true;
+        }
+        scheduleConnect(0L);
+    }
+
+    /** Forces a generation-safe reconnect without doing USB open/flush work on the caller. */
+    public void reconnect(String reason) {
+        UsbSerialPort active;
+        long generation;
+        synchronized (this) {
+            if (!desiredConnection) return;
+            active = port;
+            generation = readerGeneration;
+        }
+        if (active == null) {
+            scheduleConnect(0L);
+            return;
+        }
+        handleConnectionFailure(active, generation,
+                "USB: переподключение " + cleanReason(reason), false);
+    }
+
+    private void scheduleConnect(long delayMs) {
+        long effectiveDelayMs;
+        synchronized (this) {
+            if (!desiredConnection || port != null || connecting || connectScheduled) return;
+            long now = SystemClock.elapsedRealtime();
+            effectiveDelayMs = UsbReconnectBackoffPolicy.effectiveDelay(
+                    delayMs, now, reconnectNotBeforeElapsed);
+            connectScheduled = true;
+        }
+        maintenanceExecutor.schedule(() -> {
+            synchronized (UsbTransport.this) {
+                connectScheduled = false;
+            }
+            connectNow();
+        }, effectiveDelayMs, TimeUnit.MILLISECONDS);
+    }
+
+    private void connectNow() {
+        long retryDelayMs = 0L;
+        synchronized (this) {
+            if (!desiredConnection || port != null || connecting || usbManager == null) return;
+            long now = SystemClock.elapsedRealtime();
+            if (reconnectNotBeforeElapsed > now) {
+                retryDelayMs = reconnectNotBeforeElapsed - now;
+            } else {
+                connecting = true;
+            }
+        }
+        if (retryDelayMs > 0L) {
+            scheduleConnect(retryDelayMs);
+            return;
+        }
+        UsbSerialPort candidate = null;
         try {
-            List<UsbSerialDriver> drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager);
+            List<UsbSerialDriver> drivers =
+                    UsbSerialProber.getDefaultProber().findAllDrivers(usbManager);
             if (drivers == null || drivers.isEmpty()) {
                 setUsb(false, "USB: адаптер не найден");
                 return;
@@ -97,16 +181,28 @@ public final class UsbTransport {
                 setUsb(false, "USB: не удалось открыть " + device.getDeviceName());
                 return;
             }
-            port = driver.getPorts().get(0);
-            port.open(connection);
-            port.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-            connectionEpoch++;
-            setUsb(true, "USB: подключено " + device.getDeviceName() + " 115200 8N1");
-            startReader();
-            flushQueue();
+            candidate = driver.getPorts().get(0);
+            candidate.open(connection);
+            candidate.setParameters(115200, 8,
+                    UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            incoming.reset();
+
+            UsbSerialPort openedPort = candidate;
+            boolean installed = writeOrder.run(
+                    () -> installAndFlushSerialized(openedPort, device));
+            if (!installed) {
+                closePort(candidate);
+                candidate = null;
+                return;
+            }
+            candidate = null;
         } catch (Exception e) {
-            close();
+            if (candidate != null) closePort(candidate);
             setUsb(false, "USB: ошибка " + e.getClass().getSimpleName() + " " + e.getMessage());
+        } finally {
+            synchronized (this) {
+                connecting = false;
+            }
         }
     }
 
@@ -116,141 +212,247 @@ public final class UsbTransport {
         return writeOrQueue(copy, quiet);
     }
 
-    public synchronized void close() {
-        readRunning = false;
-        if (readThread != null) {
-            readThread.interrupt();
-            readThread = null;
-        }
-        if (port != null) {
-            try {
-                port.close();
-            } catch (Exception ignored) {
+    /** Called while {@link #writeOrder} is held, before any live writer can use the new port. */
+    private boolean installAndFlushSerialized(UsbSerialPort candidate, UsbDevice device) {
+        long generation = -1L;
+        boolean installed = false;
+        try {
+            synchronized (this) {
+                if (!desiredConnection || port != null) return false;
+                port = candidate;
+                connectionEpoch++;
+                readerGeneration++;
+                generation = readerGeneration;
+                connectedAtElapsed = SystemClock.elapsedRealtime();
+                lastRxAtElapsed = 0L;
+                reconnectNotBeforeElapsed = 0L;
+                readRunning = true;
+                Thread reader = createReader(candidate, generation);
+                readThread = reader;
+                try {
+                    reader.start();
+                    installed = true;
+                } catch (RuntimeException e) {
+                    port = null;
+                    readThread = null;
+                    readRunning = false;
+                    readerGeneration++;
+                    connectedAtElapsed = 0L;
+                    throw e;
+                }
             }
-            port = null;
+            synchronized (this) {
+                if (!readerCurrentLocked(candidate, generation)) return true;
+                setUsb(true, "USB: подключено " + device.getDeviceName() + " 115200 8N1");
+            }
+            flushQueue(candidate, generation);
+            return true;
+        } catch (RuntimeException e) {
+            // Keep ready() truthful even if an unexpected app-side callback/pending operation
+            // fails after the physical port was published.
+            if (installed) {
+                handleConnectionFailure(candidate, generation,
+                        "USB: ошибка запуска " + e.getClass().getSimpleName(), false);
+            }
+            throw e;
         }
-        synchronized (incoming) {
-            incoming.reset();
-        }
-        setUsb(false, "USB: закрыто");
     }
 
-    private synchronized AdapterTxOutcome writeOrQueue(byte[] frame, boolean quiet) {
-        if (PendingFrameQueue.isNavigationOff(frame) && port != null) {
-            pending.invalidateNavigation();
+    public void close() {
+        UsbSerialPort detached;
+        Thread reader;
+        synchronized (this) {
+            desiredConnection = false;
+            connectScheduled = false;
+            detached = port;
+            reader = readThread;
+            port = null;
+            readThread = null;
+            readRunning = false;
+            readerGeneration++;
+            connectedAtElapsed = 0L;
+            lastRxAtElapsed = 0L;
+            reconnectNotBeforeElapsed = 0L;
+            incoming.reset();
+            setUsb(false, "USB: закрыто");
         }
-        if (port == null) {
-            if (!quiet) {
-                pending.offer(frame);
+        if (reader != null && reader != Thread.currentThread()) reader.interrupt();
+        if (detached != null) maintenanceExecutor.execute(() -> closePort(detached));
+    }
+
+    private AdapterTxOutcome writeOrQueue(byte[] frame, boolean quiet) {
+        WriteAttempt attempt = writeOrder.run(() -> writeSerialized(frame, quiet));
+        if (attempt.requestConnect) scheduleConnect(0L);
+        return attempt.outcome;
+    }
+
+    /** Runs under the shared publication/flush/live-write barrier. */
+    private WriteAttempt writeSerialized(byte[] frame, boolean quiet) {
+        UsbSerialPort active;
+        long generation;
+        boolean requestConnect = false;
+        boolean queuedWithoutPort = false;
+        synchronized (this) {
+            active = port;
+            generation = readerGeneration;
+            if (PendingFrameQueue.isNavigationOff(frame) && active != null) {
+                pending.invalidateNavigation();
             }
-            long now = System.currentTimeMillis();
-            if (!quiet || now - lastQuietConnectAt > 1500L) {
-                lastQuietConnectAt = now;
-                connect();
+            if (active == null) {
+                if (!quiet) queuedWithoutPort = pending.offer(frame);
+                long now = SystemClock.elapsedRealtime();
+                if (!quiet || lastQuietConnectAt <= 0L || now < lastQuietConnectAt
+                        || now - lastQuietConnectAt > QUIET_CONNECT_MIN_INTERVAL_MS) {
+                    lastQuietConnectAt = now;
+                    requestConnect = true;
+                }
             }
-            return quiet ? AdapterTxOutcome.BLOCKED : AdapterTxOutcome.QUEUED;
+        }
+        if (active == null) {
+            AdapterTxOutcome outcome = queuedWithoutPort
+                    ? AdapterTxOutcome.QUEUED : AdapterTxOutcome.BLOCKED;
+            return new WriteAttempt(outcome, requestConnect);
         }
         try {
-            port.write(frame, 300);
-            return AdapterTxOutcome.WRITTEN;
-        } catch (IOException e) {
+            active.write(frame, 300);
+        } catch (IOException | RuntimeException e) {
+            boolean replayQueued = false;
             if (!quiet) {
-                pending.offer(frame);
+                synchronized (this) {
+                    replayQueued = pending.offer(frame);
+                }
             }
-            close();
-            if (!quiet) AppLog.line(app, "USB: запись не прошла, переподключение");
-            connect();
-            return quiet ? AdapterTxOutcome.BLOCKED : AdapterTxOutcome.QUEUED;
+            // Detach before releasing writeOrder so another producer cannot write a newer frame
+            // ahead of this failed replay-safe frame and leave stale state queued behind it.
+            handleConnectionFailure(active, generation,
+                    "USB: запись остановлена " + e.getClass().getSimpleName(), !quiet);
+            return new WriteAttempt(replayQueued
+                    ? AdapterTxOutcome.QUEUED : AdapterTxOutcome.BLOCKED, false);
         }
+        // A completed serial write is ambiguous if a concurrent watchdog invalidated the session:
+        // replaying it can duplicate firmware/raw actions. Report the completed attempt as written;
+        // stateful navigation/media producers will reassert on the next connection epoch.
+        return new WriteAttempt(AdapterTxOutcome.WRITTEN, false);
     }
 
-    private void flushQueue() {
+    private void flushQueue(UsbSerialPort active, long generation) {
         while (true) {
-            byte[] frame = pending.poll();
+            byte[] frame;
+            synchronized (this) {
+                if (!readerCurrentLocked(active, generation)) return;
+                frame = pending.poll();
+            }
             if (frame == null) return;
-            writeOrQueue(frame, false);
-            if (port == null) return;
+            if (writeOrQueue(frame, false) != AdapterTxOutcome.WRITTEN) return;
         }
     }
 
-    private void startReader() {
-        if (readThread != null && readThread.isAlive()) return;
-        UsbSerialPort active = port;
-        if (active == null) return;
-        readRunning = true;
-        readThread = new Thread(() -> {
+    private Thread createReader(UsbSerialPort active, long generation) {
+        return new Thread(() -> {
             byte[] buffer = new byte[128];
-            while (readRunning && active == port) {
-                try {
+            try {
+                while (readerCurrent(active, generation)) {
                     int read = active.read(buffer, 500);
-                    if (read > 0) appendIncoming(buffer, read);
-                } catch (IOException e) {
-                    if (readRunning) {
-                        AppLog.line(app, "USB: чтение остановлено, переподключение");
-                        close();
-                        connect();
-                    }
-                    return;
+                    if (read > 0) appendIncoming(active, generation, buffer, read);
+                }
+            } catch (IOException | RuntimeException e) {
+                handleConnectionFailure(active, generation,
+                        "USB: чтение остановлено " + e.getClass().getSimpleName(), false);
+            } finally {
+                // Covers unchecked Errors and unexpected exits without leaving a false-ready port.
+                if (readerCurrent(active, generation)) {
+                    handleConnectionFailure(active, generation,
+                            "USB: поток чтения завершился", false);
                 }
             }
-        }, "kia-canbus-usb-reader");
-        readThread.start();
+        }, "kia-canbus-usb-reader-" + generation);
     }
 
-    private void appendIncoming(byte[] data, int count) {
-        synchronized (incoming) {
-            incoming.write(data, 0, count);
-            parseIncoming();
+    private void appendIncoming(UsbSerialPort active, long generation, byte[] data, int count) {
+        if (!readerCurrent(active, generation)) return;
+        // append() only parses and returns data. Listener callbacks happen after its lock is gone.
+        UsbIncomingBuffer.ParseResult parsed = incoming.append(data, count);
+        for (byte[] bad : parsed.badChecksumFrames) {
+            long now = SystemClock.elapsedRealtime();
+            boolean log;
+            synchronized (this) {
+                log = lastBadChecksumAt <= 0L || now < lastBadChecksumAt
+                        || now - lastBadChecksumAt > 10000L;
+                if (log) lastBadChecksumAt = now;
+            }
+            if (log) AppLog.line(app, "USB rx bad checksum: " + AdapterProtocol.hex(bad));
+        }
+        for (byte[] frame : parsed.frames) {
+            synchronized (this) {
+                if (!readerCurrentLocked(active, generation)) return;
+                lastRxAtElapsed = SystemClock.elapsedRealtime();
+            }
+            if (listener == null) continue;
+            try {
+                listener.onFrame(frame);
+            } catch (RuntimeException e) {
+                AppLog.line(app, "USB rx listener error " + e.getClass().getSimpleName());
+            }
         }
     }
 
-    private void parseIncoming() {
-        byte[] data = incoming.toByteArray();
-        int index = 0;
-        while (index <= data.length - 6) {
-            int start = findHeader(data, index);
-            if (start < 0) {
-                index = data.length;
-                break;
-            }
-            if (data.length - start < 6) {
-                index = start;
-                break;
-            }
-            int len = data[start + 3] & 0xff;
-            if (len < 6 || len > 128) {
-                index = start + 1;
-                continue;
-            }
-            if (data.length - start < len) {
-                index = start;
-                break;
-            }
-            byte[] frame = Arrays.copyOfRange(data, start, start + len);
-            if (AdapterProtocol.validChecksum(frame)) {
-                if (listener != null) listener.onFrame(frame);
-                index = start + len;
-            } else {
-                long now = System.currentTimeMillis();
-                if (now - lastBadChecksumAt > 10000L) {
-                    lastBadChecksumAt = now;
-                    AppLog.line(app, "USB rx bad checksum: " + AdapterProtocol.hex(frame));
-                }
-                index = start + 1;
-            }
+    private boolean readerCurrent(UsbSerialPort active, long generation) {
+        synchronized (this) {
+            return readerCurrentLocked(active, generation);
         }
-        incoming.reset();
-        if (index < data.length) incoming.write(data, index, data.length - index);
     }
 
-    private int findHeader(byte[] data, int from) {
-        for (int i = from; i <= data.length - 3; i++) {
-            if ((data[i] & 0xff) != 0xBB) continue;
-            int second = data[i + 1] & 0xff;
-            int third = data[i + 2] & 0xff;
-            if ((second == 0xA1 && third == 0x41) || (second == 0x41 && third == 0xA1)) return i;
+    private boolean readerCurrentLocked(UsbSerialPort active, long generation) {
+        return UsbReaderGenerationPolicy.current(
+                readRunning, active == port, readerGeneration, generation);
+    }
+
+    private void handleConnectionFailure(UsbSerialPort active, long generation,
+                                         String status, boolean loud) {
+        Thread reader;
+        synchronized (this) {
+            if (!readerCurrentLocked(active, generation)) return;
+            port = null;
+            reader = readThread;
+            readThread = null;
+            readRunning = false;
+            readerGeneration++;
+            connectedAtElapsed = 0L;
+            lastRxAtElapsed = 0L;
+            long now = SystemClock.elapsedRealtime();
+            reconnectNotBeforeElapsed = UsbReconnectBackoffPolicy.extendNotBefore(
+                    reconnectNotBeforeElapsed, now, RECONNECT_BACKOFF_MS);
+            incoming.reset();
+            setUsb(false, status);
         }
-        return -1;
+        if (reader != null && reader != Thread.currentThread()) reader.interrupt();
+        AppLog.line(app, status);
+        if (loud) AppLog.line(app, "USB: запись не прошла, переподключение");
+        maintenanceExecutor.execute(() -> {
+            closePort(active);
+            scheduleConnect(RECONNECT_BACKOFF_MS);
+        });
+    }
+
+    private void closePort(UsbSerialPort active) {
+        if (active == null) return;
+        writeOrder.run(() -> {
+            try {
+                active.close();
+            } catch (Exception ignored) {
+            }
+            return null;
+        });
+    }
+
+    private static final class WriteAttempt {
+        final AdapterTxOutcome outcome;
+        final boolean requestConnect;
+
+        WriteAttempt(AdapterTxOutcome outcome, boolean requestConnect) {
+            this.outcome = outcome;
+            this.requestConnect = requestConnect;
+        }
     }
 
     private UsbSerialDriver findCanboxDriver(List<UsbSerialDriver> drivers) {
@@ -317,6 +519,11 @@ public final class UsbTransport {
         return device.getDeviceName() + ":"
                 + device.getVendorId() + ":"
                 + device.getProductId();
+    }
+
+    private static String cleanReason(String reason) {
+        String clean = reason == null ? "" : reason.replace('\n', ' ').replace('\r', ' ').trim();
+        return clean.isEmpty() ? "по watchdog" : clean;
     }
 
     private void setUsb(boolean connected, String text) {

@@ -30,6 +30,8 @@ public final class YandexCoreBridgeClient {
     private static final long MAX_ACTIVE_FRESHNESS_MS = 2500L;
     private static final long MISSING_PROVIDER_LOG_MS = 30000L;
     private static final long SPEED_SNAPSHOT_MIN_MS = 1000L;
+    private static final long SOURCE_SAMPLE_MAX_AGE_MS = 15000L;
+    private static final long SOURCE_SAMPLE_LOG_INTERVAL_MS = 10000L;
     private static final long HEARTBEAT_LOG_INTERVAL_MS = 10000L;
     private static final long BROADCAST_PROVIDER_SUPPRESS_MS = 5000L;
     private static final long BROADCAST_APPLY_MIN_MS = 200L;
@@ -89,12 +91,14 @@ public final class YandexCoreBridgeClient {
     private Handler handler;
     private boolean running;
     private final YandexSnapshotOrderGuard snapshotOrderGuard = new YandexSnapshotOrderGuard();
+    private final YandexSourceSampleGate sourceSampleGate = new YandexSourceSampleGate();
     private long lastMissingProviderLogAt;
     private long lastErrorLogAt;
     private String lastState = "";
     private String lastSignature = "";
     private String lastSpeedSignature = "";
     private long lastSpeedSnapshotSentAt;
+    private long lastSourceSampleLogAt = -1L;
     private String lastManeuverDistanceKey = "";
     private String lastManeuverProjectionLogKey = "";
     private long lastManeuverProjectionLogAt;
@@ -422,6 +426,18 @@ public final class YandexCoreBridgeClient {
                 state, callback, recentLiveRoute, hasRouteMetrics(snapshot),
                 routePresentKnown, routePresent);
         if (preserveBackgroundRoute) {
+            YandexSnapshotOrderGuard.Result backgroundOrder = snapshotOrderGuard.evaluate(
+                    firstString(snapshot, "route_id", "routeId"), seq, timestampElapsed);
+            if (backgroundOrder != YandexSnapshotOrderGuard.Result.ACCEPT
+                    && backgroundOrder
+                    != YandexSnapshotOrderGuard.Result.ACCEPT_UNTRUSTED_INITIAL) {
+                clearPendingManeuverRollover();
+                AppLog.line(app, "Yandex Core Bridge: out-of-order background snapshot ignored"
+                        + " reason=" + backgroundOrder
+                        + " seq=" + seq
+                        + " timestamp=" + timestampElapsed);
+                return snapshotResult(ACTIVE_POLL_MS, false);
+            }
             // The lifecycle callback is still a full, fresh road-context snapshot. Apply its
             // speed fields before holding the route; otherwise the limit expires while Yandex is
             // merely moving to background operation.
@@ -651,29 +667,52 @@ public final class YandexCoreBridgeClient {
         long speed = longValue(snapshot, "current_speed_kmh", "speed_kmh", -1L);
         long limit = longValue(snapshot,
                 "speed_limit_kmh", "speed_limit", "road_speed_limit", -1L);
-        boolean hasRoadLimit = containsAnyKey(snapshot,
+        boolean sourceHasRoadLimit = containsAnyKey(snapshot,
                 "speed_limit_kmh", "speed_limit", "road_speed_limit");
-        String cameraLimit = firstString(snapshot,
+        String sourceCameraLimit = firstString(snapshot,
                 "camera_speed_limit", "first_camera_speed_limit_kmh");
-        boolean hasExceeded = snapshot != null
+        boolean sourceHasExceeded = snapshot != null
                 && (snapshot.containsKey("speed_exceeded") || snapshot.containsKey("exceeded"));
-        int speedKmh = (int) Math.max(-1L, Math.min(Integer.MAX_VALUE, speed));
-        int limitKmh = (int) Math.max(-1L, Math.min(Integer.MAX_VALUE, limit));
+        String callback = firstString(snapshot, "last_callback", "callback",
+                "event_type", "bridge_reason", "reason");
+        long relativeTimestamp = firstLong(snapshot, -1L,
+                "location_relative_timestamp_ms", "location_relative_timestamp",
+                "location_elapsed_realtime_ms");
+        long absoluteTimestamp = firstLong(snapshot, -1L,
+                "location_absolute_timestamp_ms", "location_absolute_timestamp",
+                "location_timestamp_ms");
+        long now = SystemClock.elapsedRealtime();
+        YandexSourceSampleGate.Decision sourceDecision = sourceSampleGate.evaluate(
+                callback, relativeTimestamp, absoluteTimestamp,
+                now, System.currentTimeMillis(), SOURCE_SAMPLE_MAX_AGE_MS);
+        logSourceSampleDecision(callback, relativeTimestamp, absoluteTimestamp,
+                sourceDecision, now);
+
+        boolean currentSpeedFresh = sourceDecision.currentSpeedFresh && speed >= 0L;
+        boolean roadLimitFresh = sourceDecision.roadLimitFresh && sourceHasRoadLimit;
+        boolean cameraFresh = sourceDecision.anyFreshData()
+                && !TextUtils.isEmpty(sourceCameraLimit);
+        int speedKmh = currentSpeedFresh
+                ? (int) Math.min(Integer.MAX_VALUE, speed) : -1;
+        int limitKmh = roadLimitFresh
+                ? (int) Math.max(-1L, Math.min(Integer.MAX_VALUE, limit)) : -1;
+        String cameraLimit = cameraFresh ? sourceCameraLimit : "";
+        boolean hasExceeded = currentSpeedFresh && sourceHasExceeded;
         // The bridge always carries exceeded=false, including completely empty free-drive
         // snapshots. That flag alone must not create a one-second StateStore/UI update loop.
         if (!YandexSpeedSnapshotPolicy.meaningfulPayload(
-                speedKmh, hasRoadLimit, cameraLimit)) {
+                speedKmh, roadLimitFresh, cameraLimit)) {
             NavigationFeature.get(app).observeYandexTransportHeartbeat();
             return false;
         }
 
         boolean exceeded = bool(snapshot, "speed_exceeded", bool(snapshot, "exceeded", false));
-        String signature = speed + "|" + limit + "|" + hasRoadLimit + "|"
+        String signature = speedKmh + "|" + limitKmh + "|" + roadLimitFresh + "|"
                 + cameraLimit + "|" + (hasExceeded ? String.valueOf(exceeded) : "-");
-        long now = SystemClock.elapsedRealtime();
         if (signature.equals(lastSpeedSignature)) {
             if (NavigationFeature.get(app).refreshMatchingYandexSpeedContext(
-                    speedKmh, hasRoadLimit, limitKmh, hasExceeded, exceeded)) {
+                    speedKmh, currentSpeedFresh, roadLimitFresh, limitKmh,
+                    hasExceeded, exceeded)) {
                 return false;
             }
             if (now - lastSpeedSnapshotSentAt < SPEED_SNAPSHOT_MIN_MS) return false;
@@ -682,19 +721,44 @@ public final class YandexCoreBridgeClient {
         lastSpeedSnapshotSentAt = now;
 
         Intent speedIntent = baseIntent(NavigationFeature.KIA_ACTION_SPEED, snapshot, freshness);
-        if (speed >= 0) speedIntent.putExtra("current_speed", String.valueOf(speed));
-        speedIntent.putExtra("road_speed_limit_present", hasRoadLimit);
-        if (limit > 0) {
-            speedIntent.putExtra("speed_limit", String.valueOf(limit));
-            speedIntent.putExtra("road_speed_limit", String.valueOf(limit));
+        speedIntent.putExtra("bridge_source_freshness_enforced", true);
+        speedIntent.putExtra("yandex_current_speed_sample_fresh", currentSpeedFresh);
+        speedIntent.putExtra("yandex_road_limit_sample_fresh", roadLimitFresh);
+        speedIntent.putExtra("yandex_camera_sample_fresh", cameraFresh);
+        if (currentSpeedFresh) {
+            speedIntent.putExtra("current_speed", String.valueOf(speedKmh));
+        }
+        speedIntent.putExtra("road_speed_limit_present", roadLimitFresh);
+        if (roadLimitFresh && limitKmh > 0) {
+            speedIntent.putExtra("speed_limit", String.valueOf(limitKmh));
+            speedIntent.putExtra("road_speed_limit", String.valueOf(limitKmh));
             speedIntent.putExtra("speed_limit_source", "guide");
-        } else if (hasRoadLimit) {
+        } else if (roadLimitFresh) {
             speedIntent.putExtra("speed_limit_clear", true);
         }
         putString(speedIntent, "camera_speed_limit", cameraLimit);
         if (hasExceeded) speedIntent.putExtra("exceeded", exceeded);
         NavigationFeature.get(app).handle(speedIntent);
         return true;
+    }
+
+    private void logSourceSampleDecision(String callback,
+                                         long relativeTimestamp,
+                                         long absoluteTimestamp,
+                                         YandexSourceSampleGate.Decision decision,
+                                         long nowElapsed) {
+        if (lastSourceSampleLogAt >= 0L
+                && nowElapsed - lastSourceSampleLogAt < SOURCE_SAMPLE_LOG_INTERVAL_MS) {
+            return;
+        }
+        lastSourceSampleLogAt = nowElapsed;
+        AppLog.navigation(app, "NAV_YANDEX_SOURCE_SAMPLE"
+                + " callback=" + lower(callback)
+                + " relative=" + relativeTimestamp
+                + " absolute=" + absoluteTimestamp
+                + " currentFresh=" + decision.currentSpeedFresh
+                + " limitFresh=" + decision.roadLimitFresh
+                + " decision=" + decision.reason);
     }
 
     private void sendFinished(long freshness, Bundle snapshot) {
@@ -1233,10 +1297,12 @@ public final class YandexCoreBridgeClient {
 
     private void resetBridgeSessionState() {
         resetRouteGuards();
+        sourceSampleGate.reset();
         lastState = "";
         lastSignature = "";
         lastSpeedSignature = "";
         lastSpeedSnapshotSentAt = 0L;
+        lastSourceSampleLogAt = -1L;
         lastBroadcastSnapshotAt = -1L;
         lastHeartbeatBroadcastLogAt = -1L;
         synchronized (broadcastLock) {

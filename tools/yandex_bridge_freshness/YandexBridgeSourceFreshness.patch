@@ -1,0 +1,371 @@
+--- a/smali_classes9/com/kia/yandex/v2/YandexKiaBridge.smali
++++ b/smali_classes9/com/kia/yandex/v2/YandexKiaBridge.smali
+@@ -27,6 +27,10 @@
+ .field private static guidance:Lcom/yandex/navikit/guidance/Guidance;
+
+ .field private static guide:Lcom/yandex/mapkit/directions/guidance/Guide;
++
++.field private static guideSubscribed:Z
++
++.field private static guidanceSubscribed:Z
+
+ .field private static heartbeatHandler:Landroid/os/Handler;
+
+@@ -322,7 +326,133 @@
+
+     .line 1296
+     :goto_0
++    return-void
++.end method
++
++.method static declared-synchronized ensureSubscriptions()V
++    .locals 5
++
++    const-class v0, Lcom/kia/yandex/v2/YandexKiaBridge;
++
++    monitor-enter v0
++
++    :try_start_0
++    sget-object v1, Lcom/kia/yandex/v2/YandexKiaBridge;->listener:Lcom/kia/yandex/v2/YandexKiaBridgeListener;
++
++    if-eqz v1, :kia_subscription_done
++
++    sget-object v2, Lcom/kia/yandex/v2/YandexKiaBridge;->guidance:Lcom/yandex/navikit/guidance/Guidance;
++
++    sget-boolean v3, Lcom/kia/yandex/v2/YandexKiaBridge;->guidanceSubscribed:Z
++
++    if-nez v3, :kia_guidance_subscribed
++
++    if-eqz v2, :kia_guidance_subscribed
++    :try_end_0
++    .catchall {:try_start_0 .. :try_end_0} :catchall_3
++
++    :try_start_1
++    invoke-interface {v2, v1}, Lcom/yandex/navikit/guidance/Guidance;->addGuidanceListener(Lcom/yandex/navikit/guidance/GuidanceListener;)V
++
++    const/4 v3, 0x1
++
++    sput-boolean v3, Lcom/kia/yandex/v2/YandexKiaBridge;->guidanceSubscribed:Z
++    :try_end_1
++    .catchall {:try_start_1 .. :try_end_1} :catchall_0
++
++    goto :kia_guidance_subscribed
++
++    :catchall_0
++    move-exception v3
++
++    const-string v4, "guidance subscribe failed; retrying"
++
++    invoke-static {v4, v3}, Lcom/kia/yandex/v2/YandexKiaBridge;->log(Ljava/lang/String;Ljava/lang/Throwable;)V
++
++    :kia_guidance_subscribed
++    sget-object v2, Lcom/kia/yandex/v2/YandexKiaBridge;->guide:Lcom/yandex/mapkit/directions/guidance/Guide;
++
++    if-nez v2, :kia_have_guide
++
++    sget-object v2, Lcom/kia/yandex/v2/YandexKiaBridge;->guidance:Lcom/yandex/navikit/guidance/Guidance;
++
++    if-eqz v2, :kia_have_guide
++
++    :try_start_2
++    invoke-interface {v2}, Lcom/yandex/navikit/guidance/Guidance;->mapkitGuide()Lcom/yandex/mapkit/directions/guidance/Guide;
++
++    move-result-object v2
++
++    sput-object v2, Lcom/kia/yandex/v2/YandexKiaBridge;->guide:Lcom/yandex/mapkit/directions/guidance/Guide;
++    :try_end_2
++    .catchall {:try_start_2 .. :try_end_2} :catchall_1
++
++    goto :kia_have_guide
++
++    :catchall_1
++    move-exception v3
++
++    const-string v4, "mapkitGuide retry failed"
++
++    invoke-static {v4, v3}, Lcom/kia/yandex/v2/YandexKiaBridge;->log(Ljava/lang/String;Ljava/lang/Throwable;)V
++
++    :kia_have_guide
++    sget-boolean v3, Lcom/kia/yandex/v2/YandexKiaBridge;->guideSubscribed:Z
++
++    if-nez v3, :kia_update_subscribed_gate
++
++    sget-object v2, Lcom/kia/yandex/v2/YandexKiaBridge;->guide:Lcom/yandex/mapkit/directions/guidance/Guide;
++
++    if-eqz v2, :kia_update_subscribed_gate
++
++    :try_start_3
++    invoke-interface {v2, v1}, Lcom/yandex/mapkit/directions/guidance/Guide;->subscribe(Lcom/yandex/mapkit/directions/guidance/GuidanceListener;)V
++
++    const/4 v3, 0x1
++
++    sput-boolean v3, Lcom/kia/yandex/v2/YandexKiaBridge;->guideSubscribed:Z
++    :try_end_3
++    .catchall {:try_start_3 .. :try_end_3} :catchall_2
++
++    goto :kia_update_subscribed_gate
++
++    :catchall_2
++    move-exception v3
++
++    const-string v4, "guide subscribe failed; retrying"
++
++    invoke-static {v4, v3}, Lcom/kia/yandex/v2/YandexKiaBridge;->log(Ljava/lang/String;Ljava/lang/Throwable;)V
++
++    :kia_update_subscribed_gate
++    sget-boolean v2, Lcom/kia/yandex/v2/YandexKiaBridge;->guidanceSubscribed:Z
++
++    if-eqz v2, :kia_subscription_incomplete
++
++    sget-boolean v2, Lcom/kia/yandex/v2/YandexKiaBridge;->guideSubscribed:Z
++
++    if-eqz v2, :kia_subscription_incomplete
++
++    const/4 v2, 0x1
++
++    goto :kia_store_subscription_gate
++
++    :kia_subscription_incomplete
++    const/4 v2, 0x0
++
++    :kia_store_subscription_gate
++    sput-boolean v2, Lcom/kia/yandex/v2/YandexKiaBridge;->subscribed:Z
++
++    :kia_subscription_done
++    monitor-exit v0
++
+     return-void
++
++    :catchall_3
++    move-exception v1
++
++    monitor-exit v0
++
++    throw v1
+ .end method
+
+ .method private static configureGuide()V
+@@ -4333,6 +4463,48 @@
+
+     .line 193
+     :cond_0
++    const-string v0, "getRelativeTimestamp"
++
++    invoke-static {p2, v0}, Lcom/kia/yandex/v2/YandexKiaBridge;->safeCall(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;
++
++    move-result-object v0
++
++    instance-of v1, v0, Ljava/lang/Number;
++
++    if-eqz v1, :kia_no_relative_timestamp
++
++    check-cast v0, Ljava/lang/Number;
++
++    invoke-virtual {v0}, Ljava/lang/Number;->longValue()J
++
++    move-result-wide v0
++
++    const-string v2, "location_relative_timestamp_ms"
++
++    invoke-static {p0, p1, v2, v0, v1}, Lcom/kia/yandex/v2/YandexKiaBridge;->put(Landroid/content/Intent;Lorg/json/JSONObject;Ljava/lang/String;J)V
++
++    :kia_no_relative_timestamp
++    const-string v0, "getAbsoluteTimestamp"
++
++    invoke-static {p2, v0}, Lcom/kia/yandex/v2/YandexKiaBridge;->safeCall(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;
++
++    move-result-object v0
++
++    instance-of v1, v0, Ljava/lang/Number;
++
++    if-eqz v1, :kia_no_absolute_timestamp
++
++    check-cast v0, Ljava/lang/Number;
++
++    invoke-virtual {v0}, Ljava/lang/Number;->longValue()J
++
++    move-result-wide v0
++
++    const-string v2, "location_absolute_timestamp_ms"
++
++    invoke-static {p0, p1, v2, v0, v1}, Lcom/kia/yandex/v2/YandexKiaBridge;->put(Landroid/content/Intent;Lorg/json/JSONObject;Ljava/lang/String;J)V
++
++    :kia_no_absolute_timestamp
+     const-string v0, "getSpeed"
+
+     invoke-static {p2, v0}, Lcom/kia/yandex/v2/YandexKiaBridge;->safeCall(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;
+@@ -6868,12 +7040,31 @@
+     sput-object p0, Lcom/kia/yandex/v2/YandexKiaBridge;->app:Landroid/content/Context;
+
+     .line 48
++    sget-object p0, Lcom/kia/yandex/v2/YandexKiaBridge;->guidance:Lcom/yandex/navikit/guidance/Guidance;
++
++    if-eq p0, p1, :kia_same_guidance
++
++    const/4 p0, 0x0
++
++    sput-boolean p0, Lcom/kia/yandex/v2/YandexKiaBridge;->subscribed:Z
++
++    sput-boolean p0, Lcom/kia/yandex/v2/YandexKiaBridge;->guidanceSubscribed:Z
++
++    sput-boolean p0, Lcom/kia/yandex/v2/YandexKiaBridge;->guideSubscribed:Z
++
++    sput-object p0, Lcom/kia/yandex/v2/YandexKiaBridge;->guide:Lcom/yandex/mapkit/directions/guidance/Guide;
++
++    :kia_same_guidance
+     sput-object p1, Lcom/kia/yandex/v2/YandexKiaBridge;->guidance:Lcom/yandex/navikit/guidance/Guidance;
+     :try_end_0
+     .catchall {:try_start_0 .. :try_end_0} :catchall_3
+
+     .line 50
+     :try_start_1
++    sget-object p0, Lcom/kia/yandex/v2/YandexKiaBridge;->guide:Lcom/yandex/mapkit/directions/guidance/Guide;
++
++    if-nez p0, :goto_0
++
+     invoke-interface {p1}, Lcom/yandex/navikit/guidance/Guidance;->mapkitGuide()Lcom/yandex/mapkit/directions/guidance/Guide;
+
+     move-result-object p0
+@@ -6909,72 +7100,8 @@
+
+     .line 55
+     :cond_1
+-    sget-boolean p0, Lcom/kia/yandex/v2/YandexKiaBridge;->subscribed:Z
+-    :try_end_2
+-    .catchall {:try_start_2 .. :try_end_2} :catchall_3
+-
+-    if-nez p0, :cond_3
+-
+-    .line 57
+-    :try_start_3
+-    sget-object p0, Lcom/kia/yandex/v2/YandexKiaBridge;->listener:Lcom/kia/yandex/v2/YandexKiaBridgeListener;
+-
+-    invoke-interface {p1, p0}, Lcom/yandex/navikit/guidance/Guidance;->addGuidanceListener(Lcom/yandex/navikit/guidance/GuidanceListener;)V
+-    :try_end_3
+-    .catchall {:try_start_3 .. :try_end_3} :catchall_1
+-
+-    .line 60
+-    goto :goto_1
+-
+-    .line 58
+-    :catchall_1
+-    move-exception p0
+-
+-    .line 59
+-    :try_start_4
+-    const-string p1, "guidance subscribe failed"
+-
+-    invoke-static {p1, p0}, Lcom/kia/yandex/v2/YandexKiaBridge;->log(Ljava/lang/String;Ljava/lang/Throwable;)V
+-    :try_end_4
+-    .catchall {:try_start_4 .. :try_end_4} :catchall_3
+-
+-    .line 62
+-    :goto_1
+-    :try_start_5
+-    sget-object p0, Lcom/kia/yandex/v2/YandexKiaBridge;->guide:Lcom/yandex/mapkit/directions/guidance/Guide;
+-
+-    if-eqz p0, :cond_2
+-
+-    sget-object p0, Lcom/kia/yandex/v2/YandexKiaBridge;->guide:Lcom/yandex/mapkit/directions/guidance/Guide;
+-
+-    sget-object p1, Lcom/kia/yandex/v2/YandexKiaBridge;->listener:Lcom/kia/yandex/v2/YandexKiaBridgeListener;
+-
+-    invoke-interface {p0, p1}, Lcom/yandex/mapkit/directions/guidance/Guide;->subscribe(Lcom/yandex/mapkit/directions/guidance/GuidanceListener;)V
+-    :try_end_5
+-    .catchall {:try_start_5 .. :try_end_5} :catchall_2
+-
+-    .line 65
+-    :cond_2
+-    goto :goto_2
+-
+-    .line 63
+-    :catchall_2
+-    move-exception p0
+-
+-    .line 64
+-    :try_start_6
+-    const-string p1, "guide subscribe failed"
++    invoke-static {}, Lcom/kia/yandex/v2/YandexKiaBridge;->ensureSubscriptions()V
+
+-    invoke-static {p1, p0}, Lcom/kia/yandex/v2/YandexKiaBridge;->log(Ljava/lang/String;Ljava/lang/Throwable;)V
+-
+-    .line 66
+-    :goto_2
+-    const/4 p0, 0x1
+-
+-    sput-boolean p0, Lcom/kia/yandex/v2/YandexKiaBridge;->subscribed:Z
+-
+-    .line 68
+-    :cond_3
+     invoke-static {}, Lcom/kia/yandex/v2/YandexKiaBridge;->configureGuide()V
+
+     invoke-static {}, Lcom/kia/yandex/v2/YandexKiaBridge;->startHeartbeat()V
+@@ -6983,8 +7110,8 @@
+     const-string p0, "init"
+
+     invoke-static {p0}, Lcom/kia/yandex/v2/YandexKiaBridge;->publish(Ljava/lang/String;)V
+-    :try_end_6
+-    .catchall {:try_start_6 .. :try_end_6} :catchall_3
++    :try_end_2
++    .catchall {:try_start_2 .. :try_end_2} :catchall_3
+
+     .line 70
+     monitor-exit v0
+@@ -9370,6 +9497,22 @@
+
+     move-result-object p0
+
++    const-string v2, " srcTs="
++
++    invoke-virtual {p0, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
++    const-string v2, "location_relative_timestamp_ms"
++
++    invoke-static {v5, v2}, Lcom/kia/yandex/v2/YandexKiaBridge;->extraText(Landroid/content/Intent;Ljava/lang/String;)Ljava/lang/String;
++
++    move-result-object v2
++
++    invoke-virtual {p0, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
++
++    move-result-object p0
++
+     const-string v2, " cameraLimit="
+
+     invoke-virtual {p0, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+--- a/smali_classes9/com/kia/yandex/v2/YandexKiaBridgeHeartbeat.smali
++++ b/smali_classes9/com/kia/yandex/v2/YandexKiaBridgeHeartbeat.smali
+@@ -18,13 +18,31 @@
+
+ # virtual methods
+ .method public run()V
+-    .locals 1
++    .locals 3
+
++    :try_start_0
++    invoke-static {}, Lcom/kia/yandex/v2/YandexKiaBridge;->ensureSubscriptions()V
++
+     const-string v0, "heartbeat"
+
+     invoke-static {v0}, Lcom/kia/yandex/v2/YandexKiaBridge;->publish(Ljava/lang/String;)V
++    :try_end_0
++    .catchall {:try_start_0 .. :try_end_0} :catchall_0
+
+     invoke-static {}, Lcom/kia/yandex/v2/YandexKiaBridge;->scheduleHeartbeat()V
+
+     return-void
++
++    :catchall_0
++    move-exception v0
++
++    const-string v1, "YandexKiaBridge"
++
++    const-string v2, "heartbeat failed"
++
++    invoke-static {v1, v2, v0}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I
++
++    invoke-static {}, Lcom/kia/yandex/v2/YandexKiaBridge;->scheduleHeartbeat()V
++
++    return-void
+ .end method

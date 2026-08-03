@@ -7,8 +7,13 @@ public final class YandexSpeedLimitFreshnessPolicy {
 
     public static boolean shouldClear(String storedLimit, long lastFreshLimitAt,
                                       long now, long holdMs) {
+        return shouldClear(storedLimit, lastFreshLimitAt, now, holdMs, false);
+    }
+
+    public static boolean shouldClear(String storedLimit, long lastFreshLimitAt,
+                                      long now, long holdMs, boolean stationary) {
         if (storedLimit == null || storedLimit.trim().isEmpty()) return false;
         if (lastFreshLimitAt <= 0L || now < lastFreshLimitAt) return true;
-        return now - lastFreshLimitAt > holdMs;
+        return now - lastFreshLimitAt > Math.max(0L, holdMs) && !stationary;
     }
 }

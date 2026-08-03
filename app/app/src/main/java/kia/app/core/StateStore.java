@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import java.util.function.UnaryOperator;
 import kia.app.core.model.AdapterState;
 import kia.app.core.model.AmpState;
 import kia.app.core.model.CallState;
@@ -279,6 +280,14 @@ public final class StateStore {
     }
 
     public static synchronized void setUpdates(Context context, UpdateState value) {
+        updates = value == null ? UpdateState.empty() : value;
+        changed(context);
+    }
+
+    public static synchronized void updateUpdates(
+            Context context, UnaryOperator<UpdateState> update) {
+        if (update == null) return;
+        UpdateState value = update.apply(updates == null ? UpdateState.empty() : updates);
         updates = value == null ? UpdateState.empty() : value;
         changed(context);
     }

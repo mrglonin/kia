@@ -93,6 +93,7 @@ import kia.app.media.domain.RadioStationStore;
 import kia.app.media.overlay.MediaOverlayController;
 import kia.app.navigation.domain.NavigationFeature;
 import kia.app.navigation.domain.NavigationModeSettings;
+import kia.app.navigation.domain.NavigationMotionPolicy;
 import kia.app.navigation.domain.NavigationOutputMode;
 import kia.app.navigation.overlay.NavigationOverlayController;
 import kia.app.protocol.adapter.AdapterCommand;
@@ -106,9 +107,12 @@ import kia.app.tpms.TpmsController;
 import kia.app.tpms.TpmsDashboardView;
 import kia.app.tpms.TpmsPollingMode;
 import kia.app.tpms.TpmsWarningOverlayController;
+import kia.app.update.AppUpdateCheckPolicy;
 import kia.app.update.AppUpdateController;
 import kia.app.update.FirmwareUpdateController;
 import kia.app.update.NavigatorUpdateController;
+import kia.app.update.UpdateNotificationController;
+import kia.app.update.UpdateRuntimeStore;
 
 public final class MainActivity extends Activity {
     private static final int COLOR_BG = Color.rgb(13, 15, 19);
@@ -149,6 +153,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_EXPORT_SETTINGS = 43;
     private static final int REQUEST_IMPORT_SETTINGS = 44;
     private static final int REQUEST_DIAGNOSTICS_FILE = 45;
+    private static final int REQUEST_UPDATE_NOTIFICATIONS = 46;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService fileExecutor =
@@ -192,6 +197,7 @@ public final class MainActivity extends Activity {
     private CompoundButton tpmsAlertsToggle;
     private CompoundButton tpmsSoundToggle;
     private TextView updatesStatus;
+    private LinearLayout updatesPanelView;
     private TextView firmwareStatus;
     private FrameLayout firmwareActionButton;
     private View firmwareProgressFill;
@@ -239,6 +245,7 @@ public final class MainActivity extends Activity {
     private String renderedTpmsWarningKey = "";
     private int mainScrollY;
     private int settingsScrollY;
+    private boolean focusUpdatesAfterRender;
     private int radioStationManagerScrollY;
     private boolean restoreRadioStationManagerScroll;
     private final OnBackInvokedCallback backCallback = this::handleAppBack;
@@ -315,26 +322,67 @@ public final class MainActivity extends Activity {
         }
         applyImmersiveMode();
         AppService.start(this);
+        handleUpdateIntent(getIntent());
+        handler.postDelayed(this::requestUpdateNotificationPermissionIfNeeded, 400L);
         handler.postDelayed(this::maybeShowMediaProfileWizard, 900L);
         handler.postDelayed(this::checkUpdatesOnLaunch, 1600L);
         refresh();
     }
 
     private void checkUpdatesOnLaunch() {
-        if (isFinishing() || isDestroyed() || launchUpdateCheckStarted) return;
+        checkUpdates(false, "Startup");
+    }
+
+    private void checkUpdates(boolean force, String reason) {
+        if (isFinishing() || isDestroyed() || (!force && launchUpdateCheckStarted)) return;
         long now = System.currentTimeMillis();
-        if (now - AppSettings.lastUpdateCheckAt(this) < 24L * 60L * 60L * 1000L) return;
+        boolean appDue = force || AppUpdateCheckPolicy.shouldCheck(
+                now, AppSettings.lastAppUpdateCheckAt(this));
+        boolean navigatorDue = force || AppUpdateCheckPolicy.shouldCheck(
+                now, AppSettings.lastNavigatorUpdateCheckAt(this));
+        if (!appDue && !navigatorDue) return;
         launchUpdateCheckStarted = true;
-        AppSettings.setLastUpdateCheckAt(this, now);
-        AppLog.line(this, "Startup update check: Kia + Yandex");
-        appUpdater.checkAsync();
-        navigatorUpdater.checkAsync();
+        AppLog.line(this, reason + " update check: Kia=" + appDue
+                + " Yandex=" + navigatorDue);
+        if (appDue) appUpdater.checkAsync();
+        if (navigatorDue) navigatorUpdater.checkAsync();
         handler.postDelayed(this::maybeShowLaunchUpdatePrompt, 1300L);
     }
 
+    private void handleUpdateIntent(Intent intent) {
+        if (intent == null || !AppIds.ACTION_OPEN_UPDATES.equals(intent.getAction())) return;
+        intent.setAction(null);
+        appUpdatePromptShown = true;
+        navigatorUpdatePromptShown = true;
+        activeScrollView = null;
+        settingsMode = true;
+        settingsTab = SETTINGS_GENERAL;
+        settingsScrollY = 0;
+        focusUpdatesAfterRender = true;
+        if (screenFrame != null) {
+            renderTab();
+            refresh();
+        }
+        handler.post(() -> checkUpdates(true, "Notification tap"));
+    }
+
+    private void requestUpdateNotificationPermissionIfNeeded() {
+        UpdateNotificationController.prepareChannel(this);
+        if (Build.VERSION.SDK_INT < 33
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED
+                || UpdateRuntimeStore.notificationPermissionAsked(this)) {
+            return;
+        }
+        UpdateRuntimeStore.markNotificationPermissionAsked(this);
+        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                REQUEST_UPDATE_NOTIFICATIONS);
+    }
+
     private void maybeShowLaunchUpdatePrompt() {
-        if (!launchUpdateCheckStarted || !activityVisible || isFinishing() || isDestroyed()) return;
-        if (navigationSpeedKmh() > 5f) return;
+        if (!activityVisible || isFinishing() || isDestroyed()) return;
+        if (NavigationFeature.get(this).freshMotionState(5)
+                != NavigationMotionPolicy.State.STATIONARY) return;
         if (updatePromptDialog != null && updatePromptDialog.isShowing()) return;
         UpdateState s = StateStore.updates();
         if (!appUpdatePromptShown && !s.appChecking && !s.appDownloading && s.appAvailable) {
@@ -616,6 +664,13 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleUpdateIntent(intent);
+    }
+
+    @Override
     protected void onPause() {
         activityVisible = false;
         handler.removeCallbacks(refreshTick);
@@ -660,6 +715,15 @@ public final class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_UPDATE_NOTIFICATIONS) {
+            AppService.start(this);
+            if (notificationPermissionGranted()) {
+                checkUpdates(true, "Notification permission");
+            }
+            UpdateNotificationController.refresh(this);
+            refresh();
+            return;
+        }
         if (requestCode == 10 || requestCode == 11) {
             AppService.start(this);
             if (requestCode == 11 || !requestBackgroundLocationPermission()) {
@@ -1348,6 +1412,7 @@ public final class MainActivity extends Activity {
         ampVisualizer = null;
         ampSummary = null;
         updatesStatus = null;
+        updatesPanelView = null;
         firmwareStatus = null;
         firmwareActionButton = null;
         firmwareProgressFill = null;
@@ -3974,7 +4039,30 @@ public final class MainActivity extends Activity {
     private void renderGeneralSettingsTab(LinearLayout root) {
         root.addView(generalHealthPanel());
         addPermissionSection(root);
-        root.addView(generalUpdatesPanel());
+        updatesPanelView = generalUpdatesPanel();
+        root.addView(updatesPanelView);
+        if (focusUpdatesAfterRender) {
+            focusUpdatesAfterRender = false;
+            Runnable scrollToUpdates = () -> {
+                if (activeScrollView == null) {
+                    AppLog.line(this, "Update notification focus: scroll unavailable");
+                    return;
+                }
+                LinearLayout currentPanel = updatesPanelView;
+                if (currentPanel == null || !currentPanel.isAttachedToWindow()) {
+                    AppLog.line(this, "Update notification focus: panel unavailable");
+                    return;
+                }
+                int target = Math.max(0, currentPanel.getTop() - dp(12));
+                AppLog.line(this, "Update notification focus: panelTop="
+                        + currentPanel.getTop() + " target=" + target
+                        + " before=" + activeScrollView.getScrollY());
+                settingsScrollY = target;
+                activeScrollView.scrollTo(0, target);
+            };
+            handler.postDelayed(scrollToUpdates, 120L);
+            handler.postDelayed(scrollToUpdates, 450L);
+        }
         root.addView(generalDataPanel());
         root.addView(generalAppPanel());
         root.addView(mediaVisibilityPanel());

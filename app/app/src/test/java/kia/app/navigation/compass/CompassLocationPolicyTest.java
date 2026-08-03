@@ -54,4 +54,43 @@ public final class CompassLocationPolicyTest {
         assertTrue(CompassLocationPolicy.effectiveSensorAccuracy(3, 0) > 0);
         assertFalse(CompassLocationPolicy.effectiveSensorAccuracy(0, 0) > 0);
     }
+
+    @Test
+    public void finiteSensorHeadingRemainsUsableWhenVendorAccuracyIsUnknown() {
+        assertTrue(CompassLocationPolicy.usableSensorHeading(127.5f, 0));
+        assertFalse(CompassLocationPolicy.usableSensorHeading(Float.NaN, 3));
+        assertFalse(CompassLocationPolicy.usableSensorHeading(
+                Float.POSITIVE_INFINITY, 0));
+    }
+
+    @Test
+    public void registeredSensorWithoutUsableHeadingIsRecoveredAfterCooldown() {
+        assertFalse(CompassLocationPolicy.sensorStreamNeedsRecovery(
+                true, 12_999L, 10_000L, 0L,
+                3000L, 0L, 15_000L));
+        assertTrue(CompassLocationPolicy.sensorStreamNeedsRecovery(
+                true, 13_000L, 10_000L, 0L,
+                3000L, 0L, 15_000L));
+        assertFalse(CompassLocationPolicy.sensorStreamNeedsRecovery(
+                true, 20_000L, 10_000L, 12_500L,
+                3000L, 13_000L, 15_000L));
+        assertTrue(CompassLocationPolicy.sensorStreamNeedsRecovery(
+                true, 28_000L, 10_000L, 12_500L,
+                3000L, 13_000L, 15_000L));
+        assertFalse(CompassLocationPolicy.sensorStreamNeedsRecovery(
+                false, 28_000L, 10_000L, 12_500L,
+                3000L, 0L, 15_000L));
+    }
+
+    @Test
+    public void unknownAccuracySensorYieldsBrieflyToFreshMovingGpsCourse() {
+        assertFalse(CompassLocationPolicy.sensorMayDriveCluster(
+                0, 12_500L, 10_000L, 2500L));
+        assertTrue(CompassLocationPolicy.sensorMayDriveCluster(
+                0, 12_501L, 10_000L, 2500L));
+        assertTrue(CompassLocationPolicy.sensorMayDriveCluster(
+                2, 10_001L, 10_000L, 2500L));
+        assertTrue(CompassLocationPolicy.sensorMayDriveCluster(
+                0, 10_001L, 0L, 2500L));
+    }
 }

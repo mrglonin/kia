@@ -8,10 +8,17 @@ public final class YandexRoadContextPolicy {
     public static boolean shouldPreserve(String storedLimit, boolean yandexSource,
                                          long lastFreshLimitAt, long now, long holdMs,
                                          boolean hardReset) {
+        return shouldPreserve(storedLimit, yandexSource, lastFreshLimitAt, now,
+                holdMs, hardReset, false);
+    }
+
+    public static boolean shouldPreserve(String storedLimit, boolean yandexSource,
+                                         long lastFreshLimitAt, long now, long holdMs,
+                                         boolean hardReset, boolean stationary) {
         if (hardReset || !yandexSource) return false;
         if (storedLimit == null || storedLimit.trim().isEmpty()) return false;
         if (lastFreshLimitAt <= 0L || now < lastFreshLimitAt) return false;
-        return now - lastFreshLimitAt <= Math.max(0L, holdMs);
+        return stationary || now - lastFreshLimitAt <= Math.max(0L, holdMs);
     }
 
     public static boolean shouldReassertTx(int speedLimitKmh, boolean usbReady,
