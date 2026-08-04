@@ -9,15 +9,15 @@
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
-    "version": "7.10-kia.20260723-freshness",
+    "version": "7.10-kia.20260804-background",
     "version_code": 71011062,
     "package": "ru.yandex.yandexnavi",
     "apk_dir": "updates/yandex",
     "files": [
       {
-        "name": "yandex_navi-7_10-universal-kia-mod-freshness.apk",
-        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.09-363/yandex_navi-7_10-universal-kia-mod-freshness.apk",
-        "sha256": "0b6e336aaeb0211cd011de28ba66567e9c1e879b5aa6fb449ebf11fef14a71fd",
+        "name": "yandex_navi-7_10-universal-kia-mod-background.apk",
+        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.09-363/yandex_navi-7_10-universal-kia-mod-background.apk",
+        "sha256": "712f153aae0d1431e3a59b59b97b44ca43ca6120d7907a65d5ab37e1316588cf",
         "size": 115302487
       }
     ]

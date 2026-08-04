@@ -1,5 +1,14 @@
 # Changelog
 
+## Yandex Navigator background hotfix - 2026-08-04
+
+- Для текущего KIA `23.09 / 363` опубликована navigator-only пересборка `7.10-kia.20260804-background / 71011062`: `yandex_navi-7_10-universal-kia-mod-background.apk`. Версия и APK самого приложения KIA не менялись; updater обнаруживает пересборку Yandex по SHA-256 и размеру.
+- На Android-устройствах без framework provider `gps` подписка теперь переключается только на реальные `fused`, затем `network`. `passive` не используется, координаты и timestamps не подделываются.
+- После выхода на Home MapKit и native core остаются активны под существующим location foreground service. Постоянное low-importance уведомление `KIA: фоновая навигация` явно показывает фоновую работу; повторный вход не создаёт второго владельца.
+- Смахивание задачи Yandex выполняет полный teardown MapKit/Core, guidance callback, foreground notification и сервиса. Source-timestamp freshness и fail-closed TTL приложения KIA не менялись: при реальной остановке location samples старый знак по-прежнему очищается.
+- На Redmi Pad 2 Pro с Android 16 подтверждены непрерывный рост реального `srcTs` в фоне, передача дорожного лимита в KIA, повторные Home/return без накопления location-регистраций и полная очистка после swipe. Старый `freshness` asset оставлен в GitHub Release для отката.
+- Yandex mod APK: `115302487` байт, SHA-256 `712f153aae0d1431e3a59b59b97b44ca43ca6120d7907a65d5ab37e1316588cf`; сертификат SHA-256 `72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7`.
+
 ## v23.09 / 363 - 2026-08-03
 
 - KIA app `23.09 / 363`: `updates/kia_363.apk`. Для исправления свежести фоновых данных одновременно выпущен universal Yandex Navigator Kia mod `7.10-kia.20260723-freshness / 71011062`: `yandex_navi-7_10-universal-kia-mod-freshness.apk`.
