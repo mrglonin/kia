@@ -1,5 +1,15 @@
 # Changelog
 
+## v23.10 / 364 - 2026-08-05
+
+- KIA `23.10 / 364` и Yandex Navigator Kia mod `7.10-kia.20260805-teyes-compat / 71011062` выпущены одним общим релизом `v23.10-364` и одним `updates/latest.json`: `kia_364.apk` и `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`.
+- На Android 14 и ниже, включая профиль TEYES CC4 Pro, Yandex снова использует штатный жизненный цикл MapKit/Core и штатную машину состояний `GuidanceService`. Модификация больше не переводит общий сервис в foreground до готовности маршрута, что устраняет найденную причину падений при запуске и построении маршрута.
+- Расширенный фоновый режим сохранён только для Android 15+ без framework provider `gps`, когда доступен реальный `fused` либо `network`. Fallback провайдера не подделывает координаты или timestamps.
+- Ошибка создания специального foreground-уведомления теперь безопасно перехватывается, а путь Yandex Auto на старых Android возвращён к штатному запуску MapKit.
+- Проверено: `337` unit-тестов без failures/errors/skips; `lintDebug` и `lintRelease` — `0 errors / 72 warnings`; KIA release APK имеет `kia.app / 364 / 23.10`, проходит zipalign и APK Signature Scheme v2. На Android 16 физически проверены современная ветка и принудительно включённая штатная ветка: холодный запуск, построение/старт/отмена маршрута и уход в фон без Java/native crash. Реальная TEYES CC4 Pro не была подключена в момент публикации, поэтому аппаратный прогон остаётся отдельной проверкой после релиза.
+- KIA APK: `6062771` байт, SHA-256 `6e67dcf20e0bbc121f26208bc8a131e1d5303a8a463e1d320afed90bb8129165`.
+- Yandex mod APK: `115302487` байт, SHA-256 `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8`; установленный и повторно выгруженный с планшета APK совпал побайтово. Оба APK подписаны публичным сертификатом SHA-256 `72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7`.
+
 ## Yandex Navigator background hotfix - 2026-08-04
 
 - Для текущего KIA `23.09 / 363` опубликована navigator-only пересборка `7.10-kia.20260804-background / 71011062`: `yandex_navi-7_10-universal-kia-mod-background.apk`. Версия и APK самого приложения KIA не менялись; updater обнаруживает пересборку Yandex по SHA-256 и размеру.
