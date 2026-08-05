@@ -1,23 +1,23 @@
 {
   "app": {
-    "version_name": "23.09",
-    "version_code": 363,
-    "asset_name": "kia_363.apk",
-    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.09-363/kia_363.apk",
-    "sha256": "8aed01c8bfbc0cb71a107d7d5789ce75cc7fb3ee6e092133c7ba88093999e75f",
+    "version_name": "23.10",
+    "version_code": 364,
+    "asset_name": "kia_364.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.10-364/kia_364.apk",
+    "sha256": "6e67dcf20e0bbc121f26208bc8a131e1d5303a8a463e1d320afed90bb8129165",
     "size": 6062771
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
-    "version": "7.10-kia.20260804-background",
+    "version": "7.10-kia.20260805-teyes-compat",
     "version_code": 71011062,
     "package": "ru.yandex.yandexnavi",
     "apk_dir": "updates/yandex",
     "files": [
       {
-        "name": "yandex_navi-7_10-universal-kia-mod-background.apk",
-        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.09-363/yandex_navi-7_10-universal-kia-mod-background.apk",
-        "sha256": "712f153aae0d1431e3a59b59b97b44ca43ca6120d7907a65d5ab37e1316588cf",
+        "name": "yandex_navi-7_10-universal-kia-mod-teyes-compat.apk",
+        "download_url": "https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk",
+        "sha256": "4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8",
         "size": 115302487
       }
     ]

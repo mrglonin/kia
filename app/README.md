@@ -3,9 +3,9 @@
 Android source for `kia.app`.
 
 - `applicationId`: `kia.app`
-- `versionName`: `23.09`
-- `versionCode`: `363`
-- release APK name: `kia_363.apk`
+- `versionName`: `23.10`
+- `versionCode`: `364`
+- release APK name: `kia_364.apk`
 - min SDK: `29`
 - target SDK: `36`
 - compile SDK: `36`

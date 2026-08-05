@@ -43,7 +43,7 @@ Build with the repository's public update certificate:
 ```sh
 tools/yandex_bridge_background/build_mod.sh \
   /path/to/yandex_navi-7_10-universal-kia-mod-freshness.apk \
-  /tmp/yandex_navi-7_10-universal-kia-mod-background.apk
+  /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
 ```
 
 The build uses apktool `--no-res` to preserve Yandex's raw resource table. It
@@ -51,10 +51,11 @@ fails closed unless the input SHA-256 is the exact published freshness APK
 (`0b6e336a…14a71fd`) and verifies package, version, zip alignment, and signing
 certificate on the result.
 
-The compatibility candidate was checked on the Android 16 tablet in both code
+The compatibility APK published in KIA release `v23.10-364` was checked on the
+Android 16 tablet in both code
 paths. The modern no-GPS path passed cold launch, route build/start/cancel, and
 a 45-second Home run with increasing real source timestamps. A validation build
 that forced the TEYES/stock path used Yandex's own route notification and
-removed it after route cancellation without a Java or native crash. Before
-release, the production candidate still requires cold launch, at least ten
-route build/cancel cycles, and Home/return soak on a real TEYES unit.
+removed it after route cancellation without a Java or native crash. A real
+TEYES unit was not connected at publication time, so cold-launch, repeated
+route build/cancel, and Home/return hardware acceptance remain pending.
