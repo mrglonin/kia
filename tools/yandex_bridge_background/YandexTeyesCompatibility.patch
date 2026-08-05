@@ -1,0 +1,280 @@
+--- a/smali_classes3/com/yandex/navi/Navilib.smali
++++ b/smali_classes3/com/yandex/navi/Navilib.smali
+@@ -773,8 +773,25 @@
+     return-void
+
+     :cond_0
++    invoke-static {}, Lcom/yandex/navi/NavilibLifecycleImpl;->isKiaBackgroundWorkaround()Z
++
++    move-result v0
++
++    if-eqz v0, :kia_stock_mapkit_start
++
+     invoke-static {}, Lcom/yandex/navi/NavilibLifecycleImpl;->startMapKitIfNeeded()V
+
++    goto :kia_mapkit_started
++
++    :kia_stock_mapkit_start
++    invoke-static {}, Lcom/yandex/mapkit/MapKitFactory;->getInstance()Lcom/yandex/mapkit/MapKit;
++
++    move-result-object v0
++
++    invoke-interface {v0}, Lcom/yandex/mapkit/MapKit;->onStart()V
++
++    :kia_mapkit_started
++
+     invoke-static {}, Lcom/yandex/datasync/DatabaseManagerFactory;->getInstance()Lcom/yandex/datasync/DatabaseManager;
+
+     move-result-object v0
+--- a/smali_classes3/com/yandex/navi/NavilibLifecycleImpl.smali
++++ b/smali_classes3/com/yandex/navi/NavilibLifecycleImpl.smali
+@@ -35,6 +35,8 @@
+
+
+ # static fields
++.field private static kiaBackgroundWorkaround:Z
++
+ .field private static mapKitStarted:Z
+
+
+@@ -78,6 +80,72 @@
+     return-void
+ .end method
+
++.method public static final isKiaBackgroundWorkaround()Z
++    .locals 1
++
++    sget-boolean v0, Lcom/yandex/navi/NavilibLifecycleImpl;->kiaBackgroundWorkaround:Z
++
++    return v0
++.end method
++
++.method public static final shouldUseKiaBackgroundWorkaround(Landroid/content/Context;)Z
++    .locals 3
++
++    :try_start_0
++    sget v0, Landroid/os/Build$VERSION;->SDK_INT:I
++
++    const/16 v1, 0x23
++
++    if-lt v0, v1, :kia_workaround_disabled
++
++    const-string v0, "location"
++
++    invoke-virtual {p0, v0}, Landroid/content/Context;->getSystemService(Ljava/lang/String;)Ljava/lang/Object;
++
++    move-result-object v0
++
++    check-cast v0, Landroid/location/LocationManager;
++
++    const-string v1, "gps"
++
++    invoke-virtual {v0, v1}, Landroid/location/LocationManager;->getProvider(Ljava/lang/String;)Landroid/location/LocationProvider;
++
++    move-result-object v1
++
++    if-nez v1, :kia_workaround_disabled
++
++    const-string v1, "fused"
++
++    invoke-virtual {v0, v1}, Landroid/location/LocationManager;->getProvider(Ljava/lang/String;)Landroid/location/LocationProvider;
++
++    move-result-object v1
++
++    if-nez v1, :kia_workaround_enabled
++
++    const-string v1, "network"
++
++    invoke-virtual {v0, v1}, Landroid/location/LocationManager;->getProvider(Ljava/lang/String;)Landroid/location/LocationProvider;
++
++    move-result-object v0
++
++    if-eqz v0, :kia_workaround_disabled
++    :try_end_0
++    .catch Ljava/lang/RuntimeException; {:try_start_0 .. :try_end_0} :kia_workaround_failed
++
++    :kia_workaround_enabled
++    const/4 v0, 0x1
++
++    return v0
++
++    :kia_workaround_failed
++    move-exception v0
++
++    :kia_workaround_disabled
++    const/4 v0, 0x0
++
++    return v0
++.end method
++
+ .method public static final stopForTaskRemoval()V
+     .locals 0
+
+@@ -138,12 +206,32 @@
+
+     invoke-interface {v0}, Lcom/yandex/datasync/DatabaseManager;->onPause()V
+
++    sget-boolean v0, Lcom/yandex/navi/NavilibLifecycleImpl;->kiaBackgroundWorkaround:Z
++
++    if-nez v0, :kia_keep_mapkit_started
++
++    invoke-static {}, Lcom/yandex/navi/NavilibLifecycleImpl;->stopMapKitIfStarted()V
++
++    :kia_keep_mapkit_started
++
+     return-void
+ .end method
+
+ .method public onResume()V
+-    .locals 1
++    .locals 2
+
++    iget-object v0, p0, Lcom/yandex/navi/NavilibLifecycleImpl;->navilib:Lcom/yandex/navi/Navilib;
++
++    invoke-static {v0}, Lcom/yandex/navi/Navilib;->access$getApplication$p(Lcom/yandex/navi/Navilib;)Landroid/app/Application;
++
++    move-result-object v0
++
++    invoke-static {v0}, Lcom/yandex/navi/NavilibLifecycleImpl;->shouldUseKiaBackgroundWorkaround(Landroid/content/Context;)Z
++
++    move-result v1
++
++    sput-boolean v1, Lcom/yandex/navi/NavilibLifecycleImpl;->kiaBackgroundWorkaround:Z
++
+     invoke-static {}, Lcom/yandex/navi/NavilibLifecycleImpl;->startMapKitIfNeeded()V
+
+     invoke-static {}, Lcom/yandex/datasync/DatabaseManagerFactory;->getInstance()Lcom/yandex/datasync/DatabaseManager;
+@@ -162,6 +250,10 @@
+
+     invoke-static {}, Lru/yandex/core/CoreApplication;->onResume()V
+
++    sget-boolean v1, Lcom/yandex/navi/NavilibLifecycleImpl;->kiaBackgroundWorkaround:Z
++
++    if-eqz v1, :kia_resume_complete
++
+     iget-object v0, p0, Lcom/yandex/navi/NavilibLifecycleImpl;->navilib:Lcom/yandex/navi/Navilib;
+
+     invoke-static {v0}, Lcom/yandex/navi/Navilib;->access$getApplication$p(Lcom/yandex/navi/Navilib;)Landroid/app/Application;
+@@ -170,6 +262,8 @@
+
+     invoke-static {v0}, Lcom/yandex/navikit/guidance/service/GuidanceServiceKt;->access$safeStartService(Landroid/content/Context;)Z
+
++    :kia_resume_complete
++
+     return-void
+ .end method
+
+@@ -180,7 +274,15 @@
+ .end method
+
+ .method public onStop()V
+-    .locals 0
++    .locals 1
+
++    sget-boolean v0, Lcom/yandex/navi/NavilibLifecycleImpl;->kiaBackgroundWorkaround:Z
++
++    if-nez v0, :kia_keep_core_resumed
++
++    invoke-static {}, Lru/yandex/core/CoreApplication;->onStop()V
++
++    :kia_keep_core_resumed
++
+     return-void
+ .end method
+--- a/smali_classes3/com/yandex/navikit/guidance/service/GuidanceService.smali
++++ b/smali_classes3/com/yandex/navikit/guidance/service/GuidanceService.smali
+@@ -218,6 +218,17 @@
+
+ .method private final startKiaForeground()V
+     .locals 5
++
++    invoke-static {}, Lcom/yandex/navi/NavilibLifecycleImpl;->isKiaBackgroundWorkaround()Z
++
++    move-result v0
++
++    if-nez v0, :kia_workaround_enabled
++
++    return-void
++
++    :kia_workaround_enabled
++    :try_start_0
+
+     const-string v0, "notification"
+
+@@ -316,6 +327,9 @@
+
+     iput-boolean v0, p0, Lcom/yandex/navikit/guidance/service/GuidanceService;->kiaForegroundActive:Z
+
++    :try_end_0
++    .catch Ljava/lang/RuntimeException; {:try_start_0 .. :try_end_0} :kia_foreground_failed
++
+     invoke-direct {p0}, Lcom/yandex/navikit/guidance/service/GuidanceService;->getPresenter()Lcom/yandex/navikit/guidance/service/GuidanceServicePresenter;
+
+     move-result-object v1
+@@ -323,6 +337,15 @@
+     invoke-virtual {v1, v0}, Lcom/yandex/navikit/guidance/service/GuidanceServicePresenter;->setServiceForeground(Z)V
+
+     return-void
++
++    :kia_foreground_failed
++    move-exception v0
++
++    const/4 v0, 0x0
++
++    iput-boolean v0, p0, Lcom/yandex/navikit/guidance/service/GuidanceService;->kiaForegroundActive:Z
++
++    return-void
+ .end method
+
+
+@@ -366,10 +389,16 @@
+
+     invoke-virtual {v0}, Lcom/yandex/navikit/guidance/service/GuidanceServicePresenter;->detach()V
+
++    iget-boolean v1, p0, Lcom/yandex/navikit/guidance/service/GuidanceService;->kiaForegroundActive:Z
++
++    if-eqz v1, :kia_stock_destroy
++
+     const/4 v1, 0x0
+
+     invoke-virtual {v0, v1}, Lcom/yandex/navikit/guidance/service/GuidanceServicePresenter;->setServiceForeground(Z)V
+
++    :kia_stock_destroy
++
+     const-string v0, "application.guidance_service.service.onDestroy"
+
+     const/4 v1, 0x0
+@@ -396,8 +425,14 @@
+ .method public onTaskRemoved(Landroid/content/Intent;)V
+     .locals 2
+
++    iget-boolean v0, p0, Lcom/yandex/navikit/guidance/service/GuidanceService;->kiaForegroundActive:Z
++
++    if-eqz v0, :kia_stock_task_removed
++
+     invoke-static {}, Lcom/yandex/navi/NavilibLifecycleImpl;->stopForTaskRemoval()V
+
++    :kia_stock_task_removed
++
+     invoke-direct {p0}, Lcom/yandex/navikit/guidance/service/GuidanceService;->getPresenter()Lcom/yandex/navikit/guidance/service/GuidanceServicePresenter;
+
+     move-result-object p1
+@@ -412,6 +447,10 @@
+
+     invoke-static {p1, v0, v1, v0}, Lcom/yandex/navikit/report/Report;->event$default(Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+
++    iget-boolean v0, p0, Lcom/yandex/navikit/guidance/service/GuidanceService;->kiaForegroundActive:Z
++
++    if-eqz v0, :kia_task_removed_complete
++
+     const/4 v0, 0x0
+
+     iput-boolean v0, p0, Lcom/yandex/navikit/guidance/service/GuidanceService;->kiaForegroundActive:Z
+@@ -422,6 +461,8 @@
+
+     invoke-virtual {p0}, Landroid/app/Service;->stopSelf()V
+
++    :kia_task_removed_complete
++
+     return-void
+ .end method

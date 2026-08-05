@@ -59,6 +59,7 @@ aligned_apk="$work_dir/yandex-aligned.apk"
 "$java_home/bin/java" -jar "$repo_dir/tools/apktool_2.9.3.jar" \
     d --no-res --force -o "$decode_dir" "$input_apk"
 patch -l -V none -p1 -d "$decode_dir" < "$script_dir/YandexBackgroundLocation.patch"
+patch -l -V none -p1 -d "$decode_dir" < "$script_dir/YandexTeyesCompatibility.patch"
 "$java_home/bin/java" -jar "$repo_dir/tools/apktool_2.9.3.jar" \
     b "$decode_dir" -o "$unsigned_apk"
 "$build_tools/zipalign" -f -p 4 "$unsigned_apk" "$aligned_apk"
