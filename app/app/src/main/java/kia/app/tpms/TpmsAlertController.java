@@ -86,10 +86,16 @@ public final class TpmsAlertController {
             return WARNING_NONE;
         }
         int flags = state.flags == null ? 0 : state.flags[wheel];
-        return warningState(context, state.pressureKpa[wheel], state.temperatureC[wheel], flags);
+        return warningState(context, state.pressureKpa[wheel], state.temperatureC[wheel], flags,
+                state.temperatureKnown[wheel]);
     }
 
     public static int warningState(Context context, int pressureKpa, int tempC, int flags) {
+        return warningState(context, pressureKpa, tempC, flags, true);
+    }
+
+    private static int warningState(Context context, int pressureKpa, int tempC, int flags,
+                                    boolean temperatureKnown) {
         if (context == null || !AppSettings.tpmsAlertsEnabled(context)) return WARNING_NONE;
         int cleanFlags = flags & 0xff;
         if ((cleanFlags & FLAG_FAST_LEAKAGE) != 0) return WARNING_FAST_LEAKAGE;
@@ -107,8 +113,8 @@ public final class TpmsAlertController {
 
         if (pressureKpa > 0 && pressureKpa < lowPressure) return WARNING_LOW_PRESSURE;
         if (pressureKpa > highPressure) return WARNING_HIGH_PRESSURE;
-        if (tempC < lowTemp) return WARNING_LOW_TEMP;
-        if (tempC >= highTemp) return WARNING_HIGH_TEMP;
+        if (temperatureKnown && tempC < lowTemp) return WARNING_LOW_TEMP;
+        if (temperatureKnown && tempC >= highTemp) return WARNING_HIGH_TEMP;
         return WARNING_NONE;
     }
 
@@ -119,11 +125,17 @@ public final class TpmsAlertController {
             return SEVERITY_NONE;
         }
         int flags = state.flags == null ? 0 : state.flags[wheel];
-        return warningSeverity(context, state.pressureKpa[wheel], state.temperatureC[wheel], flags);
+        return warningSeverity(context, state.pressureKpa[wheel], state.temperatureC[wheel], flags,
+                state.temperatureKnown[wheel]);
     }
 
     public static int warningSeverity(Context context, int pressureKpa, int tempC, int flags) {
-        int warning = warningState(context, pressureKpa, tempC, flags);
+        return warningSeverity(context, pressureKpa, tempC, flags, true);
+    }
+
+    private static int warningSeverity(Context context, int pressureKpa, int tempC, int flags,
+                                       boolean temperatureKnown) {
+        int warning = warningState(context, pressureKpa, tempC, flags, temperatureKnown);
         if (warning == WARNING_NONE) return SEVERITY_NONE;
 
         int cleanFlags = flags & 0xff;
@@ -203,7 +215,7 @@ public final class TpmsAlertController {
             int severity = warningSeverity(context, state, wheel);
             out.append(wheelName(wheel)).append(' ')
                     .append(barText(state.pressureKpa[wheel])).append(" / ")
-                    .append(state.temperatureC[wheel]).append("C, ")
+                    .append(state.temperatureKnown[wheel] ? state.temperatureC[wheel] + "C" : "--C").append(", ")
                     .append(severityText(severity)).append(": ")
                     .append(warningText(warning));
         }

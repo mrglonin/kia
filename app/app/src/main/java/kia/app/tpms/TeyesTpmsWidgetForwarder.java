@@ -13,11 +13,12 @@ import android.os.SystemClock;
 
 import kia.app.core.AppIds;
 import kia.app.core.AppLog;
+import kia.app.core.StateStore;
 import kia.app.core.model.TpmsState;
 import kia.app.core.settings.AppSettings;
 import kia.app.protocol.adapter.AdapterGateway;
 
-/** Optional display bridge. It neither opens USB nor binds the stock TPMS service. */
+/** USB display bridge to the KIA Home card and the separate TEYES Android widgets. */
 public final class TeyesTpmsWidgetForwarder {
     private static final String WIDGET_PACKAGE = "com.teyes.tpms.widget";
     private static final String WIDGET_BOOT_RECEIVER = "com.teyes.tpms.receiver.BootReceiver";
@@ -33,12 +34,17 @@ public final class TeyesTpmsWidgetForwarder {
     private final Context app;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final TeyesTpmsWidgetPolicy policy = new TeyesTpmsWidgetPolicy();
+    private final TeyesHomeVisibilityMonitor homeMonitor;
+    private final TpmsHomeOverlayController homeOverlay;
     // Separate from StateStore: QA samples must never leak into the stock widget.
     private TpmsState hardwareState = TpmsState.empty();
     private BroadcastReceiver stateReceiver;
     private BroadcastReceiver stockReceiver;
     private boolean started;
     private boolean enabled;
+    private boolean homeVisible;
+    private long homeVisibilityObservedElapsed = -1L;
+    private boolean kiaActivityVisible;
     private boolean usbConnected;
     private boolean reactiveQueued;
     private boolean failureLogged;
@@ -69,6 +75,8 @@ public final class TeyesTpmsWidgetForwarder {
 
     private TeyesTpmsWidgetForwarder(Context context) {
         app = context.getApplicationContext();
+        homeMonitor = new TeyesHomeVisibilityMonitor(app);
+        homeOverlay = TpmsHomeOverlayController.get(app);
     }
 
     public static synchronized TeyesTpmsWidgetForwarder get(Context context) {
@@ -94,11 +102,19 @@ public final class TeyesTpmsWidgetForwarder {
         runOnMain(this::applySettingsOnMain);
     }
 
+    public void setKiaActivityVisible(boolean visible) {
+        runOnMain(() -> {
+            kiaActivityVisible = visible;
+            updateHomeCard();
+        });
+    }
+
     public void stop() {
         runOnMain(() -> {
             if (enabled) clearAllWheels();
             enabled = false;
             started = false;
+            stopHomeCard();
             lifecycleGeneration++;
             cancelReplay();
             unregisterStockReceiver();
@@ -143,15 +159,17 @@ public final class TeyesTpmsWidgetForwarder {
                 enabled = false;
                 cancelReplay();
                 unregisterStockReceiver();
+                stopHomeCard();
             } else {
                 enabled = true;
                 failureLogged = false;
                 registerStockReceiver();
+                startHomeCard();
                 bootstrapWidget(true);
                 publishSnapshot();
                 scheduleReplay();
             }
-            AppLog.line(app, "TEYES TPMS widget pressure forwarding: " + enabled);
+            AppLog.line(app, "TEYES TPMS pressure/temperature card and widgets: " + enabled);
         } else if (enabled) {
             publishSnapshot();
             scheduleReplay();
@@ -189,12 +207,50 @@ public final class TeyesTpmsWidgetForwarder {
                     ? policy.project(wheel, now, alerts, low, high)
                     : TeyesTpmsWidgetPolicy.WheelValue.unknown(wheel));
         }
+        updateHomeCard();
     }
 
     private void clearAllWheels() {
         for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
             sendWheel(TeyesTpmsWidgetPolicy.WheelValue.unknown(wheel));
         }
+        updateHomeCard();
+    }
+
+    private void startHomeCard() {
+        homeMonitor.start(visible -> {
+            if (!started || !enabled) return;
+            homeVisible = visible;
+            homeVisibilityObservedElapsed = SystemClock.elapsedRealtime();
+            refreshConnection();
+            updateHomeCard();
+        });
+    }
+
+    private void stopHomeCard() {
+        homeVisible = false;
+        homeVisibilityObservedElapsed = -1L;
+        homeMonitor.stop();
+        homeOverlay.stop();
+    }
+
+    private void updateHomeCard() {
+        if (!started || !enabled) return;
+        long now = SystemClock.elapsedRealtime();
+        boolean alerts = AppSettings.tpmsAlertsEnabled(app);
+        int low = AppSettings.tpmsLowPressureKpa(app);
+        int high = AppSettings.tpmsHighPressureKpa(app);
+        TeyesTpmsWidgetPolicy.WheelValue[] wheels = new TeyesTpmsWidgetPolicy.WheelValue[TpmsState.WHEEL_COUNT];
+        for (int wheel = 0; wheel < wheels.length; wheel++) {
+            wheels[wheel] = usbConnected ? policy.project(wheel, now, alerts, low, high)
+                    : TeyesTpmsWidgetPolicy.WheelValue.unknown(wheel);
+        }
+        boolean rctaVisible = AppSettings.rctaOverlayEnabled(app) && StateStore.rcta().active();
+        long visibilityAge = now - homeVisibilityObservedElapsed;
+        boolean visibilityFresh = homeVisibilityObservedElapsed >= 0L
+                && visibilityAge >= 0L && visibilityAge <= 1_500L;
+        homeOverlay.update(wheels, usbConnected,
+                homeVisible && visibilityFresh && !kiaActivityVisible && !rctaVisible);
     }
 
     private void sendWheel(TeyesTpmsWidgetPolicy.WheelValue value) {
@@ -261,7 +317,10 @@ public final class TeyesTpmsWidgetForwarder {
         stateReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                if (started) refreshConnection();
+                if (started) {
+                    refreshConnection();
+                    updateHomeCard();
+                }
             }
         };
         IntentFilter filter = new IntentFilter(AppIds.ACTION_STATE_CHANGED);

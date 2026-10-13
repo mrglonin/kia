@@ -18,6 +18,8 @@ public final class TpmsState {
     public final boolean[] known;
     public final int[] pressureKpa;
     public final int[] temperatureC;
+    /** A numeric backing value is not a measurement unless this flag is true. */
+    public final boolean[] temperatureKnown;
     public final int[] flags;
     public final long[] wheelUpdatedAt;
     public final boolean[] explicitlyStale;
@@ -40,9 +42,23 @@ public final class TpmsState {
     public TpmsState(boolean[] known, int[] pressureKpa, int[] temperatureC, int[] flags,
                      long[] wheelUpdatedAt, boolean[] explicitlyStale,
                      String source, long updatedAt) {
+        this(known, pressureKpa, temperatureC, temperaturesForKnownWheels(known, temperatureC),
+                flags, wheelUpdatedAt, explicitlyStale, source, updatedAt);
+    }
+
+    public TpmsState(boolean[] known, int[] pressureKpa, int[] temperatureC,
+                     boolean[] temperatureKnown, int[] flags,
+                     long[] wheelUpdatedAt, boolean[] explicitlyStale,
+                     String source, long updatedAt) {
         this.known = copyBool(known);
         this.pressureKpa = copyInt(pressureKpa);
         this.temperatureC = copyInt(temperatureC);
+        this.temperatureKnown = copyBool(temperatureKnown);
+        for (int wheel = 0; wheel < WHEEL_COUNT; wheel++) {
+            this.temperatureKnown[wheel] &= this.known[wheel]
+                    && temperatureC != null && wheel < temperatureC.length
+                    && isValidTemperatureC(this.temperatureC[wheel]);
+        }
         this.flags = copyInt(flags);
         this.wheelUpdatedAt = copyLong(wheelUpdatedAt);
         this.explicitlyStale = copyBool(explicitlyStale);
@@ -61,21 +77,32 @@ public final class TpmsState {
 
     public TpmsState withWheelAt(int wheel, int pressure, int temp, int flag,
                                  String valueSource, long observedAt) {
+        return withWheelAt(wheel, pressure, temp, true, flag, valueSource, observedAt);
+    }
+
+    /**
+     * Both values belong to this observation. Missing temperature clears its
+     * validity immediately; it never refreshes a temperature from an older frame.
+     */
+    public TpmsState withWheelAt(int wheel, int pressure, int temp, boolean temperatureValid,
+                                 int flag, String valueSource, long observedAt) {
         if (wheel < 0 || wheel >= WHEEL_COUNT) return this;
         boolean[] nextKnown = copyBool(known);
         int[] nextPressure = copyInt(pressureKpa);
         int[] nextTemp = copyInt(temperatureC);
+        boolean[] nextTemperatureKnown = copyBool(temperatureKnown);
         int[] nextFlags = copyInt(flags);
         long[] nextWheelUpdatedAt = copyLong(wheelUpdatedAt);
         boolean[] nextExplicitlyStale = copyBool(explicitlyStale);
         long cleanObservedAt = Math.max(0L, observedAt);
         nextKnown[wheel] = true;
         nextPressure[wheel] = clampPressure(pressure);
-        nextTemp[wheel] = clampTemp(temp);
+        nextTemperatureKnown[wheel] = temperatureValid && isValidTemperatureC(temp);
+        nextTemp[wheel] = nextTemperatureKnown[wheel] ? temp : 0;
         nextFlags[wheel] = flag & 0xff;
         nextWheelUpdatedAt[wheel] = cleanObservedAt;
         nextExplicitlyStale[wheel] = false;
-        return new TpmsState(nextKnown, nextPressure, nextTemp, nextFlags,
+        return new TpmsState(nextKnown, nextPressure, nextTemp, nextTemperatureKnown, nextFlags,
                 nextWheelUpdatedAt, nextExplicitlyStale,
                 valueSource, Math.max(updatedAt, cleanObservedAt));
     }
@@ -91,7 +118,7 @@ public final class TpmsState {
         boolean[] nextExplicitlyStale = copyBool(explicitlyStale);
         nextExplicitlyStale[wheel] = true;
         long cleanObservedAt = Math.max(0L, observedAt);
-        return new TpmsState(known, pressureKpa, temperatureC, flags,
+        return new TpmsState(known, pressureKpa, temperatureC, temperatureKnown, flags,
                 wheelUpdatedAt, nextExplicitlyStale,
                 valueSource, Math.max(updatedAt, cleanObservedAt));
     }
@@ -132,6 +159,15 @@ public final class TpmsState {
         return wheel >= 0 && wheel < WHEEL_COUNT && known[wheel] && !isWheelFresh(wheel, now);
     }
 
+    public boolean isTemperatureFresh(int wheel) {
+        return isTemperatureFresh(wheel, System.currentTimeMillis());
+    }
+
+    public boolean isTemperatureFresh(int wheel, long now) {
+        return wheel >= 0 && wheel < WHEEL_COUNT && temperatureKnown[wheel]
+                && isWheelFresh(wheel, now);
+    }
+
     public long wheelAgeMs(int wheel, long now) {
         if (wheel < 0 || wheel >= WHEEL_COUNT || !known[wheel] || wheelUpdatedAt[wheel] <= 0L) {
             return Long.MAX_VALUE;
@@ -149,8 +185,9 @@ public final class TpmsState {
 
     private String wheelText(int wheel) {
         if (!known[wheel]) return "-";
-        String value = String.format(Locale.US, "%.2f bar / %dC",
-                pressureKpa[wheel] / 100f, temperatureC[wheel]);
+        String value = String.format(Locale.US, "%.2f bar / %sC",
+                pressureKpa[wheel] / 100f,
+                temperatureKnown[wheel] ? String.valueOf(temperatureC[wheel]) : "__");
         return isWheelFresh(wheel) ? value : value + " (устар.)";
     }
 
@@ -185,8 +222,18 @@ public final class TpmsState {
         return Math.max(0, Math.min(600, value));
     }
 
-    private static int clampTemp(int value) {
-        return Math.max(-60, Math.min(160, value));
+    public static boolean isValidTemperatureC(int value) {
+        return value >= -60 && value <= 160;
+    }
+
+    private static boolean[] temperaturesForKnownWheels(boolean[] known, int[] temperatures) {
+        boolean[] out = new boolean[WHEEL_COUNT];
+        if (known == null || temperatures == null) return out;
+        int count = Math.min(WHEEL_COUNT, Math.min(known.length, temperatures.length));
+        for (int wheel = 0; wheel < count; wheel++) {
+            out[wheel] = known[wheel] && isValidTemperatureC(temperatures[wheel]);
+        }
+        return out;
     }
 
     private static String safe(String value) {

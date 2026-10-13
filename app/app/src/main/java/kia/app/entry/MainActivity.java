@@ -658,6 +658,7 @@ public final class MainActivity extends Activity {
         normalizeModeForWindow();
         TpmsController.get(this).setPollingMode(TpmsPollingMode.FULL_DASHBOARD);
         TpmsWarningOverlayController.get(this).setActivityVisible(true);
+        TeyesTpmsWidgetForwarder.get(this).setKiaActivityVisible(true);
         NavigationOverlayController.get(this).apply();
         applyImmersiveMode();
         if ((settingsMode || selectedTab == TAB_SETTINGS) && tabContent != null) renderTab();
@@ -683,6 +684,7 @@ public final class MainActivity extends Activity {
         hideRctaDemoAlert();
         TpmsController.get(this).setPollingMode(TpmsPollingMode.BACKGROUND);
         TpmsWarningOverlayController.get(this).setActivityVisible(false);
+        TeyesTpmsWidgetForwarder.get(this).setKiaActivityVisible(false);
         try {
             unregisterReceiver(stateReceiver);
         } catch (Exception ignored) {
@@ -1641,7 +1643,7 @@ public final class MainActivity extends Activity {
         valueLp.setMargins(0, tpmsLegacyCompact() ? dp(14) : dp(22), 0, 0);
         card.addView(value, valueLp);
 
-        String metaText = known ? state.temperatureC[wheel] + "C" : "--C";
+        String metaText = known && state.temperatureKnown[wheel] ? state.temperatureC[wheel] + "C" : "--C";
         String detail = bad ? TpmsAlertController.warningText(warning) : (known ? "норма" : "нет данных");
         TextView meta = text(metaText + "  /  " + detail,
                 tpmsLegacyCompact() ? 22 : 15, bad ? accent : COLOR_MUTED);
@@ -1891,7 +1893,7 @@ public final class MainActivity extends Activity {
         valueLp.setMargins(0, dp(22), 0, 0);
         card.addView(valueRow, valueLp);
 
-        String temp = known ? state.temperatureC[wheel] + "C" : "--C";
+        String temp = known && state.temperatureKnown[wheel] ? state.temperatureC[wheel] + "C" : "--C";
         String detail = warning == TpmsAlertController.WARNING_NONE
                 ? (known ? "норма" : "нет данных")
                 : TpmsAlertController.warningText(warning);
@@ -2449,7 +2451,7 @@ public final class MainActivity extends Activity {
         pressureLp.setMargins(0, dp(16), 0, 0);
         card.addView(pressure, pressureLp);
 
-        String temp = known ? state.temperatureC[wheel] + "C" : "--C";
+        String temp = known && state.temperatureKnown[wheel] ? state.temperatureC[wheel] + "C" : "--C";
         String detail = warning == TpmsAlertController.WARNING_NONE
                 ? (known ? "норма" : "нет данных")
                 : TpmsAlertController.warningText(warning);
@@ -2623,7 +2625,7 @@ public final class MainActivity extends Activity {
         pressureLp.setMargins(0, dp(10), 0, 0);
         card.addView(pressure, pressureLp);
 
-        String temp = known ? state.temperatureC[wheel] + "C" : "--C";
+        String temp = known && state.temperatureKnown[wheel] ? state.temperatureC[wheel] + "C" : "--C";
         String detail = !known ? "нет данных"
                 : !fresh ? "данные устарели · "
                 + ageText(now, now - state.wheelAgeMs(wheel, now))
@@ -4018,19 +4020,19 @@ public final class MainActivity extends Activity {
 
     private LinearLayout teyesTpmsWidgetPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
-        addSettingsPanelHeader(panel, "Виджет TEYES",
-                "Давление из KIA в штатном виджете на главном экране", COLOR_ACCENT_BLUE);
-        addInlineSwitch(panel, "Передавать давление в виджет TEYES",
-                "Давление в Bar; температура пока показывается как «__»",
+        addSettingsPanelHeader(panel, "Шины на главном экране TEYES",
+                "Четыре колеса: давление и температура из USB-адаптера KIA", COLOR_ACCENT_BLUE);
+        addInlineSwitch(panel, "Показывать давление и температуру",
+                "Карточка KIA появляется автоматически на главном экране TEYES",
                 AppSettings.teyesTpmsWidgetForwardEnabled(this), (button, checked) -> {
                     AppSettings.setTeyesTpmsWidgetForwardEnabled(this, checked);
                     if (checked) AppService.start(this);
                     TeyesTpmsWidgetForwarder.get(this).applySettings();
                     refresh();
                 });
-        TextView hint = text("Пока включено, источник виджета — USB-адаптер KIA. "
-                        + "Добавьте штатный виджет TEYES на главный экран. "
-                        + "При принудительной остановке KIA последнее значение может остаться в виджете.",
+        TextView hint = text("Карточку можно передвинуть. При открытии другого приложения она скрывается. "
+                        + "Давление — в Bar, температура — в °C; отсутствующие или устаревшие данные — «—». "
+                        + "Отдельные виджеты TEYES также получают эти показания.",
                 isCompact() ? 13 : 15, COLOR_MUTED);
         LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);

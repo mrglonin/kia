@@ -5,20 +5,25 @@ import java.util.Locale;
 
 import kia.app.core.model.TpmsState;
 
-/** Pressure-only projection of USB observations; replay never refreshes their age. */
+/** Projection of verified USB values; replay never refreshes their age. */
 public final class TeyesTpmsWidgetPolicy {
     public static final long STALE_AFTER_MS = 180_000L;
     public static final String UNKNOWN = "__";
     private static final int PRESSURE_WARNING_FLAGS = 0x01 | 0x02 | 0x08;
+    private static final int TEMPERATURE_WARNING_FLAG = 0x04;
 
     private final boolean[] available = new boolean[TpmsState.WHEEL_COUNT];
     private final int[] pressureKpa = new int[TpmsState.WHEEL_COUNT];
+    private final boolean[] temperatureAvailable = new boolean[TpmsState.WHEEL_COUNT];
+    private final int[] temperatureC = new int[TpmsState.WHEEL_COUNT];
     private final int[] flags = new int[TpmsState.WHEEL_COUNT];
     private final long[] observedAtElapsed = new long[TpmsState.WHEEL_COUNT];
 
     public void reset() {
         Arrays.fill(available, false);
         Arrays.fill(pressureKpa, 0);
+        Arrays.fill(temperatureAvailable, false);
+        Arrays.fill(temperatureC, 0);
         Arrays.fill(flags, 0);
         Arrays.fill(observedAtElapsed, 0L);
     }
@@ -30,6 +35,9 @@ public final class TeyesTpmsWidgetPolicy {
             if ((wheelMask & (1 << wheel)) == 0) continue;
             available[wheel] = state.known[wheel] && !state.explicitlyStale[wheel];
             pressureKpa[wheel] = state.pressureKpa[wheel];
+            temperatureAvailable[wheel] = available[wheel] && state.temperatureKnown[wheel]
+                    && TpmsState.isValidTemperatureC(state.temperatureC[wheel]);
+            temperatureC[wheel] = state.temperatureC[wheel];
             flags[wheel] = state.flags[wheel];
             observedAtElapsed[wheel] = observedElapsed;
         }
@@ -71,28 +79,32 @@ public final class TeyesTpmsWidgetPolicy {
         boolean pressureWarning = alertsEnabled
                 && ((flags[wheel] & PRESSURE_WARNING_FLAGS) != 0
                 || (pressure > 0 && pressure < low) || pressure > high);
+        boolean temperatureWarning = alertsEnabled
+                && (flags[wheel] & TEMPERATURE_WARNING_FLAG) != 0;
         return new WheelValue((byte) (wheel + 1),
-                String.format(Locale.US, "%.2f", pressure / 100d), pressureWarning);
+                String.format(Locale.US, "%.2f", pressure / 100d),
+                temperatureAvailable[wheel] ? String.valueOf(temperatureC[wheel]) : UNKNOWN,
+                pressureWarning || temperatureWarning);
     }
 
     public static final class WheelValue {
         public final byte which;
         public final String pressure;
-        // TpmsState has no independent temperature-valid flag. Do not invent a value.
-        public final String temperature = UNKNOWN;
+        public final String temperature;
         public final boolean alert;
         public final int pressureUnit = 1; // Bar
         public final int temperatureUnit = 1; // Celsius
         public final int warningState = 0; // Receiver renders alert, not this vendor enum.
 
-        private WheelValue(byte which, String pressure, boolean alert) {
+        private WheelValue(byte which, String pressure, String temperature, boolean alert) {
             this.which = which;
             this.pressure = pressure;
+            this.temperature = temperature;
             this.alert = alert;
         }
 
         public static WheelValue unknown(int wheel) {
-            return new WheelValue((byte) (wheel + 1), UNKNOWN, false);
+            return new WheelValue((byte) (wheel + 1), UNKNOWN, UNKNOWN, false);
         }
     }
 }
