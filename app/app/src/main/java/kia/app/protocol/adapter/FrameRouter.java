@@ -12,6 +12,7 @@ import kia.app.core.model.VehicleState;
 import kia.app.media.domain.MediaFeature;
 import kia.app.rcta.RctaController;
 import kia.app.tpms.TpmsController;
+import kia.app.tpms.TeyesTpmsWidgetForwarder;
 import kia.app.update.FirmwareUpdateController;
 
 public final class FrameRouter {
@@ -21,7 +22,7 @@ public final class FrameRouter {
         this.app = context.getApplicationContext();
     }
 
-    public void onFrame(byte[] frame) {
+    public void onFrame(byte[] frame, long usbConnectionEpoch, long receivedElapsed) {
         if (frame == null || frame.length < 6) return;
         int id = frame[4] & 0xff;
         StateStore.setAdapter(app, StateStore.adapter().withFrameTime(System.currentTimeMillis()));
@@ -59,7 +60,10 @@ public final class FrameRouter {
                 break;
             case AdapterProtocol.CMD_TPMS:
             case AdapterProtocol.CMD_TPMS_LEGACY:
-                TpmsController.get(app).handleAdapterFrame(frame);
+                if (TpmsController.get(app).handleAdapterFrame(frame)) {
+                    TeyesTpmsWidgetForwarder.get(app).onUsbFrame(
+                            frame, usbConnectionEpoch, receivedElapsed);
+                }
                 break;
             default:
                 break;

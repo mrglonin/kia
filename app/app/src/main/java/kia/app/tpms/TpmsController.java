@@ -90,13 +90,24 @@ public final class TpmsController {
         AdapterGateway.get(app).pollTpms();
     }
 
-    public void handleAdapterFrame(byte[] frame) {
+    /** Returns whether the packet contains recognized wheel slots, even if all are empty. */
+    public boolean handleAdapterFrame(byte[] frame) {
         long now = System.currentTimeMillis();
         TpmsState next = parseAdapterFrame(frame, StateStore.tpms(), now);
-        if (next == null) return;
-        StateStore.setTpms(app, next);
-        TpmsAlertController.get(app).apply(next);
-        if (polling) scheduleNext();
+        if (next != null) {
+            StateStore.setTpms(app, next);
+            TpmsAlertController.get(app).apply(next);
+            if (polling) scheduleNext();
+        }
+        return observedWheelMask(frame) != 0;
+    }
+
+    static int observedWheelMask(byte[] frame) {
+        int len = frame == null || frame.length < 6 ? 0 : Math.min(frame.length, frame[3] & 0xff);
+        int id = u8(frame, 4);
+        if (id == AdapterProtocol.CMD_TPMS && len >= 14) return 0x0f;
+        if (id == AdapterProtocol.CMD_TPMS_LEGACY && len >= 23) return u8(frame, 5) & 0x0f;
+        return 0;
     }
 
     static TpmsState parseAdapterFrame(byte[] frame, TpmsState current, long observedAt) {

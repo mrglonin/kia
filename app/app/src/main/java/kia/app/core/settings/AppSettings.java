@@ -48,6 +48,7 @@ public final class AppSettings {
     private static final String KEY_SAS_RATIO = "sas_ratio";
     private static final String KEY_TPMS_ALERTS = "tpms_alerts";
     private static final String KEY_TPMS_SOUND_ALERTS = "tpms_sound_alerts";
+    private static final String KEY_TEYES_TPMS_WIDGET_FORWARD = "teyes_tpms_widget_forward_enabled";
     private static final String KEY_TPMS_LOW_PRESSURE = "tpms_low_pressure";
     private static final String KEY_TPMS_HIGH_PRESSURE = "tpms_high_pressure";
     private static final String KEY_TPMS_LOW_TEMP = "tpms_low_temp";
@@ -754,6 +755,14 @@ public final class AppSettings {
 
     public static void setTpmsSoundAlertsEnabled(Context context, boolean value) {
         prefs(context).edit().putBoolean(KEY_TPMS_SOUND_ALERTS, value).apply();
+    }
+
+    public static boolean teyesTpmsWidgetForwardEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_TEYES_TPMS_WIDGET_FORWARD, false);
+    }
+
+    public static void setTeyesTpmsWidgetForwardEnabled(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_TEYES_TPMS_WIDGET_FORWARD, value).apply();
     }
 
     public static int tpmsLowPressureKpa(Context context) {

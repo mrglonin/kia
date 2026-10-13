@@ -75,6 +75,7 @@ public final class SettingsTransfer {
             "canbus_debug_visible",
             "tpms_alerts",
             "tpms_sound_alerts",
+            "teyes_tpms_widget_forward_enabled",
             "rcta_overlay",
             "rcta_sound",
             "media_source_reassert",

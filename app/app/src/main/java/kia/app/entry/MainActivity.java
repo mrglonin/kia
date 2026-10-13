@@ -104,6 +104,7 @@ import kia.app.rcta.RctaSoundPlayer;
 import kia.app.tpms.DashboardNavigationSnapshot;
 import kia.app.tpms.TpmsAlertController;
 import kia.app.tpms.TpmsController;
+import kia.app.tpms.TeyesTpmsWidgetForwarder;
 import kia.app.tpms.TpmsDashboardView;
 import kia.app.tpms.TpmsPollingMode;
 import kia.app.tpms.TpmsWarningOverlayController;
@@ -4012,6 +4013,30 @@ public final class MainActivity extends Activity {
     private void renderTpmsSettingsTab(LinearLayout root) {
         root.addView(tpmsThresholdPanel());
         root.addView(tpmsSettingsAlertsPanel());
+        root.addView(teyesTpmsWidgetPanel());
+    }
+
+    private LinearLayout teyesTpmsWidgetPanel() {
+        LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
+        addSettingsPanelHeader(panel, "Виджет TEYES",
+                "Давление из KIA в штатном виджете на главном экране", COLOR_ACCENT_BLUE);
+        addInlineSwitch(panel, "Передавать давление в виджет TEYES",
+                "Давление в Bar; температура пока показывается как «__»",
+                AppSettings.teyesTpmsWidgetForwardEnabled(this), (button, checked) -> {
+                    AppSettings.setTeyesTpmsWidgetForwardEnabled(this, checked);
+                    if (checked) AppService.start(this);
+                    TeyesTpmsWidgetForwarder.get(this).applySettings();
+                    refresh();
+                });
+        TextView hint = text("Пока включено, источник виджета — USB-адаптер KIA. "
+                        + "Добавьте штатный виджет TEYES на главный экран. "
+                        + "При принудительной остановке KIA последнее значение может остаться в виджете.",
+                isCompact() ? 13 : 15, COLOR_MUTED);
+        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hintLp.setMargins(0, dp(10), 0, 0);
+        panel.addView(hint, hintLp);
+        return panel;
     }
 
     private void renderGeneralSettingsTab(LinearLayout root) {

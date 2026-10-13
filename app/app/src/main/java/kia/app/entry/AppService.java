@@ -42,6 +42,7 @@ import kia.app.navigation.overlay.NavigationOverlayController;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.rcta.RctaOverlayController;
 import kia.app.tpms.TpmsController;
+import kia.app.tpms.TeyesTpmsWidgetForwarder;
 import kia.app.update.AppUpdateCheckPolicy;
 import kia.app.update.AppUpdateController;
 import kia.app.update.NavigatorUpdateController;
@@ -137,6 +138,7 @@ public final class AppService extends Service {
         registerLocationProviderReceiver();
         acquireServiceWakeLock();
         gateway = AdapterGateway.get(this);
+        TeyesTpmsWidgetForwarder.get(this).start();
         gateway.start();
         gateway.requestAdapterInfoQuiet();
         TpmsController.get(this).startPolling();
@@ -179,6 +181,7 @@ public final class AppService extends Service {
         }
         acquireServiceWakeLock();
         if (gateway == null) gateway = AdapterGateway.get(this);
+        TeyesTpmsWidgetForwarder.get(this).start();
         gateway.start();
         TpmsController.get(this).startPolling();
         if (healthMonitor == null) healthMonitor = new HealthMonitor(this);
@@ -228,6 +231,7 @@ public final class AppService extends Service {
         unregisterBluetoothCallReceiver();
         unregisterLocationProviderReceiver();
         releaseServiceWakeLock();
+        TeyesTpmsWidgetForwarder.get(this).stop();
         TpmsController.get(this).stopPolling();
         if (gateway != null) gateway.stop();
         AppLog.line(this, "Service: stopped");

@@ -43,7 +43,7 @@ public final class UsbTransport {
     private static final Set<String> REQUESTED_USB_PERMISSIONS = new HashSet<>();
 
     public interface Listener {
-        void onFrame(byte[] frame);
+        void onFrame(byte[] frame, long connectionEpoch, long receivedElapsed);
     }
 
     private final Context app;
@@ -383,13 +383,17 @@ public final class UsbTransport {
             if (log) AppLog.line(app, "USB rx bad checksum: " + AdapterProtocol.hex(bad));
         }
         for (byte[] frame : parsed.frames) {
+            long frameEpoch;
+            long receivedElapsed;
             synchronized (this) {
                 if (!readerCurrentLocked(active, generation)) return;
                 lastRxAtElapsed = SystemClock.elapsedRealtime();
+                frameEpoch = connectionEpoch;
+                receivedElapsed = lastRxAtElapsed;
             }
             if (listener == null) continue;
             try {
-                listener.onFrame(frame);
+                listener.onFrame(frame, frameEpoch, receivedElapsed);
             } catch (RuntimeException e) {
                 AppLog.line(app, "USB rx listener error " + e.getClass().getSimpleName());
             }
