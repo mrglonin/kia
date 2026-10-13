@@ -27,7 +27,6 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
-import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -101,6 +100,7 @@ import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
 import kia.app.rcta.BlindSpotOverlayView;
 import kia.app.rcta.RctaOverlayController;
+import kia.app.rcta.RctaSoundPlayer;
 import kia.app.tpms.DashboardNavigationSnapshot;
 import kia.app.tpms.TpmsAlertController;
 import kia.app.tpms.TpmsController;
@@ -220,7 +220,10 @@ public final class MainActivity extends Activity {
     private ScrollView activeScrollView;
     private BlindSpotOverlayView rctaPreview;
     private BlindSpotOverlayView rctaDemoOverlay;
-    private MediaPlayer rctaPlayer;
+    private RctaSoundPlayer rctaSound;
+    private boolean rctaDemoLeftActive;
+    private boolean rctaDemoRightActive;
+    private boolean rctaDemoForceSound;
     private boolean rctaDiagnosticsActive;
     private final ArrayList<EditText> ampInputs = new ArrayList<>();
     private final ArrayList<EditText> tpmsInputs = new ArrayList<>();
@@ -884,6 +887,9 @@ public final class MainActivity extends Activity {
 
     private void showRctaDemoAlert(boolean left, boolean right, boolean forceSound) {
         if (screenFrame == null) return;
+        rctaDemoLeftActive = left;
+        rctaDemoRightActive = right;
+        rctaDemoForceSound = forceSound;
         if (rctaDemoOverlay == null) {
             rctaDemoOverlay = new BlindSpotOverlayView(this);
             rctaDemoOverlay.setClickable(false);
@@ -901,7 +907,7 @@ public final class MainActivity extends Activity {
             rctaDemoOverlay.bringToFront();
         }
         rctaDemoOverlay.postInvalidateOnAnimation();
-        startRctaSound(forceSound);
+        applyRctaDemoSound();
     }
 
     private void hideRctaDemoAlert() {
@@ -909,50 +915,22 @@ public final class MainActivity extends Activity {
             ((ViewGroup) rctaDemoOverlay.getParent()).removeView(rctaDemoOverlay);
         }
         rctaDemoOverlay = null;
-        stopRctaSound();
+        rctaDemoLeftActive = false;
+        rctaDemoRightActive = false;
+        rctaDemoForceSound = false;
+        if (rctaSound != null) rctaSound.stop();
     }
 
-    private void startRctaSound() {
-        startRctaSound(false);
-    }
-
-    private void startRctaSound(boolean force) {
-        if (!force && !AppSettings.rctaSoundEnabled(this)) {
-            stopRctaSound();
-            return;
-        }
-        if (rctaPlayer != null) {
-            if (!rctaPlayer.isPlaying()) {
-                try {
-                    rctaPlayer.start();
-                } catch (Exception ignored) {
-                    stopRctaSound();
-                }
-            }
-            return;
-        }
-        try {
-            rctaPlayer = MediaPlayer.create(this, R.raw.rcta_warning);
-            if (rctaPlayer == null) return;
-            rctaPlayer.setLooping(true);
-            rctaPlayer.start();
-        } catch (Exception e) {
-            stopRctaSound();
-            AppLog.line(this, "RCTA sound failed " + e.getClass().getSimpleName());
-        }
-    }
-
-    private void stopRctaSound() {
-        if (rctaPlayer == null) return;
-        try {
-            rctaPlayer.stop();
-        } catch (Exception ignored) {
-        }
-        try {
-            rctaPlayer.release();
-        } catch (Exception ignored) {
-        }
-        rctaPlayer = null;
+    private void applyRctaDemoSound() {
+        if (rctaSound == null) rctaSound = new RctaSoundPlayer(this);
+        int style = AppSettings.rctaStyle(this);
+        int mode = AppSettings.rctaSoundMode(this);
+        // Preserve the existing forced diagnostic tone for types 1/2. TEYES previews
+        // and voice warnings always follow the sound switch, including diagnostics.
+        boolean enabled = AppSettings.rctaSoundEnabled(this)
+                || (rctaDemoForceSound && style != AppSettings.RCTA_STYLE_TEYES
+                        && mode == AppSettings.RCTA_SOUND_TONE);
+        rctaSound.apply(style, mode, rctaDemoLeftActive, rctaDemoRightActive, enabled);
     }
 
     private void applyImmersiveMode() {
@@ -4210,6 +4188,8 @@ public final class MainActivity extends Activity {
     }
 
     private void renderRctaSettingsTab(LinearLayout root) {
+        boolean teyesStyle = AppSettings.rctaStyle(this) == AppSettings.RCTA_STYLE_TEYES;
+        boolean voiceMode = AppSettings.rctaSoundMode(this) == AppSettings.RCTA_SOUND_VOICE;
         LinearLayout preview = settingsPanel(COLOR_WARNING);
         addSettingsPanelHeader(preview, "RCTA",
                 "preview поверх камеры: чистый центр, предупреждение только по бокам",
@@ -4232,13 +4212,15 @@ public final class MainActivity extends Activity {
         stageLp.setMargins(0, dp(12), 0, dp(10));
         preview.addView(stage, stageLp);
 
+        String appearance = teyesStyle
+                ? "TEYES · красная пульсация по стороне опасности"
+                : AppSettings.rctaStyleLabel(this) + " · " + AppSettings.rctaColorLabel(this)
+                        + " · фон " + rctaBackgroundPercent(AppSettings.rctaBackgroundAlpha(this))
+                        + "% · стрелок " + AppSettings.rctaArrowCount(this);
         TextView status = text((AppSettings.expertMode(this)
                         ? "CAN: BB A1 41 08 75 RL RR · 00 нет · 01 предупреждение · "
                         : "Предпросмотр: левая и правая опасная зона · ")
-                        + AppSettings.rctaStyleLabel(this) + " · "
-                        + AppSettings.rctaColorLabel(this) + " · фон "
-                        + rctaBackgroundPercent(AppSettings.rctaBackgroundAlpha(this)) + "%"
-                        + " · стрелок " + AppSettings.rctaArrowCount(this),
+                        + appearance,
                 isCompact() ? 13 : 15, COLOR_MUTED);
         preview.addView(status);
         root.addView(preview);
@@ -4248,32 +4230,39 @@ public final class MainActivity extends Activity {
                 "эти параметры сохраняются сейчас и будут использоваться после подключения событий",
                 COLOR_WARNING);
         addSettingsSubHeader(settings, "Тип анимации",
-                "Тип 1 как сейчас; Тип 2 без угловых линий и со стрелками ближе к углам");
+                "Тип 1 — угловые линии; Тип 2 — стрелки; TEYES — пульсация по краям");
         addActionGrid(settings,
                 action("Тип 1", "угловые линии + стрелки", rctaStyleColor(AppSettings.RCTA_STYLE_TYPE_1),
                         AppSettings.rctaStyle(this) == AppSettings.RCTA_STYLE_TYPE_1,
                         () -> setRctaStyle(AppSettings.RCTA_STYLE_TYPE_1)),
                 action("Тип 2", "без линий, ближе к углам", rctaStyleColor(AppSettings.RCTA_STYLE_TYPE_2),
                         AppSettings.rctaStyle(this) == AppSettings.RCTA_STYLE_TYPE_2,
-                        () -> setRctaStyle(AppSettings.RCTA_STYLE_TYPE_2)));
-        settings.addView(settingsDivider());
-        addSettingsSubHeader(settings, "Цвет предупреждения",
-                "меняется только цвет RCTA; геометрия стрелок и углов остаётся плотной");
-        addActionGrid(settings,
-                action("Янтарный", "штатный вид", rctaColorChoice(AppSettings.RCTA_COLOR_AMBER),
-                        AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_AMBER,
-                        () -> setRctaColor(AppSettings.RCTA_COLOR_AMBER)),
-                action("Красный", "самый заметный", rctaColorChoice(AppSettings.RCTA_COLOR_RED),
-                        AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_RED,
-                        () -> setRctaColor(AppSettings.RCTA_COLOR_RED)),
-                action("Голубой", "холодный акцент", rctaColorChoice(AppSettings.RCTA_COLOR_CYAN),
-                        AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_CYAN,
-                        () -> setRctaColor(AppSettings.RCTA_COLOR_CYAN)),
-                action("Зелёный", "мягкий акцент", rctaColorChoice(AppSettings.RCTA_COLOR_GREEN),
-                        AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_GREEN,
-                        () -> setRctaColor(AppSettings.RCTA_COLOR_GREEN)));
-        settings.addView(rctaArrowCountSlider());
-        settings.addView(rctaBackgroundAlphaSlider());
+                        () -> setRctaStyle(AppSettings.RCTA_STYLE_TYPE_2)),
+                action("TEYES", "оригинальная красная пульсация", rctaStyleColor(AppSettings.RCTA_STYLE_TEYES),
+                        teyesStyle, () -> setRctaStyle(AppSettings.RCTA_STYLE_TEYES)));
+        if (teyesStyle) {
+            addSettingsSubHeader(settings, "Стиль TEYES",
+                    "Оригинальные цвет и форма. Ниже можно выбрать стереосигнал или голосовое предупреждение.");
+        } else {
+            settings.addView(settingsDivider());
+            addSettingsSubHeader(settings, "Цвет предупреждения",
+                    "меняется только цвет RCTA; геометрия стрелок и углов остаётся плотной");
+            addActionGrid(settings,
+                    action("Янтарный", "штатный вид", rctaColorChoice(AppSettings.RCTA_COLOR_AMBER),
+                            AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_AMBER,
+                            () -> setRctaColor(AppSettings.RCTA_COLOR_AMBER)),
+                    action("Красный", "самый заметный", rctaColorChoice(AppSettings.RCTA_COLOR_RED),
+                            AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_RED,
+                            () -> setRctaColor(AppSettings.RCTA_COLOR_RED)),
+                    action("Голубой", "холодный акцент", rctaColorChoice(AppSettings.RCTA_COLOR_CYAN),
+                            AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_CYAN,
+                            () -> setRctaColor(AppSettings.RCTA_COLOR_CYAN)),
+                    action("Зелёный", "мягкий акцент", rctaColorChoice(AppSettings.RCTA_COLOR_GREEN),
+                            AppSettings.rctaColor(this) == AppSettings.RCTA_COLOR_GREEN,
+                            () -> setRctaColor(AppSettings.RCTA_COLOR_GREEN)));
+            settings.addView(rctaArrowCountSlider());
+            settings.addView(rctaBackgroundAlphaSlider());
+        }
         settings.addView(settingsDivider());
         addInlineSwitch(settings, "Показывать предупреждение",
                 "анимация слева/справа поверх экрана заднего хода",
@@ -4294,16 +4283,32 @@ public final class MainActivity extends Activity {
                     refresh();
                 });
         settings.addView(settingsDivider());
+        addSettingsSubHeader(settings, "Тип звукового предупреждения",
+                "Для любого стиля RCTA: сигнал или русская голосовая подсказка о стороне опасности");
+        addActionGrid(settings,
+                action("Сигнал", "TEYES: по стороне опасности", choiceColor(!voiceMode),
+                        !voiceMode, () -> setRctaSoundMode(AppSettings.RCTA_SOUND_TONE)),
+                action("Голос", "русские подсказки слева / справа", choiceColor(voiceMode),
+                        voiceMode, () -> setRctaSoundMode(AppSettings.RCTA_SOUND_VOICE)));
+        if (voiceMode) {
+            addSettingsSubHeader(settings, "Голосовые подсказки",
+                    "При опасности с обеих сторон фразы звучат по очереди, без наложения.");
+        }
+        settings.addView(settingsDivider());
         addInlineSwitch(settings, "Звуковое предупреждение",
-                "звуковой сигнал RCTA после появления реального события",
+                voiceMode ? "голосовая подсказка RCTA после появления реального события"
+                        : "звуковой сигнал RCTA после появления реального события",
                 AppSettings.rctaSoundEnabled(this), (button, checked) -> {
                     AppSettings.setRctaSoundEnabled(this, checked);
                     RctaOverlayController.get(this).apply();
+                    if (rctaDemoOverlay != null) applyRctaDemoSound();
                     refresh();
                 });
         settings.addView(settingsDivider());
         addInlineSwitch(settings, "Панель диагностики",
-                "сразу показывает RCTA слева и справа на весь экран со звуком, пока не выключить",
+                teyesStyle || voiceMode
+                        ? "показывает предупреждения с обеих сторон; звук следует переключателю выше"
+                        : "сразу показывает RCTA слева и справа на весь экран со звуком, пока не выключить",
                 rctaDiagnosticsActive, this::toggleRctaDiagnostics);
         root.addView(settings);
     }
@@ -4328,6 +4333,20 @@ public final class MainActivity extends Activity {
         RctaOverlayController.get(this).apply();
         AppLog.line(this, "RCTA style: " + AppSettings.rctaStyleLabel(this));
         renderTab();
+        if (rctaDemoOverlay != null && !rctaDiagnosticsActive) {
+            showRctaDemoAlert(rctaDemoLeftActive, rctaDemoRightActive, rctaDemoForceSound);
+        }
+        refresh();
+    }
+
+    private void setRctaSoundMode(int mode) {
+        AppSettings.setRctaSoundMode(this, mode);
+        RctaOverlayController.get(this).apply();
+        AppLog.line(this, "RCTA sound mode: " + AppSettings.rctaSoundModeLabel(this));
+        renderTab();
+        if (rctaDemoOverlay != null && !rctaDiagnosticsActive) {
+            showRctaDemoAlert(rctaDemoLeftActive, rctaDemoRightActive, rctaDemoForceSound);
+        }
         refresh();
     }
 

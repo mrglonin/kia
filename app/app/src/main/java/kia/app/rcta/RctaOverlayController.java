@@ -6,7 +6,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.PixelFormat;
-import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -16,7 +15,6 @@ import android.view.Gravity;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 
-import kia.app.R;
 import kia.app.core.AppIds;
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
@@ -31,13 +29,14 @@ public final class RctaOverlayController {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final WindowManager windowManager;
     private BlindSpotOverlayView overlay;
-    private MediaPlayer player;
+    private final RctaSoundPlayer sound;
     private BroadcastReceiver receiver;
     private boolean receiverRegistered;
     private boolean permissionLogged;
 
     private RctaOverlayController(Context context) {
         this.app = context.getApplicationContext();
+        this.sound = new RctaSoundPlayer(app, true);
         this.windowContext = createWindowContext(app);
         this.windowManager = (WindowManager) windowContext.getSystemService(Context.WINDOW_SERVICE);
     }
@@ -59,7 +58,7 @@ public final class RctaOverlayController {
     public synchronized void stop() {
         handler.post(() -> {
             hide();
-            stopSound();
+            sound.stop();
             unregisterReceiver();
         });
     }
@@ -71,8 +70,9 @@ public final class RctaOverlayController {
     private void applyOnMain() {
         RctaState state = StateStore.rcta();
         boolean active = state != null && state.active();
-        if (active && AppSettings.rctaSoundEnabled(app)) startSound();
-        else stopSound();
+        sound.apply(AppSettings.rctaStyle(app), AppSettings.rctaSoundMode(app),
+                active && state.left, active && state.right,
+                AppSettings.rctaSoundEnabled(app));
 
         if (!active || !AppSettings.rctaOverlayEnabled(app)) {
             hide();
@@ -133,37 +133,6 @@ public final class RctaOverlayController {
         } catch (Exception ignored) {
         }
         overlay = null;
-    }
-
-    private void startSound() {
-        if (player != null) {
-            if (!player.isPlaying()) {
-                try {
-                    player.start();
-                } catch (Exception ignored) {
-                }
-            }
-            return;
-        }
-        try {
-            player = MediaPlayer.create(app, R.raw.rcta_warning);
-            if (player == null) return;
-            player.setLooping(true);
-            player.start();
-        } catch (Exception e) {
-            AppLog.line(app, "RCTA sound failed " + e.getClass().getSimpleName());
-            stopSound();
-        }
-    }
-
-    private void stopSound() {
-        if (player == null) return;
-        try {
-            player.stop();
-        } catch (Exception ignored) {
-        }
-        player.release();
-        player = null;
     }
 
     private WindowManager.LayoutParams layoutParams() {

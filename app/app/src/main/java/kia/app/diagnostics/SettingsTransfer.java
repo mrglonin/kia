@@ -99,6 +99,7 @@ public final class SettingsTransfer {
             "tpms_low_temp",
             "tpms_high_temp",
             "rcta_style",
+            "rcta_sound_mode",
             "rcta_color",
             "rcta_bg_alpha",
             "rcta_arrow_count",

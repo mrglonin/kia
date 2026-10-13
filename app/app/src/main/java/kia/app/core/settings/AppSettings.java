@@ -54,6 +54,7 @@ public final class AppSettings {
     private static final String KEY_TPMS_HIGH_TEMP = "tpms_high_temp";
     private static final String KEY_RCTA_OVERLAY = "rcta_overlay";
     private static final String KEY_RCTA_SOUND = "rcta_sound";
+    private static final String KEY_RCTA_SOUND_MODE = "rcta_sound_mode";
     private static final String KEY_RCTA_STYLE = "rcta_style";
     private static final String KEY_RCTA_COLOR = "rcta_color";
     private static final String KEY_RCTA_BG_ALPHA = "rcta_bg_alpha";
@@ -110,6 +111,9 @@ public final class AppSettings {
     public static final int FIRMWARE_SOURCE_BUNDLED_04 = 3;
     public static final int RCTA_STYLE_TYPE_1 = 1;
     public static final int RCTA_STYLE_TYPE_2 = 2;
+    public static final int RCTA_STYLE_TEYES = 3;
+    public static final int RCTA_SOUND_TONE = 0;
+    public static final int RCTA_SOUND_VOICE = 1;
     public static final int RCTA_COLOR_AMBER = 0xffffc43b;
     public static final int RCTA_COLOR_RED = 0xffff5364;
     public static final int RCTA_COLOR_CYAN = 0xff39d3be;
@@ -800,6 +804,18 @@ public final class AppSettings {
         prefs(context).edit().putBoolean(KEY_RCTA_SOUND, value).apply();
     }
 
+    public static int rctaSoundMode(Context context) {
+        return normalizeRctaSoundMode(prefs(context).getInt(KEY_RCTA_SOUND_MODE, RCTA_SOUND_TONE));
+    }
+
+    public static void setRctaSoundMode(Context context, int value) {
+        prefs(context).edit().putInt(KEY_RCTA_SOUND_MODE, normalizeRctaSoundMode(value)).apply();
+    }
+
+    public static String rctaSoundModeLabel(Context context) {
+        return rctaSoundMode(context) == RCTA_SOUND_VOICE ? "Голос" : "Сигнал";
+    }
+
     public static int rctaStyle(Context context) {
         return normalizeRctaStyle(prefs(context).getInt(KEY_RCTA_STYLE, RCTA_STYLE_TYPE_2));
     }
@@ -809,7 +825,14 @@ public final class AppSettings {
     }
 
     public static String rctaStyleLabel(Context context) {
-        return rctaStyle(context) == RCTA_STYLE_TYPE_2 ? "Тип 2" : "Тип 1";
+        switch (rctaStyle(context)) {
+            case RCTA_STYLE_TEYES:
+                return "TEYES";
+            case RCTA_STYLE_TYPE_2:
+                return "Тип 2";
+            default:
+                return "Тип 1";
+        }
     }
 
     public static int rctaColor(Context context) {
@@ -1235,7 +1258,12 @@ public final class AppSettings {
     }
 
     private static int normalizeRctaStyle(int value) {
+        if (value == RCTA_STYLE_TEYES) return RCTA_STYLE_TEYES;
         return value == RCTA_STYLE_TYPE_2 ? RCTA_STYLE_TYPE_2 : RCTA_STYLE_TYPE_1;
+    }
+
+    private static int normalizeRctaSoundMode(int value) {
+        return value == RCTA_SOUND_VOICE ? RCTA_SOUND_VOICE : RCTA_SOUND_TONE;
     }
 
     private static int normalizeRctaColor(int value) {

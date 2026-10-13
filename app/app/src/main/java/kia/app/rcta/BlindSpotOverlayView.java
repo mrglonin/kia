@@ -1,14 +1,20 @@
 package kia.app.rcta;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.os.SystemClock;
 import android.util.AttributeSet;
 import android.view.View;
+
+import kia.app.R;
+import kia.app.core.settings.AppSettings;
 
 public final class BlindSpotOverlayView extends View {
     private static final int COLOR_AMBER = 0xffffc43b;
@@ -31,9 +37,18 @@ public final class BlindSpotOverlayView extends View {
     private static final int CHEVRON_MARGIN_STEP_DP = 54;
     private static final int CHEVRON_COUNT_MIN = 3;
     private static final int CHEVRON_COUNT_MAX = 6;
+    private static final long TEYES_PULSE_CYCLE_MS = 150L;
+    // Original ADAS danger windows use 943 * (screenWidth / 2000), full height.
+    private static final float TEYES_DANGER_WIDTH_FRACTION = 943f / 2000f;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint teyesPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Path path = new Path();
+    private final RectF teyesBounds = new RectF();
+    private Bitmap teyesLeftWarning;
+    private Bitmap teyesRightWarning;
+    private long teyesLeftStartedAt;
+    private long teyesRightStartedAt;
     private boolean previewLeft = true;
     private boolean previewRight = true;
     private boolean previewUnknown;
@@ -58,6 +73,9 @@ public final class BlindSpotOverlayView extends View {
     }
 
     public void setPreview(boolean left, boolean right, boolean unknown) {
+        long now = SystemClock.uptimeMillis();
+        if ((left || unknown) && !(previewLeft || previewUnknown)) teyesLeftStartedAt = now;
+        if ((right || unknown) && !(previewRight || previewUnknown)) teyesRightStartedAt = now;
         previewLeft = left;
         previewRight = right;
         previewUnknown = unknown;
@@ -70,7 +88,10 @@ public final class BlindSpotOverlayView extends View {
     }
 
     public void setStyleType(int value) {
-        styleType = value == 2 ? 2 : 1;
+        int next = value == AppSettings.RCTA_STYLE_TEYES
+                ? AppSettings.RCTA_STYLE_TEYES : (value == 2 ? 2 : 1);
+        if (styleType != next && next == AppSettings.RCTA_STYLE_TEYES) resetTeyesPulse();
+        styleType = next;
         invalidate();
     }
 
@@ -92,6 +113,7 @@ public final class BlindSpotOverlayView extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        if (styleType == AppSettings.RCTA_STYLE_TEYES) resetTeyesPulse();
         postInvalidateOnAnimation();
     }
 
@@ -104,6 +126,11 @@ public final class BlindSpotOverlayView extends View {
         if (w <= 0) return;
 
         long now = SystemClock.uptimeMillis();
+        if (styleType == AppSettings.RCTA_STYLE_TEYES) {
+            drawTeyesWarnings(canvas, w, h, now);
+            postInvalidateOnAnimation();
+            return;
+        }
         float phase = isInEditMode() ? 0.5f : (now % 900L) / 900f;
         float pulse = 0.52f + 0.48f * (1f - Math.abs(phase - 0.5f) * 2f);
         boolean drawLeft = previewLeft || previewUnknown;
@@ -111,6 +138,39 @@ public final class BlindSpotOverlayView extends View {
         if (drawLeft) drawSide(canvas, w, h, true, phase, pulse);
         if (drawRight) drawSide(canvas, w, h, false, phase, pulse);
         postInvalidateOnAnimation();
+    }
+
+    private void resetTeyesPulse() {
+        teyesLeftStartedAt = SystemClock.uptimeMillis();
+        teyesRightStartedAt = teyesLeftStartedAt;
+    }
+
+    private void drawTeyesWarnings(Canvas canvas, int w, int h, long now) {
+        // RCTA exposes active left/right only, so use the original red level-1 assets.
+        // The amber level-0 assets must not invent a lower-severity vehicle state.
+        if (teyesLeftWarning == null) {
+            teyesLeftWarning = BitmapFactory.decodeResource(getResources(), R.drawable.teyes_lca_warn_left_1);
+            teyesRightWarning = BitmapFactory.decodeResource(getResources(), R.drawable.teyes_lca_warn_right_1);
+        }
+        float width = w * TEYES_DANGER_WIDTH_FRACTION;
+        if (previewLeft || previewUnknown) {
+            teyesBounds.set(0, 0, width, h);
+            drawTeyesSide(canvas, teyesLeftWarning, now, teyesLeftStartedAt);
+        }
+        if (previewRight || previewUnknown) {
+            teyesBounds.set(w - width, 0, w, h);
+            drawTeyesSide(canvas, teyesRightWarning, now, teyesRightStartedAt);
+        }
+    }
+
+    private void drawTeyesSide(Canvas canvas, Bitmap bitmap, long now, long startedAt) {
+        if (bitmap == null) return;
+        // ShineAlphaView uses 75 ms cosine-eased legs: alpha 1 -> .2 -> 1.
+        float phase = Math.max(0L, now - startedAt) % TEYES_PULSE_CYCLE_MS
+                / (float) TEYES_PULSE_CYCLE_MS;
+        float alpha = isInEditMode() ? 1f : 0.6f + 0.4f * (float) Math.cos(phase * Math.PI * 2);
+        teyesPaint.setAlpha(Math.round(255f * alpha));
+        canvas.drawBitmap(bitmap, null, teyesBounds, teyesPaint);
     }
 
     private void drawSide(Canvas canvas, int w, int h, boolean leftSide, float phase, float pulse) {

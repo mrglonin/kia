@@ -2,30 +2,28 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-[![Скачать KIA 23.10 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.10%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.10-364/kia_364.apk)
+[![Скачать KIA 23.11 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.11%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.11-365/kia_365.apk)
 
-- APK KIA: [kia_364.apk](https://github.com/mrglonin/kia/releases/download/v23.10-364/kia_364.apk)
+- APK KIA: [kia_365.apk](https://github.com/mrglonin/kia/releases/download/v23.11-365/kia_365.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-teyes-compat.apk](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.10-364`](https://github.com/mrglonin/kia/releases/tag/v23.10-364)
-- Текущий публичный релиз: `23.10` / `364`
+- GitHub Release: [`v23.11-365`](https://github.com/mrglonin/kia/releases/tag/v23.11-365)
+- Текущий публичный релиз: `23.11` / `365`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.10` / `364` | `updates/kia_364.apk`, 6 062 771 байт | `6e67dcf20e0bbc121f26208bc8a131e1d5303a8a463e1d320afed90bb8129165` |
+| KIA app | `23.11` / `365` | `updates/kia_365.apk`, 6 684 331 байт | `9834d4b889915b393126de5070caaa2ff25587e3bdee76236b37315fb64ff524` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
 
-В `23.10` KIA и совместимый Yandex mod опубликованы одним общим обновлением. На Android 14 и ниже Yandex сохраняет штатный жизненный цикл MapKit/Core и штатный маршрутный foreground service, поэтому мод больше не вмешивается в переходы запуска и построения маршрута на TEYES CC4 Pro.
+В `23.11` в **Настройки → RCTA → Тип анимации** добавлен третий стиль **TEYES**: оригинальная красная пульсация по краю экрана со стороны опасности. Типы 1 и 2 и их параметры сохранены; новый стиль включается вручную. RCTA передаёт только наличие опасности слева/справа, поэтому используется красное предупреждение без выдуманного уровня близости.
 
-USB-путь получил защиту от зависшего reader thread, старого поколения callbacks, нарушения порядка записи и reconnect-цикла без паузы. Очередь сохраняет только актуальные latest-only кадры, а health-monitor различает новую сессию и действительно остановившийся обмен. Запуск foreground service на Android 16 больше не удерживает wake-lock, если ОС отклонила сам запуск.
+В блоке **Тип звукового предупреждения** можно выбрать **Сигнал** или **Голос** для любого стиля. В стиле TEYES сигнал направлен в левый/правый стереоканал; голос использует оригинальные русские подсказки TEYES. При опасности с обеих сторон фразы чередуются с паузой и не перекрывают друг друга. Реальное голосовое предупреждение имеет приоритет над демонстрацией. Отключение звука, снятие события и смена режима отменяют воспроизведение и отложенный повтор. Выбор сохраняется и входит в экспорт/импорт настроек; по умолчанию остаётся сигнал.
 
-На Android 15+ без framework `gps` расширенный фоновый режим включается только при наличии реального `fused` либо `network`. KIA по-прежнему не принимает переставший обновляться speed/limit как свежий heartbeat и безопасно очищает устаревшее ограничение.
+Проверено: чистая offline-сборка, `337` unit-тестов без failures/errors/skips; `lintDebug` и `lintRelease` — по `0 errors` / `74 warnings`; ZIP, zipalign и прежняя подпись APK. Отдельная проверка production-класса звука с Android stubs: `30/30` сценариев, включая отмену callbacks и приоритет live/demo. На release APK в эмуляторе Android 15 проверены сохранение стиля/голоса после перезапуска, голос слева/справа/с обеих сторон без параллельных фраз, переключение на сигнал и остановка при отключении звука/очистке события. Установка и аппаратная проверка этой версии на TEYES CC4 Pro ещё не выполнены.
 
-OTA теперь проверяется фоновым сервисом, а не только открытым Activity: успешная проверка повторяется раз в час, сетевой retry запускается каждые 15 минут. Реальное системное уведомление объединяет KIA/Yandex, восстанавливается после перезагрузки магнитолы, открывает раздел обновлений и не показывает модальное окно при движении либо неизвестной/устаревшей скорости. Успех одного источника больше не подавляет повтор другого, stale `latest.json` сравнивается с GitHub Releases, а SHA/размер обязательны до предложения установки.
-
-Проверено: `337` unit-тестов, `0 failures/errors/skips`; `lintDebug` и `lintRelease` — по `0 errors` / `72 warnings`; KIA release build, ZIP, zipalign и подпись. На физическом Android 16 проверены запуск, построение/старт/отмена маршрута и фон; отдельно принудительно проверена штатная ветка старого Android. Реальная TEYES CC4 Pro в момент публикации не была подключена и требует контрольного аппаратного прогона.
+Yandex Navigator mod остаётся версии `7.10-kia.20260805-teyes-compat / 71011062` из `v23.10-364`; его APK и блок манифеста не изменены.
 
 ## Что работает
 
@@ -33,7 +31,7 @@ OTA теперь проверяется фоновым сервисом, а не
 - TPMS-экран под Kia: давление, температура, предупреждения, ускоренный опрос при аварийных значениях.
 - Медиа и звонки: TEYES/CC4, Android-плееры, BT/USB/FM/AM, подписи источника и текста на приборку.
 - Навигация: Yandex Core Bridge, 2GIS fallback, режимы `обычный`, `TBT`, `стрелка к финишу`, номерные съезды с кругового, угловые манёвры, lane/gray-road/micro-maneuver логика и опциональный дальний знак «прямо».
-- RCTA: предупреждение слева/справа/с двух сторон, overlay поверх камеры, звук, настройка стиля.
+- RCTA: предупреждение слева/справа/с двух сторон, overlay поверх камеры, три стиля, сигнал или русские голосовые подсказки.
 - CAN/USB: обмен с переделанным адаптером, TPMS poll, температура панели и health-статус адаптера.
 - Обновления: KIA APK и Yandex mod APK через `updates/latest.json`.
 
@@ -68,7 +66,7 @@ OTA теперь проверяется фоновым сервисом, а не
 ADB:
 
 ```bash
-adb install -r updates/kia_364.apk
+adb install -r updates/kia_365.apk
 curl -L -o /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk \
   https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
 adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
@@ -76,7 +74,7 @@ adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
 
 На магнитоле:
 
-1. Установить `kia_364.apk`.
+1. Установить `kia_365.apk`.
 2. Выдать runtime permissions: уведомления, геолокация и Bluetooth — только для используемых функций.
 3. Включить специальные права: поверх окон, доступ к уведомлениям и игнор оптимизации батареи.
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
@@ -103,7 +101,7 @@ Release-сборка подписывается публичным debug-keystor
 
 ```bash
 ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
-$ADB -s emulator-5554 install -r updates/kia_364.apk
+$ADB -s emulator-5554 install -r updates/kia_365.apk
 $ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning
