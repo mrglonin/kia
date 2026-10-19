@@ -42,6 +42,7 @@ import kia.app.navigation.overlay.NavigationOverlayController;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.rcta.RctaOverlayController;
 import kia.app.tpms.TpmsController;
+import kia.app.tpms.TpmsAlertController;
 import kia.app.tpms.TeyesTpmsWidgetForwarder;
 import kia.app.update.AppUpdateCheckPolicy;
 import kia.app.update.AppUpdateController;
@@ -140,7 +141,6 @@ public final class AppService extends Service {
         gateway = AdapterGateway.get(this);
         TeyesTpmsWidgetForwarder.get(this).start();
         gateway.start();
-        gateway.requestAdapterInfoQuiet();
         TpmsController.get(this).startPolling();
 
         mediaCapture = new MediaCaptureManager(this);
@@ -233,6 +233,7 @@ public final class AppService extends Service {
         releaseServiceWakeLock();
         TeyesTpmsWidgetForwarder.get(this).stop();
         TpmsController.get(this).stopPolling();
+        TpmsAlertController.get(this).clear();
         if (gateway != null) gateway.stop();
         AppLog.line(this, "Service: stopped");
         super.onDestroy();

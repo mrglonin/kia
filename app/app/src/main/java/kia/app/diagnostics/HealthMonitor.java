@@ -7,6 +7,7 @@ import android.os.SystemClock;
 
 import kia.app.core.AppLog;
 import kia.app.protocol.adapter.AdapterGateway;
+import kia.app.tpms.TpmsController;
 
 /** Polls adapter health away from the main looper and recovers silent half-open USB sessions. */
 public final class HealthMonitor {
@@ -77,6 +78,7 @@ public final class HealthMonitor {
             session.observedLastRxAt = lastRxAt;
             session.silentProbeBursts = 0;
             session.lastHealthAt = 0L;
+            TpmsController.get(app).onAdapterConnected(connectionEpoch);
         } else if (lastRxAt > 0L && lastRxAt != session.observedLastRxAt) {
             session.observedLastRxAt = lastRxAt;
             session.silentProbeBursts = 0;
@@ -99,7 +101,7 @@ public final class HealthMonitor {
         if (session.lastHealthAt <= 0L || now < session.lastHealthAt
                 || now - session.lastHealthAt > INFO_POLL_MS) {
             session.lastHealthAt = now;
-            gateway.requestAdapterInfoQuiet();
+            gateway.requestHealthQuiet();
             session.silentProbeBursts++;
         }
         return POLL_MS;

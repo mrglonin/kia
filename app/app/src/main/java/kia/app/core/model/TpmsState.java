@@ -1,5 +1,7 @@
 package kia.app.core.model;
 
+import android.os.SystemClock;
+
 import java.util.Locale;
 
 public final class TpmsState {
@@ -14,6 +16,34 @@ public final class TpmsState {
      * background poll so one delayed response does not make all wheels stale.
      */
     public static final long WHEEL_STALE_AFTER_MS = 180_000L;
+
+    interface Clock {
+        long wallMillis();
+        long elapsedMillis();
+    }
+
+    private static final Clock SYSTEM_CLOCK = new Clock() {
+        public long wallMillis() { return System.currentTimeMillis(); }
+        public long elapsedMillis() {
+            try {
+                // Includes head-unit sleep and is unaffected by GPS/network wall-clock corrections.
+                return SystemClock.elapsedRealtime();
+            } catch (RuntimeException error) {
+                // Plain JVM parsing tests use Android's throwing SDK stub, not a device clock.
+                if (error.getMessage() == null || !error.getMessage().contains("not mocked")) {
+                    throw error;
+                }
+                return System.nanoTime() / 1_000_000L;
+            }
+        }
+    };
+    private static volatile Clock clock = SYSTEM_CLOCK;
+
+    static void setClockForTests(Clock value) { clock = value == null ? SYSTEM_CLOCK : value; }
+
+    // Wall timestamps remain available for diagnostics; live freshness uses these per-wheel anchors.
+    private final long[] wheelAgeAtCaptureMs;
+    private final long[] wheelCapturedAtElapsedMs;
 
     public final boolean[] known;
     public final int[] pressureKpa;
@@ -40,6 +70,13 @@ public final class TpmsState {
     public TpmsState(boolean[] known, int[] pressureKpa, int[] temperatureC, int[] flags,
                      long[] wheelUpdatedAt, boolean[] explicitlyStale,
                      String source, long updatedAt) {
+        this(known, pressureKpa, temperatureC, flags, wheelUpdatedAt, explicitlyStale,
+                source, updatedAt, null, null);
+    }
+
+    private TpmsState(boolean[] known, int[] pressureKpa, int[] temperatureC, int[] flags,
+                      long[] wheelUpdatedAt, boolean[] explicitlyStale, String source,
+                      long updatedAt, long[] capturedAges, long[] capturedElapsed) {
         this.known = copyBool(known);
         this.pressureKpa = copyInt(pressureKpa);
         this.temperatureC = copyInt(temperatureC);
@@ -48,6 +85,17 @@ public final class TpmsState {
         this.explicitlyStale = copyBool(explicitlyStale);
         this.source = safe(source);
         this.updatedAt = updatedAt;
+        this.wheelAgeAtCaptureMs = copyLong(capturedAges);
+        this.wheelCapturedAtElapsedMs = copyLong(capturedElapsed);
+        if (capturedAges == null || capturedElapsed == null) {
+            long wallNow = clock.wallMillis();
+            long elapsedNow = clock.elapsedMillis();
+            for (int wheel = 0; wheel < WHEEL_COUNT; wheel++) {
+                this.wheelAgeAtCaptureMs[wheel] = initialAge(
+                        this.known[wheel], this.wheelUpdatedAt[wheel], wallNow);
+                this.wheelCapturedAtElapsedMs[wheel] = elapsedNow;
+            }
+        }
     }
 
     public static TpmsState empty() {
@@ -56,7 +104,7 @@ public final class TpmsState {
     }
 
     public TpmsState withWheel(int wheel, int pressure, int temp, int flag, String valueSource) {
-        return withWheelAt(wheel, pressure, temp, flag, valueSource, System.currentTimeMillis());
+        return withWheelAt(wheel, pressure, temp, flag, valueSource, clock.wallMillis());
     }
 
     public TpmsState withWheelAt(int wheel, int pressure, int temp, int flag,
@@ -68,6 +116,8 @@ public final class TpmsState {
         int[] nextFlags = copyInt(flags);
         long[] nextWheelUpdatedAt = copyLong(wheelUpdatedAt);
         boolean[] nextExplicitlyStale = copyBool(explicitlyStale);
+        long[] nextAges = copyLong(wheelAgeAtCaptureMs);
+        long[] nextElapsed = copyLong(wheelCapturedAtElapsedMs);
         long cleanObservedAt = Math.max(0L, observedAt);
         nextKnown[wheel] = true;
         nextPressure[wheel] = clampPressure(pressure);
@@ -75,9 +125,11 @@ public final class TpmsState {
         nextFlags[wheel] = flag & 0xff;
         nextWheelUpdatedAt[wheel] = cleanObservedAt;
         nextExplicitlyStale[wheel] = false;
+        nextAges[wheel] = initialAge(true, cleanObservedAt, clock.wallMillis());
+        nextElapsed[wheel] = clock.elapsedMillis();
         return new TpmsState(nextKnown, nextPressure, nextTemp, nextFlags,
                 nextWheelUpdatedAt, nextExplicitlyStale,
-                valueSource, Math.max(updatedAt, cleanObservedAt));
+                valueSource, Math.max(updatedAt, cleanObservedAt), nextAges, nextElapsed);
     }
 
     /**
@@ -93,7 +145,8 @@ public final class TpmsState {
         long cleanObservedAt = Math.max(0L, observedAt);
         return new TpmsState(known, pressureKpa, temperatureC, flags,
                 wheelUpdatedAt, nextExplicitlyStale,
-                valueSource, Math.max(updatedAt, cleanObservedAt));
+                valueSource, Math.max(updatedAt, cleanObservedAt),
+                wheelAgeAtCaptureMs, wheelCapturedAtElapsedMs);
     }
 
     public boolean hasData() {
@@ -104,17 +157,42 @@ public final class TpmsState {
     }
 
     public boolean hasFreshData() {
-        long now = System.currentTimeMillis();
+        long elapsedNow = clock.elapsedMillis();
         for (int wheel = 0; wheel < WHEEL_COUNT; wheel++) {
-            if (isWheelFresh(wheel, now)) return true;
+            if (isWheelFreshAtElapsed(wheel, elapsedNow)) return true;
         }
         return false;
     }
 
     public boolean isWheelFresh(int wheel) {
-        return isWheelFresh(wheel, System.currentTimeMillis());
+        return isWheelFreshAtElapsed(wheel, clock.elapsedMillis());
     }
 
+    public long wheelAgeMs(int wheel) {
+        return wheelAgeAtElapsed(wheel, clock.elapsedMillis());
+    }
+
+    private boolean isWheelFreshAtElapsed(int wheel, long elapsedNow) {
+        return wheel >= 0 && wheel < WHEEL_COUNT && known[wheel] && !explicitlyStale[wheel]
+                && wheelAgeAtElapsed(wheel, elapsedNow) <= WHEEL_STALE_AFTER_MS;
+    }
+
+    private long wheelAgeAtElapsed(int wheel, long elapsedNow) {
+        if (wheel < 0 || wheel >= WHEEL_COUNT || !known[wheel]) return Long.MAX_VALUE;
+        long initial = wheelAgeAtCaptureMs[wheel];
+        long captured = wheelCapturedAtElapsedMs[wheel];
+        if (initial == Long.MAX_VALUE || elapsedNow < captured) return Long.MAX_VALUE;
+        long delta = elapsedNow - captured;
+        return initial > Long.MAX_VALUE - delta ? Long.MAX_VALUE : initial + delta;
+    }
+
+    private static long initialAge(boolean known, long observedAt, long wallNow) {
+        if (!known || observedAt <= 0L || observedAt > wallNow) return Long.MAX_VALUE;
+        long age = wallNow - observedAt;
+        return age < 0L ? Long.MAX_VALUE : age;
+    }
+
+    /** Explicit wall-clock overload retained for diagnostic calculations and historical fixtures. */
     public boolean isWheelFresh(int wheel, long now) {
         return isWheelFresh(wheel, now, WHEEL_STALE_AFTER_MS);
     }
@@ -132,6 +210,7 @@ public final class TpmsState {
         return wheel >= 0 && wheel < WHEEL_COUNT && known[wheel] && !isWheelFresh(wheel, now);
     }
 
+    /** Explicit wall-clock age; runtime displays should use {@link #wheelAgeMs(int)}. */
     public long wheelAgeMs(int wheel, long now) {
         if (wheel < 0 || wheel >= WHEEL_COUNT || !known[wheel] || wheelUpdatedAt[wheel] <= 0L) {
             return Long.MAX_VALUE;

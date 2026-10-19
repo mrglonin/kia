@@ -656,7 +656,7 @@ public final class MainActivity extends Activity {
         }
         handler.post(refreshTick);
         normalizeModeForWindow();
-        TpmsController.get(this).setPollingMode(TpmsPollingMode.FULL_DASHBOARD);
+        syncTpmsPollingMode();
         TpmsWarningOverlayController.get(this).setActivityVisible(true);
         NavigationOverlayController.get(this).apply();
         applyImmersiveMode();
@@ -681,7 +681,7 @@ public final class MainActivity extends Activity {
         handler.removeCallbacks(pendingStateRefresh);
         cancelRctaDemoSequence();
         hideRctaDemoAlert();
-        TpmsController.get(this).setPollingMode(TpmsPollingMode.BACKGROUND);
+        syncTpmsPollingMode();
         TpmsWarningOverlayController.get(this).setActivityVisible(false);
         try {
             unregisterReceiver(stateReceiver);
@@ -696,11 +696,17 @@ public final class MainActivity extends Activity {
         if (hasFocus) applyImmersiveMode();
     }
 
+    private void syncTpmsPollingMode() {
+        TpmsController.get(this).setPollingMode(activityVisible
+                ? TpmsPollingMode.FULL_DASHBOARD
+                : TpmsPollingMode.BACKGROUND);
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         normalizeModeForWindow();
-        TpmsController.get(this).setPollingMode(TpmsPollingMode.FULL_DASHBOARD);
+        syncTpmsPollingMode();
         renderTab();
         refresh();
         applyImmersiveMode();
@@ -710,7 +716,7 @@ public final class MainActivity extends Activity {
     public void onMultiWindowModeChanged(boolean isInMultiWindowMode, Configuration newConfig) {
         super.onMultiWindowModeChanged(isInMultiWindowMode, newConfig);
         normalizeModeForWindow();
-        TpmsController.get(this).setPollingMode(TpmsPollingMode.FULL_DASHBOARD);
+        syncTpmsPollingMode();
         renderTab();
         refresh();
         applyImmersiveMode();
@@ -2595,7 +2601,7 @@ public final class MainActivity extends Activity {
     private View tpmsWheelCard(TpmsState state, int wheel) {
         boolean known = state != null && state.known != null && wheel < state.known.length && state.known[wheel];
         long now = System.currentTimeMillis();
-        boolean fresh = known && state.isWheelFresh(wheel, now);
+        boolean fresh = known && state.isWheelFresh(wheel);
         int warning = TpmsAlertController.warningState(this, state, wheel);
         int color = fresh ? warningColor(warning) : COLOR_MUTED;
         LinearLayout card = new LinearLayout(this);
@@ -2626,7 +2632,7 @@ public final class MainActivity extends Activity {
         String temp = known ? state.temperatureC[wheel] + "C" : "--C";
         String detail = !known ? "нет данных"
                 : !fresh ? "данные устарели · "
-                + ageText(now, now - state.wheelAgeMs(wheel, now))
+                + ageText(now, now - state.wheelAgeMs(wheel))
                 : warning == TpmsAlertController.WARNING_NONE
                 ? "норма"
                 : TpmsAlertController.warningText(warning);
@@ -5164,7 +5170,7 @@ public final class MainActivity extends Activity {
 
     private void toggleTpmsAlerts(CompoundButton button, boolean enabled) {
         AppSettings.setTpmsAlertsEnabled(this, enabled);
-        TpmsAlertController.get(this).apply(StateStore.tpms());
+        TpmsController.get(this).onSettingsChanged();
         AppLog.line(this, "TPMS alerts: " + enabled);
         renderTab();
         refresh();
@@ -5175,7 +5181,7 @@ public final class MainActivity extends Activity {
         if (!enabled) {
             TpmsWarningOverlayController.get(this).stopSound();
         } else {
-            TpmsAlertController.get(this).apply(StateStore.tpms());
+            TpmsController.get(this).onSettingsChanged();
         }
         AppLog.line(this, "TPMS sound alerts: " + enabled);
         refresh();
@@ -5202,7 +5208,7 @@ public final class MainActivity extends Activity {
     }
 
     private void onTpmsThresholdChanged(String label) {
-        TpmsAlertController.get(this).apply(StateStore.tpms());
+        TpmsController.get(this).onSettingsChanged();
         AppLog.line(this, "TPMS threshold: " + label);
         renderTab();
         refresh();

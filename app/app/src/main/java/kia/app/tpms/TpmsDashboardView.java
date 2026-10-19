@@ -116,12 +116,11 @@ public final class TpmsDashboardView extends View {
     private void scheduleFreshnessRefresh() {
         removeCallbacks(freshnessRefresh);
         if (state == null || state.known == null || state.wheelUpdatedAt == null) return;
-        long now = System.currentTimeMillis();
         long nextDelay = Long.MAX_VALUE;
         for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
-            if (!known(wheel) || !state.isWheelFresh(wheel, now)) continue;
-            long expiresAt = state.wheelUpdatedAt[wheel] + TpmsState.WHEEL_STALE_AFTER_MS + 1L;
-            nextDelay = Math.min(nextDelay, Math.max(1L, expiresAt - now));
+            if (!known(wheel) || !state.isWheelFresh(wheel)) continue;
+            long remaining = TpmsState.WHEEL_STALE_AFTER_MS + 1L - state.wheelAgeMs(wheel);
+            nextDelay = Math.min(nextDelay, Math.max(1L, remaining));
         }
         if (nextDelay != Long.MAX_VALUE) postDelayed(freshnessRefresh, nextDelay);
     }

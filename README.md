@@ -2,20 +2,24 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-[![Скачать KIA 23.15 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.15%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.15-369/kia_369.apk)
+[![Скачать KIA 23.16 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%2023.16%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.16-370/kia_370.apk)
 
-- APK KIA: [kia_369.apk](https://github.com/mrglonin/kia/releases/download/v23.15-369/kia_369.apk)
+- APK KIA: [kia_370.apk](https://github.com/mrglonin/kia/releases/download/v23.16-370/kia_370.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-teyes-compat.apk](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.15-369`](https://github.com/mrglonin/kia/releases/tag/v23.15-369)
-- Текущий публичный релиз: `23.15` / `369`
+- GitHub Release: [`v23.16-370`](https://github.com/mrglonin/kia/releases/tag/v23.16-370)
+- Текущий публичный релиз: `23.16` / `370`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.15` / `369` | `updates/kia_369.apk`, 6 697 531 байт | `8127dd08babe754f854f4ddc071143b95cd1acb001d4708df61a7df67b821749` |
+| KIA app | `23.16` / `370` | `updates/kia_370.apk`, 6 704 627 байт | `c5c36e1476236c41fffcb9a826d4a02e5821059727edc596e855b71f6186511d` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
+
+В `23.16` исправлены предупреждения и фоновый опрос TPMS: выбирается максимальная тяжесть всех причин, изменение цифр не возвращает закрытую плашку, а новая причина или усиление опасности снова включает предупреждение. После 30 секунд отсутствия причины допускается новый эпизод. Опрос и получение сведений адаптера выполняются в фоне; новое USB-соединение запускает запрос TPMS, частичные кадры не сдвигают его бесконечно. Свежесть показаний использует монотонное время, остановка службы очищает плашку/звук, а изменение окна учитывает активность приложения. Интервалы сохранены: `120 / 5 / 1 с`.
+
+Проверено для `23.16`: `391` unit-тест, `79` сценариев TPMS/предупреждений/USB-health и `35` сценариев компаса; `lintRelease` — `0 errors / 74 warnings`; release-сборка, ZIP CRC, zipalign и прежняя подпись APK. Стенды исполняют настоящие классы с заменами границ Android/USB; физическая магнитола в этом прогоне не подключалась. Отдельная карточка TPMS из отозванной 367 отсутствует.
 
 В `23.15` исправлен GPS-компас: старые и повторные точки не заменяют свежий курс, сохранённые источники проверяются до выбора, а остановка блокирует запоздавший курс движения. Положение, скорость и направление принимаются независимо, поэтому обновления разных GPS-источников не теряют скорость навигации. Основа приложения — 366; отдельная карточка TPMS из отозванной 367 отсутствует.
 
@@ -76,7 +80,7 @@ Yandex Navigator mod остаётся версии `7.10-kia.20260805-teyes-comp
 ADB:
 
 ```bash
-adb install -r updates/kia_369.apk
+adb install -r updates/kia_370.apk
 curl -L -o /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk \
   https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
 adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
@@ -84,7 +88,7 @@ adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
 
 На магнитоле:
 
-1. Установить `kia_369.apk`.
+1. Установить `kia_370.apk`.
 2. Выдать runtime permissions: уведомления, геолокация и Bluetooth — только для используемых функций.
 3. Включить специальные права: поверх окон, доступ к уведомлениям и игнор оптимизации батареи.
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
@@ -107,11 +111,20 @@ Release-сборка подписывается публичным debug-keystor
 
 ## QA
 
+Проверки настоящего кода на JVM (нужны JDK, Android SDK и JUnit-зависимости после Gradle unit-тестов):
+
+```bash
+python3 tools/tpms_regression.py --output /tmp/kia-tpms-check
+python3 tools/compass_regression.py --output /tmp/kia-compass-check
+```
+
+Для TPMS доступны отдельные сценарии `tools/tpms_regression/scheduler.py`, `alerts.py` и `health.py`; каждый принимает `--source` и `--output`. Используются `JAVA_HOME`/`PATH` и `ANDROID_HOME`/`ANDROID_SDK_ROOT`; журналы и хеши исходников сохраняются в каталоге результата. Эти проверки не устанавливают приложение на устройство и не измеряют физический USB, звук или датчики.
+
 Быстрые сценарии через встроенный `QaReceiver`:
 
 ```bash
 ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
-$ADB -s emulator-5554 install -r updates/kia_369.apk
+$ADB -s emulator-5554 install -r updates/kia_370.apk
 $ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning

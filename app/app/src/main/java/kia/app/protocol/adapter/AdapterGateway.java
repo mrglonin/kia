@@ -14,12 +14,16 @@ public final class AdapterGateway {
     private final Context app;
     private final UsbTransport transport;
     private final FrameRouter router;
+    private final AdapterInfoDiscoveryPolicy infoDiscovery = new AdapterInfoDiscoveryPolicy();
     private volatile boolean exclusiveUpdateMode;
 
     private AdapterGateway(Context context) {
         this.app = context.getApplicationContext();
         this.router = new FrameRouter(app);
-        this.transport = new UsbTransport(app, router::onFrame);
+        this.transport = new UsbTransport(app, (frame, epoch, receivedElapsed) -> {
+            infoDiscovery.observeReply(frame, epoch);
+            router.onFrame(frame, epoch, receivedElapsed);
+        });
     }
 
     public static synchronized AdapterGateway get(Context context) {
@@ -90,6 +94,8 @@ public final class AdapterGateway {
     }
 
     public void endExclusiveUpdate() {
+        // An MCU restart need not detach the USB serial bridge or advance its connection epoch.
+        if (exclusiveUpdateMode) infoDiscovery.invalidate();
         exclusiveUpdateMode = false;
         StateStore.updateUpdates(app, current -> current.withExclusiveUsbMode(false));
         AppLog.line(app, "Adapter: exclusive firmware update mode off");
@@ -105,6 +111,18 @@ public final class AdapterGateway {
 
     public void requestAdapterInfoQuiet() {
         requestAdapterInfo(true);
+    }
+
+    /** Periodic liveness probe; identity is retried only until received on this USB session. */
+    public void requestHealthQuiet() {
+        int missing = infoDiscovery.missingRequests(transport.connectionEpoch());
+        if ((missing & AdapterInfoDiscoveryPolicy.REQUEST_UID) != 0) {
+            send(AdapterCommand.quiet("uid", AdapterProtocol.requestAdapterUid()));
+        }
+        if ((missing & AdapterInfoDiscoveryPolicy.REQUEST_VERSION) != 0) {
+            send(AdapterCommand.quiet("version", AdapterProtocol.requestAdapterVersion()));
+        }
+        send(AdapterCommand.quiet("health", AdapterProtocol.requestHealth()));
     }
 
     private void requestAdapterInfo(boolean quiet) {

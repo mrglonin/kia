@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.SystemClock;
 import android.text.TextUtils;
 
 import java.util.Locale;
@@ -31,22 +32,14 @@ public final class TpmsAlertController {
     public static final int SEVERITY_WARNING = 1;
     public static final int SEVERITY_CRITICAL = 2;
 
-    private static final int FLAG_FAST_LEAKAGE = 0x01;
-    private static final int FLAG_HIGH_PRESSURE = 0x02;
-    private static final int FLAG_HIGH_TEMP = 0x04;
-    private static final int FLAG_LOW_PRESSURE = 0x08;
-    private static final int FLAG_LOW_BATTERY = 0x10;
-    private static final int CRITICAL_PRESSURE_MARGIN_KPA = 30;
-    private static final int CRITICAL_TEMP_MARGIN_C = 10;
     private static final String CHANNEL = "kia_tpms_status";
     private static final int NOTIFICATION_ID = 4418;
-    private static final long REPEAT_MS = 60000L;
+    static final int CAUSE_SLOTS = TpmsState.WHEEL_COUNT * TpmsWarningPolicy.CAUSE_COUNT;
 
     private static TpmsAlertController instance;
 
     private final Context app;
-    private String lastWarningKey = "";
-    private long lastWarningAt;
+    private final TpmsAlertLifecycle notificationLifecycle = new TpmsAlertLifecycle(CAUSE_SLOTS);
 
     private TpmsAlertController(Context context) {
         this.app = context.getApplicationContext();
@@ -57,26 +50,30 @@ public final class TpmsAlertController {
         return instance;
     }
 
-    public void apply(TpmsState state) {
-        String key = warningKey(app, state);
-        TpmsWarningOverlayController.get(app).apply(state, key);
-        if (TextUtils.isEmpty(key)) {
-            synchronized (this) {
-                lastWarningKey = "";
-                lastWarningAt = 0L;
-            }
+    public synchronized void apply(TpmsState state) {
+        if (!AppSettings.tpmsAlertsEnabled(app)) {
+            clear();
+            return;
+        }
+        int[] levels = warningLevels(app, state);
+        String details = warningDetails(app, state);
+        TpmsWarningOverlayController.get(app).apply(levels, details);
+        long now = SystemClock.elapsedRealtime();
+        notificationLifecycle.observe(levels, now);
+        if (TextUtils.isEmpty(details)) {
             cancel();
             return;
         }
-        long now = System.currentTimeMillis();
-        synchronized (this) {
-            if (key.equals(lastWarningKey) && now - lastWarningAt < REPEAT_MS) return;
-            lastWarningKey = key;
-            lastWarningAt = now;
-        }
-        String details = warningDetails(app, state);
+        if (!notificationLifecycle.shouldNotify(now)) return;
         show("TPMS: " + warningText(firstWarning(app, state)), details);
         AppLog.line(app, "TPMS alert: " + details);
+    }
+
+    /** Clears every alert surface and invalidates queued overlay/sound updates. */
+    public synchronized void clear() {
+        notificationLifecycle.reset();
+        TpmsWarningOverlayController.get(app).clear();
+        cancel();
     }
 
     public static int warningState(Context context, TpmsState state, int wheel) {
@@ -90,26 +87,7 @@ public final class TpmsAlertController {
     }
 
     public static int warningState(Context context, int pressureKpa, int tempC, int flags) {
-        if (context == null || !AppSettings.tpmsAlertsEnabled(context)) return WARNING_NONE;
-        int cleanFlags = flags & 0xff;
-        if ((cleanFlags & FLAG_FAST_LEAKAGE) != 0) return WARNING_FAST_LEAKAGE;
-        if ((cleanFlags & FLAG_HIGH_PRESSURE) != 0) return WARNING_HIGH_PRESSURE;
-        if ((cleanFlags & FLAG_HIGH_TEMP) != 0) return WARNING_HIGH_TEMP;
-        if ((cleanFlags & FLAG_LOW_PRESSURE) != 0) return WARNING_LOW_PRESSURE;
-        if ((cleanFlags & FLAG_LOW_BATTERY) != 0) return WARNING_LOW_BATTERY;
-
-        int lowPressure = Math.min(AppSettings.tpmsLowPressureKpa(context),
-                AppSettings.tpmsHighPressureKpa(context) - 1);
-        int highPressure = Math.max(AppSettings.tpmsHighPressureKpa(context), lowPressure + 1);
-        int lowTemp = Math.min(AppSettings.tpmsLowTempC(context),
-                AppSettings.tpmsHighTempC(context) - 1);
-        int highTemp = Math.max(AppSettings.tpmsHighTempC(context), lowTemp + 1);
-
-        if (pressureKpa > 0 && pressureKpa < lowPressure) return WARNING_LOW_PRESSURE;
-        if (pressureKpa > highPressure) return WARNING_HIGH_PRESSURE;
-        if (tempC < lowTemp) return WARNING_LOW_TEMP;
-        if (tempC >= highTemp) return WARNING_HIGH_TEMP;
-        return WARNING_NONE;
+        return evaluate(context, pressureKpa, tempC, flags).warning();
     }
 
     public static int warningSeverity(Context context, TpmsState state, int wheel) {
@@ -123,36 +101,30 @@ public final class TpmsAlertController {
     }
 
     public static int warningSeverity(Context context, int pressureKpa, int tempC, int flags) {
-        int warning = warningState(context, pressureKpa, tempC, flags);
-        if (warning == WARNING_NONE) return SEVERITY_NONE;
+        return evaluate(context, pressureKpa, tempC, flags).severity();
+    }
 
-        int cleanFlags = flags & 0xff;
-        if ((cleanFlags & FLAG_FAST_LEAKAGE) != 0) return SEVERITY_CRITICAL;
-        if ((cleanFlags & (FLAG_HIGH_PRESSURE | FLAG_HIGH_TEMP | FLAG_LOW_PRESSURE)) != 0) {
-            return SEVERITY_CRITICAL;
+    private static TpmsWarningPolicy.Result evaluate(Context context, int pressureKpa,
+                                                     int tempC, int flags) {
+        if (context == null || !AppSettings.tpmsAlertsEnabled(context)) {
+            return new TpmsWarningPolicy.Result();
         }
-        if ((cleanFlags & FLAG_LOW_BATTERY) != 0) return SEVERITY_WARNING;
+        return TpmsWarningPolicy.evaluate(pressureKpa, tempC, flags,
+                AppSettings.tpmsLowPressureKpa(context), AppSettings.tpmsHighPressureKpa(context),
+                AppSettings.tpmsLowTempC(context), AppSettings.tpmsHighTempC(context));
+    }
 
-        int lowPressure = Math.min(AppSettings.tpmsLowPressureKpa(context),
-                AppSettings.tpmsHighPressureKpa(context) - 1);
-        int highPressure = Math.max(AppSettings.tpmsHighPressureKpa(context), lowPressure + 1);
-        int lowTemp = Math.min(AppSettings.tpmsLowTempC(context),
-                AppSettings.tpmsHighTempC(context) - 1);
-        int highTemp = Math.max(AppSettings.tpmsHighTempC(context), lowTemp + 1);
-
-        if (warning == WARNING_LOW_PRESSURE && pressureKpa <= lowPressure - CRITICAL_PRESSURE_MARGIN_KPA) {
-            return SEVERITY_CRITICAL;
+    static int[] warningLevels(Context context, TpmsState state) {
+        int[] levels = new int[CAUSE_SLOTS];
+        if (state == null || context == null || !AppSettings.tpmsAlertsEnabled(context)) return levels;
+        for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
+            if (!state.isWheelFresh(wheel)) continue;
+            TpmsWarningPolicy.Result result = evaluate(context,
+                    state.pressureKpa[wheel], state.temperatureC[wheel], state.flags[wheel]);
+            System.arraycopy(result.levels, 0, levels,
+                    wheel * TpmsWarningPolicy.CAUSE_COUNT, result.levels.length);
         }
-        if (warning == WARNING_HIGH_PRESSURE && pressureKpa >= highPressure + CRITICAL_PRESSURE_MARGIN_KPA) {
-            return SEVERITY_CRITICAL;
-        }
-        if (warning == WARNING_LOW_TEMP && tempC <= lowTemp - CRITICAL_TEMP_MARGIN_C) {
-            return SEVERITY_CRITICAL;
-        }
-        if (warning == WARNING_HIGH_TEMP && tempC >= highTemp + CRITICAL_TEMP_MARGIN_C) {
-            return SEVERITY_CRITICAL;
-        }
-        return SEVERITY_WARNING;
+        return levels;
     }
 
     public static boolean hasWarnings(Context context, TpmsState state) {
@@ -168,27 +140,27 @@ public final class TpmsAlertController {
     }
 
     public static int firstWarning(Context context, TpmsState state) {
-        if (state == null || state.known == null) return WARNING_NONE;
-        for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
-            int warning = warningState(context, state, wheel);
-            if (warning != WARNING_NONE) return warning;
+        int[] levels = warningLevels(context, state);
+        int selected = WARNING_NONE;
+        int highest = SEVERITY_NONE;
+        for (int slot = 0; slot < levels.length; slot++) {
+            if (levels[slot] > highest) {
+                highest = levels[slot];
+                selected = slot % TpmsWarningPolicy.CAUSE_COUNT;
+            }
         }
-        return WARNING_NONE;
+        return selected;
     }
 
+    /** Identity contains wheel/cause/severity only; current readings remain in details. */
     public static String warningKey(Context context, TpmsState state) {
-        if (context == null || state == null || state.known == null
-                || !AppSettings.tpmsAlertsEnabled(context)) {
-            return "";
-        }
+        int[] levels = warningLevels(context, state);
         StringBuilder out = new StringBuilder();
-        for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
-            int warning = warningState(context, state, wheel);
-            if (warning == WARNING_NONE) continue;
+        for (int slot = 0; slot < levels.length; slot++) {
+            if (levels[slot] == SEVERITY_NONE) continue;
             if (out.length() > 0) out.append('|');
-            out.append(wheel).append(':').append(warning).append(':')
-                    .append(warningSeverity(context, state, wheel)).append(':')
-                    .append(state.pressureKpa[wheel]).append(':').append(state.temperatureC[wheel]);
+            out.append(slot / TpmsWarningPolicy.CAUSE_COUNT).append(':')
+                    .append(slot % TpmsWarningPolicy.CAUSE_COUNT).append(':').append(levels[slot]);
         }
         return out.toString();
     }

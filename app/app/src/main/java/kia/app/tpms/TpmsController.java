@@ -2,7 +2,8 @@ package kia.app.tpms;
 
 import android.content.Context;
 import android.os.Handler;
-import android.os.Looper;
+import android.os.HandlerThread;
+import android.os.SystemClock;
 
 import kia.app.core.StateStore;
 import kia.app.core.model.TpmsState;
@@ -23,21 +24,16 @@ public final class TpmsController {
     private static TpmsController instance;
 
     private final Context app;
-    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Object lock = new Object();
+    private Handler worker;
     private boolean polling;
     private TpmsPollingMode pollingMode = TpmsPollingMode.BACKGROUND;
-
-    private final Runnable pollTick = new Runnable() {
-        @Override
-        public void run() {
-            if (!polling) return;
-            // Re-evaluate age before every request so a warning cannot remain
-            // active only because no newer adapter frame has arrived.
-            TpmsAlertController.get(app).apply(StateStore.tpms());
-            requestNow();
-            scheduleNext();
-        }
-    };
+    private long generation;
+    private long connectedEpoch;
+    private long lastPollStartedAt = -1L;
+    private long nextPollAt = Long.MAX_VALUE;
+    private long forcedPollAt = Long.MAX_VALUE;
+    private Runnable pollTick;
 
     private TpmsController(Context context) {
         this.app = context.getApplicationContext();
@@ -49,14 +45,36 @@ public final class TpmsController {
     }
 
     public void startPolling() {
-        if (polling) return;
-        polling = true;
-        scheduleImmediate();
+        synchronized (lock) {
+            if (polling) return;
+            if (worker == null) {
+                // Keep one serialized worker for this process, including service restarts.
+                // A slow write from an old session cannot overlap a new session's write.
+                HandlerThread thread = new HandlerThread("KiaTpmsPolling");
+                thread.start();
+                worker = new Handler(thread.getLooper());
+            }
+            polling = true;
+            long session = ++generation;
+            pollTick = () -> pollOnWorker(session);
+            lastPollStartedAt = -1L;
+            nextPollAt = Long.MAX_VALUE;
+            forcedPollAt = SystemClock.elapsedRealtime();
+            scheduleNextLocked();
+        }
     }
 
     public void stopPolling() {
-        polling = false;
-        handler.removeCallbacks(pollTick);
+        synchronized (lock) {
+            polling = false;
+            generation++;
+            if (worker != null && pollTick != null) worker.removeCallbacks(pollTick);
+            pollTick = null;
+            nextPollAt = Long.MAX_VALUE;
+            forcedPollAt = Long.MAX_VALUE;
+            // USB writes never hold this lock. An already-started write may finish,
+            // but it cannot apply alerts or schedule another tick after this fence.
+        }
     }
 
     public void setForegroundActive(boolean active) {
@@ -76,28 +94,57 @@ public final class TpmsController {
     }
 
     public void setPollingMode(TpmsPollingMode mode) {
-        TpmsPollingMode clean = mode == null ? TpmsPollingMode.BACKGROUND : mode;
-        if (pollingMode == clean) return;
-        pollingMode = clean;
-        if (polling) scheduleImmediate();
+        synchronized (lock) {
+            TpmsPollingMode clean = mode == null ? TpmsPollingMode.BACKGROUND : mode;
+            if (pollingMode == clean) return;
+            pollingMode = clean;
+            if (polling) scheduleImmediateLocked();
+        }
     }
 
     public TpmsPollingMode pollingMode() {
-        return pollingMode;
+        synchronized (lock) { return pollingMode; }
     }
 
+    /** Request a poll on the worker; callers never perform USB I/O on their thread. */
     public void requestNow() {
-        AdapterGateway.get(app).pollTpms();
+        synchronized (lock) {
+            if (polling) scheduleImmediateLocked();
+        }
+    }
+
+    /** Called once a new USB connection epoch becomes usable. */
+    public void onAdapterConnected(long connectionEpoch) {
+        synchronized (lock) {
+            if (connectionEpoch <= 0L || connectionEpoch <= connectedEpoch) return;
+            connectedEpoch = connectionEpoch;
+            if (polling) scheduleImmediateLocked();
+        }
+    }
+
+    /** Re-evaluate thresholds and alert enablement without waiting for another packet. */
+    public void onSettingsChanged() {
+        synchronized (lock) {
+            if (!polling) return;
+            TpmsAlertController.get(app).apply(StateStore.tpms());
+            scheduleNextLocked();
+        }
     }
 
     /** Returns whether the packet contains recognized wheel slots, even if all are empty. */
     public boolean handleAdapterFrame(byte[] frame) {
-        long now = System.currentTimeMillis();
-        TpmsState next = parseAdapterFrame(frame, StateStore.tpms(), now);
-        if (next != null) {
-            StateStore.setTpms(app, next);
-            TpmsAlertController.get(app).apply(next);
-            if (polling) scheduleNext();
+        synchronized (lock) {
+            long now = System.currentTimeMillis();
+            TpmsState next = parseAdapterFrame(frame, StateStore.tpms(), now);
+            if (next != null) {
+                // Keep this synchronous: FrameRouter forwards the newly stored wheel
+                // values to the native TEYES widget immediately after this method.
+                StateStore.setTpms(app, next);
+                if (polling) {
+                    TpmsAlertController.get(app).apply(next);
+                    scheduleNextLocked();
+                }
+            }
         }
         return observedWheelMask(frame) != 0;
     }
@@ -162,14 +209,44 @@ public final class TpmsController {
         return changed ? next : null;
     }
 
-    private void scheduleImmediate() {
-        handler.removeCallbacks(pollTick);
-        handler.post(pollTick);
+    private void pollOnWorker(long session) {
+        synchronized (lock) {
+            if (!polling || session != generation) return;
+            long now = SystemClock.elapsedRealtime();
+            // A callback already dequeued before a newer reschedule must not
+            // consume that newer deadline or create a duplicate timer.
+            if (now < nextPollAt) return;
+            worker.removeCallbacks(pollTick);
+            nextPollAt = Long.MAX_VALUE;
+            forcedPollAt = Long.MAX_VALUE;
+            lastPollStartedAt = now;
+            TpmsAlertController.get(app).apply(StateStore.tpms());
+        }
+        try {
+            AdapterGateway.get(app).pollTpms();
+        } finally {
+            synchronized (lock) {
+                if (polling && session == generation) scheduleNextLocked();
+            }
+        }
     }
 
-    private void scheduleNext() {
-        handler.removeCallbacks(pollTick);
-        handler.postDelayed(pollTick, pollIntervalMs());
+    private void scheduleImmediateLocked() {
+        forcedPollAt = Math.min(forcedPollAt, SystemClock.elapsedRealtime());
+        scheduleNextLocked();
+    }
+
+    private void scheduleNextLocked() {
+        if (!polling || pollTick == null) return;
+        long now = SystemClock.elapsedRealtime();
+        long regular = lastPollStartedAt < 0L ? now : lastPollStartedAt + pollIntervalMs();
+        long deadline = Math.max(now, Math.min(regular, forcedPollAt));
+        if (deadline == nextPollAt) return;
+        worker.removeCallbacks(pollTick);
+        nextPollAt = deadline;
+        worker.postDelayed(pollTick, Math.max(0L, deadline - now));
+        // Packet arrivals do not restart the interval. Only the last poll, the
+        // current severity/mode, or an explicit immediate request sets its end.
     }
 
     private long pollIntervalMs() {

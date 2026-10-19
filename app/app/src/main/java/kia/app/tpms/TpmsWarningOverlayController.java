@@ -9,6 +9,7 @@ import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.view.Display;
 import android.view.Gravity;
@@ -32,8 +33,9 @@ public final class TpmsWarningOverlayController {
     private LinearLayout overlay;
     private TextView detailsText;
     private MediaPlayer player;
-    private String currentKey = "";
-    private String dismissedKey = "";
+    private final TpmsAlertLifecycle lifecycle =
+            new TpmsAlertLifecycle(TpmsAlertController.CAUSE_SLOTS);
+    private long lifecycleGeneration;
     private boolean permissionLogged;
 
     private TpmsWarningOverlayController(Context context) {
@@ -48,36 +50,62 @@ public final class TpmsWarningOverlayController {
     }
 
     public void apply(TpmsState state, String key) {
-        String safeKey = key == null ? "" : key;
-        String details = TpmsAlertController.warningDetails(app, state);
-        handler.post(() -> applyOnMain(safeKey, details));
+        apply(TpmsAlertController.warningLevels(app, state),
+                TpmsAlertController.warningDetails(app, state));
     }
 
-    public void stopSound() {
-        handler.post(this::stopSoundOnMain);
+    synchronized void apply(int[] levels, String details) {
+        int[] copy = levels.clone();
+        long generation = lifecycleGeneration;
+        handler.post(() -> {
+            synchronized (this) {
+                if (generation != lifecycleGeneration) return;
+                applyOnMain(copy, details);
+            }
+        });
     }
 
-    public void dismissCurrent() {
-        handler.post(this::dismiss);
+    public synchronized void stopSound() {
+        long generation = lifecycleGeneration;
+        handler.post(() -> {
+            synchronized (this) {
+                if (generation == lifecycleGeneration) stopSoundOnMain();
+            }
+        });
+    }
+
+    public synchronized void dismissCurrent() {
+        long generation = lifecycleGeneration;
+        handler.post(() -> {
+            synchronized (this) {
+                if (generation == lifecycleGeneration) dismiss();
+            }
+        });
+    }
+
+    public synchronized void clear() {
+        long generation = ++lifecycleGeneration;
+        handler.removeCallbacksAndMessages(null);
+        Runnable cleanup = () -> {
+            synchronized (this) {
+                if (generation != lifecycleGeneration) return;
+                lifecycle.reset();
+                hide();
+                stopSoundOnMain();
+                permissionLogged = false;
+            }
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run();
+        else handler.post(cleanup);
     }
 
     public void setActivityVisible(boolean visible) {
         // TPMS warnings must stay in the real overlay layer, even while Kia is open.
     }
 
-    private synchronized void applyOnMain(String key, String details) {
-        if (key.length() == 0) {
-            currentKey = "";
-            dismissedKey = "";
-            hide();
-            stopSoundOnMain();
-            return;
-        }
-        if (!key.equals(currentKey)) {
-            currentKey = key;
-            dismissedKey = "";
-        }
-        if (key.equals(dismissedKey)) {
+    private void applyOnMain(int[] levels, String details) {
+        lifecycle.observe(levels, SystemClock.elapsedRealtime());
+        if (!lifecycle.shouldShow()) {
             hide();
             stopSoundOnMain();
             return;
@@ -95,8 +123,8 @@ public final class TpmsWarningOverlayController {
         }
     }
 
-    private void dismiss() {
-        dismissedKey = currentKey;
+    private synchronized void dismiss() {
+        lifecycle.dismiss();
         hide();
         stopSoundOnMain();
         AppLog.line(app, "TPMS overlay dismissed");
