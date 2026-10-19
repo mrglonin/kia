@@ -37,7 +37,6 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private static final long REREGISTER_MS = 15000L;
     private static final long STARTUP_NAV_GRACE_MS = 3000L;
     private static final long STALE_LOCATION_MS = 2500L;
-    private static final long LAST_KNOWN_MAX_AGE_MS = STALE_LOCATION_MS;
     private static final long GPS_BEARING_PRIORITY_MS = STALE_LOCATION_MS;
     private static final long SENSOR_STALE_MS = 1500L;
     private static final long RAW_SENSOR_STALE_MS = 3000L;
@@ -69,7 +68,11 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private long lastRegisterAt;
     private long startedAt;
     private long lastUsbEpoch = -1L;
-    private long lastCachedLocationElapsedNanos;
+    private long lastLocationElapsedNanos;
+    private long lastGpsBearingElapsedNanos;
+    private long lastGpsSpeedElapsedNanos;
+    private long lastStationaryLocationElapsedNanos;
+    private float lastAcceptedGpsSpeed = Float.NaN;
     private long lastSuccessfulCompassTxAt;
     private long lastCompassTxAttemptAt;
     private int lastTransmittedStep = -1;
@@ -178,7 +181,11 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         targetStep = -1;
         startedAt = 0L;
         lastUsbEpoch = -1L;
-        lastCachedLocationElapsedNanos = 0L;
+        lastLocationElapsedNanos = 0L;
+        lastGpsBearingElapsedNanos = 0L;
+        lastGpsSpeedElapsedNanos = 0L;
+        lastStationaryLocationElapsedNanos = 0L;
+        lastAcceptedGpsSpeed = Float.NaN;
         lastTransmittedStep = -1;
         animationRunning = false;
         lastCompassSendAllowed = false;
@@ -204,37 +211,58 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     @Override
     public void onLocationChanged(Location location) {
         if (!running) return;
-        acceptLocation(location, false);
+        acceptLocation(location);
     }
 
-    private void acceptLocation(Location location, boolean lastKnown) {
-        if (location == null) return;
-        if (lastKnown && !acceptLastKnownSample(location)) return;
-        lastLocation = new Location(location);
-        NavigationFeature.get(app).updateGpsLocation(location);
-        if (sensorHeadingFresh()) return;
-        if (!CompassLocationPolicy.usableGpsBearing(
-                location.hasBearing(), location.getBearing(),
-                location.hasSpeed(), location.hasSpeed() ? location.getSpeed() : Float.NaN)) {
-            return;
+    private void acceptLocation(Location location) {
+        if (!freshLocation(location, SystemClock.elapsedRealtimeNanos())) return;
+        long fixElapsedNanos = location.getElapsedRealtimeNanos();
+        rememberStationaryLocation(location);
+        boolean updateSpeed = CompassLocationPolicy.newerSpeedSample(
+                location.hasSpeed(), location.getSpeed(), fixElapsedNanos,
+                lastGpsSpeedElapsedNanos, lastAcceptedGpsSpeed);
+        boolean updateBearing = usableGpsBearing(location)
+                && CompassLocationPolicy.newerSample(fixElapsedNanos, lastGpsBearingElapsedNanos)
+                && fixElapsedNanos > lastStationaryLocationElapsedNanos;
+        if (updateSpeed) {
+            lastGpsSpeedElapsedNanos = fixElapsedNanos;
+            lastAcceptedGpsSpeed = location.getSpeed();
         }
-        lastGpsBearingAt = SystemClock.elapsedRealtime();
+        if (updateBearing) lastGpsBearingElapsedNanos = fixElapsedNanos;
+        if (CompassLocationPolicy.newerSample(fixElapsedNanos, lastLocationElapsedNanos)) {
+            lastLocationElapsedNanos = fixElapsedNanos;
+            lastLocation = new Location(location);
+            NavigationFeature.get(app).updateGpsLocation(location, updateSpeed, updateBearing);
+        } else if (updateSpeed || updateBearing) {
+            NavigationFeature.get(app).updateGpsMotion(location, updateSpeed, updateBearing);
+        }
+        // A newer position/speed-only provider must not hide a usable course from
+        // another provider. Track course order separately, without rewinding navigation.
+        if (!updateBearing || sensorHeadingFresh()) return;
+        lastGpsBearingAt = fixElapsedNanos / 1_000_000L;
         updateTargetStep(normalize(location.getBearing()));
     }
 
-    private boolean acceptLastKnownSample(Location location) {
-        long nowElapsedNanos = SystemClock.elapsedRealtimeNanos();
-        long fixElapsedNanos = location.getElapsedRealtimeNanos();
-        if (!CompassLocationPolicy.freshLastKnown(
-                nowElapsedNanos, fixElapsedNanos, LAST_KNOWN_MAX_AGE_MS)) {
-            return false;
+    private static boolean freshLocation(Location location, long nowElapsedNanos) {
+        return location != null && CompassLocationPolicy.freshSample(
+                nowElapsedNanos, location.getElapsedRealtimeNanos(), STALE_LOCATION_MS);
+    }
+
+    private static boolean usableGpsBearing(Location location) {
+        return CompassLocationPolicy.usableGpsBearing(
+                location.hasBearing(), location.getBearing(),
+                location.hasSpeed(), location.hasSpeed() ? location.getSpeed() : Float.NaN);
+    }
+
+    private void rememberStationaryLocation(Location location) {
+        if (CompassLocationPolicy.stationarySpeed(location.hasSpeed(), location.getSpeed())) {
+            lastStationaryLocationElapsedNanos = Math.max(lastStationaryLocationElapsedNanos,
+                    location.getElapsedRealtimeNanos());
         }
-        if (CompassLocationPolicy.sameLastKnownSample(
-                fixElapsedNanos, lastCachedLocationElapsedNanos)) {
-            return false;
-        }
-        lastCachedLocationElapsedNanos = fixElapsedNanos;
-        return true;
+    }
+
+    private static boolean knownGpsSpeed(Location location) {
+        return location.hasSpeed() && Float.isFinite(location.getSpeed()) && location.getSpeed() >= 0f;
     }
 
     @Override
@@ -311,8 +339,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
             any |= requestProvider(LocationManager.PASSIVE_PROVIDER);
             registered = any;
             lastRegisterAt = now;
-            Location last = bestLastKnownLocation();
-            if (last != null) acceptLocation(last, true);
+            acceptLastKnownLocations();
         } catch (Exception e) {
             registered = false;
             AppLog.line(app, "Compass: GPS start failed " + e.getClass().getSimpleName());
@@ -411,15 +438,28 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         headingSensor = null;
     }
 
-    private Location bestLastKnownLocation() {
-        Location best = lastKnown(LocationManager.GPS_PROVIDER);
-        Location fused = lastKnown(FUSED_PROVIDER);
-        if (newerUsefulLocation(fused, best)) best = fused;
-        Location passive = lastKnown(LocationManager.PASSIVE_PROVIDER);
-        if (newerUsefulLocation(passive, best)) best = passive;
-        Location network = lastKnown(LocationManager.NETWORK_PROVIDER);
-        if (newerUsefulLocation(network, best)) best = network;
-        return best != null && (best.hasBearing() || best.hasSpeed()) ? best : null;
+    private void acceptLastKnownLocations() {
+        long nowElapsedNanos = SystemClock.elapsedRealtimeNanos();
+        Location latestLocation = null;
+        Location latestSpeed = null;
+        Location latestBearing = null;
+        Location[] candidates = {
+                lastKnown(LocationManager.GPS_PROVIDER), lastKnown(FUSED_PROVIDER),
+                lastKnown(LocationManager.PASSIVE_PROVIDER), lastKnown(LocationManager.NETWORK_PROVIDER)
+        };
+        for (Location candidate : candidates) {
+            if (!freshLocation(candidate, nowElapsedNanos)) continue;
+            // Record every fresh stop before accepting any cached moving course.
+            rememberStationaryLocation(candidate);
+            if (newerLocation(candidate, latestLocation)) latestLocation = candidate;
+            if (knownGpsSpeed(candidate) && newerLocation(candidate, latestSpeed)) latestSpeed = candidate;
+            if (usableGpsBearing(candidate) && newerLocation(candidate, latestBearing)) {
+                latestBearing = candidate;
+            }
+        }
+        acceptLocation(latestLocation);
+        if (latestSpeed != latestLocation) acceptLocation(latestSpeed);
+        if (latestBearing != latestLocation && latestBearing != latestSpeed) acceptLocation(latestBearing);
     }
 
     @SuppressLint("MissingPermission")
@@ -432,11 +472,16 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         }
     }
 
-    private static boolean newerUsefulLocation(Location candidate, Location current) {
-        if (candidate == null || (!candidate.hasBearing() && !candidate.hasSpeed())) return false;
-        return current == null
-                || (!current.hasBearing() && !current.hasSpeed())
-                || candidate.getTime() >= current.getTime();
+    private static boolean newerLocation(Location candidate, Location current) {
+        if (current == null) return true;
+        long candidateTime = candidate.getElapsedRealtimeNanos();
+        long currentTime = current.getElapsedRealtimeNanos();
+        if (candidateTime != currentTime) return candidateTime > currentTime;
+        boolean candidateStopped = CompassLocationPolicy.stationarySpeed(candidate.hasSpeed(), candidate.getSpeed());
+        boolean currentStopped = CompassLocationPolicy.stationarySpeed(current.hasSpeed(), current.getSpeed());
+        if (candidateStopped != currentStopped) return candidateStopped;
+        if (usableGpsBearing(candidate) != usableGpsBearing(current)) return usableGpsBearing(candidate);
+        return knownGpsSpeed(candidate) && !knownGpsSpeed(current);
     }
 
     private void unregisterLocation() {

@@ -23,29 +23,65 @@ public final class CompassLocationPolicyTest {
     }
 
     @Test
-    public void lastKnownUsesMonotonicAgeWhenAvailable() {
+    public void samplesUseMonotonicAgeIncludingTheFreshnessBoundary() {
         long now = 20_000_000_000L;
-        assertTrue(CompassLocationPolicy.freshLastKnown(
+        assertTrue(CompassLocationPolicy.freshSample(
                 now, now - 2_500_000_000L, 2500L));
-        assertFalse(CompassLocationPolicy.freshLastKnown(
+        assertFalse(CompassLocationPolicy.freshSample(
                 now, now - 2_500_000_001L, 2500L));
-        assertFalse(CompassLocationPolicy.freshLastKnown(
+        assertFalse(CompassLocationPolicy.freshSample(
                 now, now + 1L, 2500L));
     }
 
     @Test
-    public void lastKnownWithoutMonotonicTimestampIsNotTrusted() {
-        assertFalse(CompassLocationPolicy.freshLastKnown(
+    public void samplesWithoutMonotonicTimestampAreNotTrusted() {
+        assertFalse(CompassLocationPolicy.freshSample(
                 20_000_000_000L, 0L, 2500L));
-        assertFalse(CompassLocationPolicy.freshLastKnown(
+        assertFalse(CompassLocationPolicy.freshSample(
                 0L, 10_000_000_000L, 2500L));
+        assertFalse(CompassLocationPolicy.freshSample(
+                20_000_000_000L, -1L, 2500L));
     }
 
     @Test
-    public void identicalCachedFixIsConsumedOnlyOnce() {
-        assertTrue(CompassLocationPolicy.sameLastKnownSample(123L, 123L));
-        assertFalse(CompassLocationPolicy.sameLastKnownSample(0L, 0L));
-        assertFalse(CompassLocationPolicy.sameLastKnownSample(124L, 123L));
+    public void onlyNewerSamplesAdvanceAnAcceptedStream() {
+        assertTrue(CompassLocationPolicy.newerSample(123L, 0L));
+        assertFalse(CompassLocationPolicy.newerSample(123L, 123L));
+        assertFalse(CompassLocationPolicy.newerSample(122L, 123L));
+        assertFalse(CompassLocationPolicy.newerSample(0L, 0L));
+        assertTrue(CompassLocationPolicy.newerSample(124L, 123L));
+    }
+
+    @Test
+    public void onlyValidLowSpeedEstablishesAStationaryBarrier() {
+        assertTrue(CompassLocationPolicy.stationarySpeed(true, 0f));
+        assertTrue(CompassLocationPolicy.stationarySpeed(true, 1.39f));
+        assertFalse(CompassLocationPolicy.stationarySpeed(true, 1.4f));
+        assertFalse(CompassLocationPolicy.stationarySpeed(false, 0f));
+        assertFalse(CompassLocationPolicy.stationarySpeed(true, -1f));
+        assertFalse(CompassLocationPolicy.stationarySpeed(true, Float.NaN));
+        assertFalse(CompassLocationPolicy.stationarySpeed(true, Float.POSITIVE_INFINITY));
+    }
+
+    @Test
+    public void freshnessRejectsInvalidWindowsAndDoesNotOverflow() {
+        assertFalse(CompassLocationPolicy.freshSample(10L, 9L, -1L));
+        assertFalse(CompassLocationPolicy.freshSample(10L, 9L, 0L));
+        assertTrue(CompassLocationPolicy.freshSample(10L, 10L, 0L));
+        assertTrue(CompassLocationPolicy.freshSample(Long.MAX_VALUE, 1L, Long.MAX_VALUE));
+    }
+
+    @Test
+    public void speedUpdatesKeepIndependentOrderAndStopWinsATimestampTie() {
+        assertTrue(CompassLocationPolicy.newerSpeedSample(true, 10f, 124L, 123L, 0f));
+        assertFalse(CompassLocationPolicy.newerSpeedSample(true, 10f, 122L, 123L, 0f));
+        assertFalse(CompassLocationPolicy.newerSpeedSample(true, 10f, 123L, 123L, 10f));
+        assertTrue(CompassLocationPolicy.newerSpeedSample(true, 0f, 123L, 123L, 10f));
+        assertFalse(CompassLocationPolicy.newerSpeedSample(true, 10f, 123L, 123L, 0f));
+        assertFalse(CompassLocationPolicy.newerSpeedSample(true, 0f, 123L, 123L, 0f));
+        assertFalse(CompassLocationPolicy.newerSpeedSample(false, 0f, 124L, 123L, 10f));
+        assertFalse(CompassLocationPolicy.newerSpeedSample(true, Float.NaN, 124L, 123L, 10f));
+        assertFalse(CompassLocationPolicy.newerSpeedSample(true, -1f, 124L, 123L, 10f));
     }
 
     @Test

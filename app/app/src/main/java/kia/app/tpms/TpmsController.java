@@ -128,18 +128,7 @@ public final class TpmsController {
             int pressureKpa = u16(frame, offset);
             int temperatureC = s8(frame, offset + 2);
             int flags = u8(frame, offset + 3);
-            // The legacy signed byte can represent real 0 C and -1 C. Do not
-            // reinterpret 00/FF as sentinels without a protocol validity bit.
-            boolean temperatureValid = TpmsState.isValidTemperatureC(temperatureC);
-            if (pressureKpa > 600) {
-                TpmsState stale = next.withWheelStale(wheel, "adapter", observedAt);
-                if (stale != next) {
-                    next = stale;
-                    changed = true;
-                }
-                continue;
-            }
-            next = next.withWheelAt(wheel, pressureKpa, temperatureC, temperatureValid, flags,
+            next = next.withWheelAt(wheel, pressureKpa, temperatureC, flags,
                     "adapter", observedAt);
             changed = true;
         }
@@ -166,11 +155,7 @@ public final class TpmsController {
             float psi = pressureRaw * 0.25f;
             int pressureKpa = Math.round(psi * 6.894757f);
             int temperatureC = tempRaw - 55;
-            // The offset byte 00 is conservatively treated as unavailable;
-            // FF/out-of-range must not be clamped into a plausible temperature.
-            boolean temperatureValid = tempRaw != 0 && tempRaw != 0xff
-                    && TpmsState.isValidTemperatureC(temperatureC);
-            next = next.withWheelAt(wheel, pressureKpa, temperatureC, temperatureValid, 0,
+            next = next.withWheelAt(wheel, pressureKpa, temperatureC, 0,
                     "adapter 0x51", observedAt);
             changed = true;
         }

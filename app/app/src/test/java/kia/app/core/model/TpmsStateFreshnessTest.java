@@ -46,7 +46,6 @@ public final class TpmsStateFreshnessTest {
         assertEquals(10_000L, stale.wheelAgeMs(TpmsState.WHEEL_RR, 20_000L));
         assertTrue(stale.isWheelStale(TpmsState.WHEEL_RR, 20_000L));
         assertFalse(stale.hasFreshData());
-        assertFalse(stale.isTemperatureFresh(TpmsState.WHEEL_RR, 20_000L));
     }
 
     @Test
@@ -62,66 +61,5 @@ public final class TpmsStateFreshnessTest {
         assertArrayEquals(new long[]{55_000L, 0L, 55_000L, 0L}, state.wheelUpdatedAt);
         assertTrue(state.isWheelFresh(TpmsState.WHEEL_FL, 56_000L));
         assertTrue(state.isWheelFresh(TpmsState.WHEEL_RL, 56_000L));
-        assertArrayEquals(new boolean[]{true, false, true, false}, state.temperatureKnown);
-    }
-
-    @Test
-    public void missingTemperatureKeepsPressureFreshWithoutReplayingOldTemperature() {
-        TpmsState state = TpmsState.empty()
-                .withWheelAt(0, 250, 31, 0, "adapter", 1_000L)
-                .withWheelAt(0, 255, 0, false, 0, "adapter", 2_000L);
-
-        assertTrue(state.isWheelFresh(0, 2_000L));
-        assertEquals(255, state.pressureKpa[0]);
-        assertFalse(state.temperatureKnown[0]);
-        assertFalse(state.isTemperatureFresh(0, 2_000L));
-        assertTrue(state.summary().contains("2.55 bar / __C"));
-    }
-
-    @Test
-    public void realZeroAndNegativeTemperaturesRemainMeasurements() {
-        TpmsState state = TpmsState.empty()
-                .withWheelAt(0, 250, 0, true, 0, "adapter", 1_000L)
-                .withWheelAt(1, 255, -1, true, 0, "adapter", 1_000L);
-
-        assertTrue(state.isTemperatureFresh(0, 1_000L));
-        assertTrue(state.isTemperatureFresh(1, 1_000L));
-        assertEquals(0, state.temperatureC[0]);
-        assertEquals(-1, state.temperatureC[1]);
-    }
-
-    @Test
-    public void outOfRangeTemperatureDoesNotBecomeClampedMeasurement() {
-        TpmsState state = TpmsState.empty()
-                .withWheelAt(0, 250, -61, true, 0, "adapter", 1_000L)
-                .withWheelAt(1, 255, 161, true, 0, "adapter", 1_000L)
-                .withWheelAt(2, 250, -60, true, 0, "adapter", 1_000L)
-                .withWheelAt(3, 255, 160, true, 0, "adapter", 1_000L);
-
-        assertFalse(state.temperatureKnown[0]);
-        assertFalse(state.temperatureKnown[1]);
-        assertTrue(state.isWheelFresh(0, 1_000L));
-        assertTrue(state.isWheelFresh(1, 1_000L));
-        assertTrue(state.temperatureKnown[2]);
-        assertTrue(state.temperatureKnown[3]);
-    }
-
-    @Test
-    public void temperatureExpiresWithItsWheelAndNewWheelDoesNotRefreshIt() {
-        TpmsState state = TpmsState.empty()
-                .withWheelAt(0, 250, 31, 0, "adapter", 1_000L)
-                .withWheelAt(1, 255, 32, 0, "adapter", 150_000L);
-
-        assertTrue(state.isTemperatureFresh(0, 181_000L));
-        assertFalse(state.isTemperatureFresh(0, 181_001L));
-        assertTrue(state.isTemperatureFresh(1, 181_001L));
-    }
-
-    @Test
-    public void constructorDoesNotInventMissingTemperatureArrayEntries() {
-        TpmsState state = new TpmsState(new boolean[]{true, true, true, true},
-                new int[]{250, 250, 250, 250}, new int[]{0}, new int[4],
-                "legacy", 1_000L);
-        assertArrayEquals(new boolean[]{true, false, false, false}, state.temperatureKnown);
     }
 }

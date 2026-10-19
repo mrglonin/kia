@@ -33,11 +33,10 @@ public final class TeyesTpmsWidgetPolicyTest {
         TeyesTpmsWidgetPolicy policy = new TeyesTpmsWidgetPolicy();
         policy.observe(state, TpmsController.observedWheelMask(frame), 5000);
         String[] expected = {"2.57", "2.55", "2.53", "2.59"};
-        String[] expectedTemperature = {"35", "36", "35", "34"};
         for (int wheel = 0; wheel < 4; wheel++) {
             TeyesTpmsWidgetPolicy.WheelValue value = policy.project(wheel, 5000, true, 220, 300);
             assertEquals(expected[wheel], value.pressure);
-            assertEquals(expectedTemperature[wheel], value.temperature);
+            assertEquals("__", value.temperature);
             assertFalse(value.alert);
         }
     }
@@ -64,7 +63,6 @@ public final class TeyesTpmsWidgetPolicyTest {
         assertFalse(policy.isFresh(0, 181001));
         assertEquals(-1, policy.nextExpiryDelayMs(181001));
         assertEquals("__", policy.project(0, 181001, true, 220, 300).pressure);
-        assertEquals("__", policy.project(0, 181001, true, 220, 300).temperature);
     }
 
     @Test
@@ -86,11 +84,8 @@ public final class TeyesTpmsWidgetPolicyTest {
                 .withWheelAt(1, 255, 35, 0, "hardware", 200000);
         policy.observe(mixed, 2, 150000);
         assertEquals("2.40", policy.project(0, 150000, false, 220, 300).pressure);
-        assertEquals("20", policy.project(0, 150000, false, 220, 300).temperature);
         assertEquals("__", policy.project(0, 181001, false, 220, 300).pressure);
-        assertEquals("__", policy.project(0, 181001, false, 220, 300).temperature);
         assertEquals("2.55", policy.project(1, 181001, false, 220, 300).pressure);
-        assertEquals("35", policy.project(1, 181001, false, 220, 300).temperature);
     }
 
     @Test
@@ -108,47 +103,12 @@ public final class TeyesTpmsWidgetPolicyTest {
     }
 
     @Test
-    public void hardwareTemperatureWarningSurvivesMissingNumericTemperature() {
+    public void unverifiedTemperatureNeverBecomesWidgetTemperatureOrTemperatureAlarm() {
         TeyesTpmsWidgetPolicy policy = new TeyesTpmsWidgetPolicy();
-        TpmsState unknownTemperature = TpmsState.empty()
-                .withWheelAt(0, 250, 160, false, 0x04, "hardware", 123456);
-        policy.observe(unknownTemperature, 1, 1000);
+        policy.observe(wheel(0, 250, 160, 0x04), 1, 1000);
         TeyesTpmsWidgetPolicy.WheelValue value = policy.project(0, 1000, true, 220, 300);
         assertEquals("__", value.temperature);
-        assertTrue(value.alert);
-    }
-
-    @Test
-    public void verifiedTemperatureAndItsWarningAreForwarded() {
-        TeyesTpmsWidgetPolicy policy = new TeyesTpmsWidgetPolicy();
-        policy.observe(wheel(0, 250, 91, 0x04), 1, 1000);
-        assertEquals("91", policy.project(0, 1000, true, 220, 300).temperature);
-        assertTrue(policy.project(0, 1000, true, 220, 300).alert);
-        assertFalse(policy.project(0, 1000, false, 220, 300).alert);
-    }
-
-    @Test
-    public void validPressureWithMissingTemperatureClearsPreviousTemperature() {
-        TeyesTpmsWidgetPolicy policy = new TeyesTpmsWidgetPolicy();
-        policy.observe(wheel(0, 250, 31, 0), 1, 1000);
-        TpmsState pressureOnly = TpmsState.empty()
-                .withWheelAt(0, 255, 0, false, 0, "hardware", 123456);
-        policy.observe(pressureOnly, 1, 2000);
-        TeyesTpmsWidgetPolicy.WheelValue value = policy.project(0, 2000, true, 220, 300);
-        assertEquals("2.55", value.pressure);
-        assertEquals("__", value.temperature);
-    }
-
-    @Test
-    public void nativePlaceholdersNeverProjectAsMinus55OrClamped160() {
-        byte[] frame = nativeFrame(new int[]{148, 149, 150, 147}, new int[]{0, 0xff, 216, 55});
-        TpmsState state = TpmsController.parseAdapterFrame(frame, null, 1000);
-        TeyesTpmsWidgetPolicy policy = new TeyesTpmsWidgetPolicy();
-        policy.observe(state, 15, 1000);
-        assertEquals("__", policy.project(TpmsState.WHEEL_FR, 1000, true, 220, 300).temperature);
-        assertEquals("__", policy.project(TpmsState.WHEEL_FL, 1000, true, 220, 300).temperature);
-        assertEquals("__", policy.project(TpmsState.WHEEL_RR, 1000, true, 220, 300).temperature);
-        assertEquals("0", policy.project(TpmsState.WHEEL_RL, 1000, true, 220, 300).temperature);
+        assertFalse(value.alert);
     }
 
     @Test

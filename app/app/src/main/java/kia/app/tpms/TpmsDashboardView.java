@@ -827,7 +827,7 @@ public final class TpmsDashboardView extends View {
     }
 
     private String tempText(int wheel) {
-        return state.temperatureKnown[wheel] ? String.valueOf(state.temperatureC[wheel]) : "--";
+        return String.valueOf(state.temperatureC[wheel]);
     }
 
     private boolean hasAlert() {

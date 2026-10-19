@@ -21,7 +21,7 @@ final class CompassLocationPolicy {
                 && speedMetersPerSecond >= MIN_GPS_BEARING_SPEED_MPS;
     }
 
-    static boolean freshLastKnown(long nowElapsedNanos, long fixElapsedNanos, long maxAgeMs) {
+    static boolean freshSample(long nowElapsedNanos, long fixElapsedNanos, long maxAgeMs) {
         if (maxAgeMs < 0L || nowElapsedNanos <= 0L || fixElapsedNanos <= 0L
                 || fixElapsedNanos > nowElapsedNanos) {
             return false;
@@ -31,8 +31,27 @@ final class CompassLocationPolicy {
         return nowElapsedNanos - fixElapsedNanos <= maxAgeNanos;
     }
 
-    static boolean sameLastKnownSample(long fixElapsedNanos, long previousElapsedNanos) {
-        return fixElapsedNanos > 0L && fixElapsedNanos == previousElapsedNanos;
+    static boolean newerSample(long fixElapsedNanos, long previousElapsedNanos) {
+        return fixElapsedNanos > 0L && fixElapsedNanos > previousElapsedNanos;
+    }
+
+    static boolean stationarySpeed(boolean hasSpeed, float speedMetersPerSecond) {
+        return hasSpeed && !Float.isNaN(speedMetersPerSecond)
+                && !Float.isInfinite(speedMetersPerSecond)
+                && speedMetersPerSecond >= 0f
+                && speedMetersPerSecond < MIN_GPS_BEARING_SPEED_MPS;
+    }
+
+    static boolean newerSpeedSample(boolean hasSpeed, float speedMetersPerSecond,
+                                    long fixElapsedNanos, long previousElapsedNanos,
+                                    float previousSpeedMetersPerSecond) {
+        if (!hasSpeed || !Float.isFinite(speedMetersPerSecond) || speedMetersPerSecond < 0f) {
+            return false;
+        }
+        return newerSample(fixElapsedNanos, previousElapsedNanos)
+                || (fixElapsedNanos > 0L && fixElapsedNanos == previousElapsedNanos
+                && stationarySpeed(true, speedMetersPerSecond)
+                && previousSpeedMetersPerSecond >= MIN_GPS_BEARING_SPEED_MPS);
     }
 
     static int effectiveSensorAccuracy(int callbackAccuracy, int eventAccuracy) {

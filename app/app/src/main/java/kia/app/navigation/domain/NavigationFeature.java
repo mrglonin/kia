@@ -487,20 +487,40 @@ public final class NavigationFeature {
     }
 
     public synchronized void updateGpsLocation(Location location) {
+        updateGpsLocation(location, true, true);
+    }
+
+    public synchronized void updateGpsLocation(Location location, boolean updateSpeed, boolean updateBearing) {
         if (location == null) return;
         long now = System.currentTimeMillis();
-        float speed = location.hasSpeed() ? Math.max(0f, location.getSpeed()) : Float.NaN;
         rememberCurrentPoint(location.getLatitude(), location.getLongitude(), now,
                 location.hasAccuracy() ? location.getAccuracy() : Float.NaN,
                 "gps_location");
-        if (location.hasBearing() && gpsBearingReliable(speed)) {
+        applyGpsMotion(location, updateSpeed, updateBearing, now);
+        onGpsUpdated(now);
+    }
+
+    /** Accept independently ordered motion fields without rewinding the current position. */
+    public synchronized void updateGpsMotion(Location location, boolean updateSpeed, boolean updateBearing) {
+        if (location == null || (!updateSpeed && !updateBearing)) return;
+        long now = System.currentTimeMillis();
+        applyGpsMotion(location, updateSpeed, updateBearing, now);
+        onGpsUpdated(now);
+    }
+
+    private void applyGpsMotion(Location location, boolean updateSpeed, boolean updateBearing, long now) {
+        float speed = location.hasSpeed() ? Math.max(0f, location.getSpeed()) : Float.NaN;
+        if (updateBearing && location.hasBearing() && gpsBearingReliable(speed)) {
             lastGpsBearing = normalizeDegrees(location.getBearing());
             lastGpsBearingAt = now;
         }
-        if (location.hasSpeed()) {
+        if (updateSpeed && location.hasSpeed()) {
             lastGpsSpeedMetersPerSecond = speed;
             updateGpsSpeed(location.getSpeed());
         }
+    }
+
+    private void onGpsUpdated(long now) {
         expireStaleYandexRoadSpeedLimit(now, "gps");
         maybeRecoverStaleFinishFromMovement();
         if (maybeAutoFinishStaleNearDestination(now)) return;
