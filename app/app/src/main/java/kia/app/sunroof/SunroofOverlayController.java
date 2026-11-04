@@ -6,12 +6,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.PixelFormat;
-import android.hardware.input.InputManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.util.DisplayMetrics;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -25,10 +26,12 @@ import kia.app.core.model.VehicleState;
 import kia.app.core.settings.AppSettings;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.tpms.TpmsAlertController;
+import kia.app.tpms.TpmsWarningOverlayController;
 
 /** Owns roof windows and audio; all vehicle decisions and Android mutations run on main. */
 public final class SunroofOverlayController {
     private static SunroofOverlayController instance;
+    static final long DEFERRED_TRANSITION_TTL_MS = 10_000L;
     private final Context app;
     private final Context windowContext;
     private final WindowManager windowManager;
@@ -39,11 +42,14 @@ public final class SunroofOverlayController {
     private final TeyesSunroofObserver observer;
     private volatile long generation;
     private volatile String status = "Люк: наблюдение выключено";
+    private volatile String diagnostics = "running=false window=false";
+    private String lastDiagnosticKey = "";
     private boolean running;
     private boolean observerRunning;
     private boolean accKnown;
     private boolean accOn;
     private boolean asleep;
+    private boolean screenOff;
     private boolean permissionLogged;
     private boolean windowFailureLogged;
     private boolean qaMode;
@@ -63,6 +69,9 @@ public final class SunroofOverlayController {
     private SunroofAlertPolicy.Kind shownKind = SunroofAlertPolicy.Kind.NONE;
     private boolean shownDemo;
     private boolean audioEnabled;
+    private long realSequence = Long.MIN_VALUE;
+    private long realSequenceStartedAt;
+    private boolean realSequenceDeferred;
     private BroadcastReceiver stateReceiver;
     private BroadcastReceiver systemReceiver;
     private Runnable finishTransient;
@@ -84,6 +93,7 @@ public final class SunroofOverlayController {
             @Override public void onAcc(boolean known, boolean on, long elapsed, String source) {
                 postCurrent(() -> {
                     if (!running || !observerRunning) return;
+                    SunroofStateMemory.observeAcc(app, known, on);
                     if (known && accKnown && on != accOn) cancelDemo();
                     accKnown = known;
                     accOn = on;
@@ -99,7 +109,10 @@ public final class SunroofOverlayController {
                 postCurrent(() -> {
                     if (!running || !observerRunning) return;
                     asleep = sleeping;
-                    if (sleeping) dismissOnMain();
+                    if (sleeping) {
+                        cancelDemo();
+                        hide();
+                    }
                     applyOnMain();
                 });
             }
@@ -138,8 +151,13 @@ public final class SunroofOverlayController {
             hide();
             accKnown = false;
             asleep = false;
+            screenOff = false;
             realSnapshotTaken = false;
+            realSequence = Long.MIN_VALUE;
+            realSequenceDeferred = false;
             status = "Люк: наблюдение выключено";
+            reportDecision("stopped", null, AppSettings.sunroofOverlayEnabled(app), false,
+                    lastRealEpoch, StateStore.vehicle());
         };
         if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run();
         else main.post(cleanup);
@@ -196,7 +214,7 @@ public final class SunroofOverlayController {
     }
 
     public String statusSummary() {
-        return status + "\n" + observer.statusSummary();
+        return status + "\n" + diagnostics + "\n" + observer.statusSummary();
     }
 
     public static boolean canDrawOverlays(Context context) {
@@ -227,6 +245,9 @@ public final class SunroofOverlayController {
         }
         AdapterGateway gateway = AdapterGateway.get(app);
         VehicleState vehicle = StateStore.vehicle();
+        SunroofStateMemory.Snapshot remembered = SunroofStateMemory.snapshot(app);
+        PowerManager power = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
+        if (power != null) screenOff = !power.isInteractive();
         boolean connected = gateway.usbReady();
         long epoch = gateway.connectionEpoch();
         boolean realChanged = realSnapshotTaken && (lastRealRoofKnown != vehicle.sunroofKnown
@@ -236,30 +257,72 @@ public final class SunroofOverlayController {
         lastRealRoofKnown = vehicle.sunroofKnown;
         lastRealRoofOpen = vehicle.sunroofOpen;
         lastRealEpoch = epoch;
-        if (realChanged) cancelDemo();
+        if (realChanged) {
+            cancelDemo();
+            AppLog.line(app, "Sunroof source: known=" + vehicle.sunroofKnown
+                    + " open=" + vehicle.sunroofOpen + " usbEpoch=" + epoch
+                    + " roofEpoch=" + vehicle.sunroofConnectionEpoch
+                    + " roofAt=" + vehicle.sunroofReceivedElapsed);
+        }
+        long now = SystemClock.elapsedRealtime();
         SunroofAlertPolicy.Decision real = policy.update(new SunroofAlertPolicy.Input(
                 enabled, AppSettings.sunroofParkingWarningEnabled(app), connected, epoch,
                 vehicle.sunroofKnown, vehicle.sunroofOpen, vehicle.sunroofConnectionEpoch,
-                vehicle.sunroofReceivedElapsed, accKnown, accOn, SystemClock.elapsedRealtime()));
+                vehicle.sunroofReceivedElapsed, accKnown, accOn, now,
+                remembered.known, remembered.open, remembered.acknowledged));
+        if (real.sequence != realSequence) {
+            realSequence = real.sequence;
+            realSequenceStartedAt = now;
+            realSequenceDeferred = false;
+        }
         boolean hazard = higherPriorityHazard();
         if (hazard) cancelDemo();
-        if (hazard || asleep) {
+        if (asleep || screenOff) {
             if (real.kind == SunroofAlertPolicy.Kind.OPENING
                     || real.kind == SunroofAlertPolicy.Kind.CLOSING) policy.finish(real.sequence);
             hide();
-            status = hazard ? "Люк: приоритет предупреждения TPMS/RCTA" : "Люк: магнитола засыпает";
+            status = screenOff ? "Люк: экран выключен" : "Люк: магнитола засыпает";
+            reportDecision(screenOff ? "screen_off" : "sleep", real, enabled, connected, epoch, vehicle);
             return;
+        }
+        if (hazard) {
+            if (real.kind == SunroofAlertPolicy.Kind.OPENING
+                    || real.kind == SunroofAlertPolicy.Kind.CLOSING) {
+                realSequenceDeferred = true;
+                if (now - realSequenceStartedAt >= DEFERRED_TRANSITION_TTL_MS) {
+                    policy.finish(real.sequence);
+                }
+            }
+            hide();
+            status = "Люк: ожидает закрытия критического предупреждения TPMS/RCTA";
+            reportDecision("critical_defer", real, enabled, connected, epoch, vehicle);
+            return;
+        }
+        if (realSequenceDeferred) {
+            if (now - realSequenceStartedAt >= DEFERRED_TRANSITION_TTL_MS
+                    && (real.kind == SunroofAlertPolicy.Kind.OPENING
+                    || real.kind == SunroofAlertPolicy.Kind.CLOSING)) {
+                real = policy.finish(real.sequence);
+            }
+            // Once an eligible deferred event is shown, let its full animation complete.
+            realSequenceDeferred = false;
         }
         if (real.kind == SunroofAlertPolicy.Kind.PARKING_WARNING) cancelDemo();
         SunroofAlertPolicy.Decision next = demo == null ? real : demo;
+        boolean usingMemory = remembered.known && (!connected || !vehicle.sunroofKnown
+                || vehicle.sunroofConnectionEpoch != epoch);
         status = demo != null ? "Люк: демонстрация, данные автомобиля не изменены"
                 : !enabled ? "Люк: оповещения выключены"
+                : usingMemory ? "Люк: последнее сохранённое — "
+                + (remembered.open ? "открыт" : "закрыт")
+                + (next.kind == SunroofAlertPolicy.Kind.PARKING_WARNING ? " · предупреждение" : "")
                 : !connected ? "Люк: ожидается USB CAN"
                 : !vehicle.sunroofKnown ? "Люк: ожидается состояние"
                 : "Люк: " + (vehicle.sunroofOpen ? "открыт" : "закрыт")
                 + (next.kind == SunroofAlertPolicy.Kind.PARKING_WARNING ? " · предупреждение" : "");
         if (next.kind == SunroofAlertPolicy.Kind.NONE) {
             hide();
+            reportDecision("none", next, enabled, connected, epoch, vehicle);
             return;
         }
         if (!canDrawOverlays(app)) {
@@ -269,15 +332,47 @@ public final class SunroofOverlayController {
                 permissionLogged = true;
                 AppLog.line(app, "Sunroof overlay: нужно разрешение поверх окон");
             }
+            reportDecision("permission", next, enabled, connected, epoch, vehicle);
             return;
         }
         permissionLogged = false;
         show(next, demo != null);
+        reportDecision(overlay == null ? "window_failed" : "shown", next,
+                enabled, connected, epoch, vehicle);
+    }
+
+    private void reportDecision(String reason, SunroofAlertPolicy.Decision decision,
+                                boolean enabled, boolean connected, long epoch,
+                                VehicleState vehicle) {
+        boolean permission = canDrawOverlays(app);
+        boolean shown = overlay != null && overlay.isAttachedToWindow();
+        SunroofStateMemory.Snapshot remembered = SunroofStateMemory.snapshot(app);
+        String facts = "reason=" + reason + " running=" + running + " master=" + enabled
+                + " permission=" + permission + " window=" + shown
+                + " usb=" + connected + " usbEpoch=" + epoch
+                + " roofKnown=" + vehicle.sunroofKnown + " roofOpen=" + vehicle.sunroofOpen
+                + " roofEpoch=" + vehicle.sunroofConnectionEpoch
+                + " cacheKnown=" + remembered.known + " cacheOpen=" + remembered.open
+                + " cacheAck=" + remembered.acknowledged
+                + " accKnown=" + accKnown + " accOn=" + accOn + " asleep=" + asleep
+                + " screenOff=" + screenOff
+                + " kind=" + (decision == null ? SunroofAlertPolicy.Kind.NONE : decision.kind)
+                + " sequence=" + (decision == null
+                ? realSequence == Long.MIN_VALUE ? -1L : realSequence : decision.sequence)
+                + " demo=" + (demo != null);
+        diagnostics = facts + " roofAt=" + vehicle.sunroofReceivedElapsed
+                + " savedAt=" + remembered.recordedAt;
+        // Timestamp-only CAN repeats and the 1-second service tick must not flood the log.
+        if (!facts.equals(lastDiagnosticKey)) {
+            lastDiagnosticKey = facts;
+            AppLog.line(app, "Sunroof decision: " + diagnostics);
+        }
     }
 
     private boolean higherPriorityHazard() {
         return (StateStore.rcta().active() && AppSettings.rctaOverlayEnabled(app))
-                || TpmsAlertController.hasWarnings(app, StateStore.tpms());
+                || (TpmsWarningOverlayController.get(app).isShowing()
+                && TpmsAlertController.hasCriticalWarnings(app, StateStore.tpms()));
     }
 
     private void previewOnMain(boolean open, boolean parking) {
@@ -322,6 +417,9 @@ public final class SunroofOverlayController {
             demo = qaPolicy.dismiss();
             if (demo.kind == SunroofAlertPolicy.Kind.NONE) demo = null;
         } else {
+            if (policy.current().kind == SunroofAlertPolicy.Kind.PARKING_WARNING) {
+                SunroofStateMemory.acknowledge(app);
+            }
             policy.dismiss();
         }
         hide();
@@ -329,24 +427,25 @@ public final class SunroofOverlayController {
 
     private void show(SunroofAlertPolicy.Decision decision, boolean demonstration) {
         boolean warning = decision.kind == SunroofAlertPolicy.Kind.PARKING_WARNING;
-        boolean allowAudio = warning ? AppSettings.sunroofSoundEnabled(app)
-                : AppSettings.sunroofTransitionSoundEnabled(app);
+        boolean allowAudio = warning || AppSettings.sunroofTransitionSoundEnabled(app);
         sound.setEnabled(allowAudio);
         if (overlay != null && !overlay.isAttachedToWindow()) hide();
         if (overlay != null && shownSequence == decision.sequence
                 && shownKind == decision.kind && shownDemo == demonstration) {
-            if (allowAudio && !audioEnabled) sound.play(warning);
+            if (allowAudio && !audioEnabled) sound.play(decision.kind);
             audioEnabled = allowAudio;
             return;
         }
         hide();
         if (windowManager == null) return;
         SunroofOverlayView next = new SunroofOverlayView(windowContext);
+        float carWidthPx = SunroofOverlayGeometry.carWidthPx(displayWidthPx());
+        next.setCompactCarWidthPx(warning ? 0f : carWidthPx);
         next.setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
         try {
-            windowManager.addView(next, layoutParams(warning));
+            windowManager.addView(next, layoutParams(warning, carWidthPx));
             overlay = next;
             shownSequence = decision.sequence;
             shownKind = decision.kind;
@@ -367,7 +466,7 @@ public final class SunroofOverlayController {
         windowFailureLogged = false;
         sound.setEnabled(allowAudio);
         audioEnabled = allowAudio;
-        if (allowAudio) sound.play(warning);
+        if (allowAudio) sound.play(decision.kind);
         if (!warning) {
             long sequence = decision.sequence;
             long current = generation;
@@ -407,35 +506,41 @@ public final class SunroofOverlayController {
         else policy.finish(decision.sequence);
     }
 
-    private WindowManager.LayoutParams layoutParams(boolean warning) {
+    private WindowManager.LayoutParams layoutParams(boolean warning, float carWidthPx) {
         int flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-        if (!warning) flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        if (!warning) flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                 | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+                warning ? ViewGroup.LayoutParams.MATCH_PARENT
+                        : SunroofOverlayGeometry.compactWidthPx(carWidthPx),
+                warning ? ViewGroup.LayoutParams.MATCH_PARENT
+                        : SunroofOverlayGeometry.compactHeightPx(carWidthPx),
                 overlayWindowType(), flags, PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.START;
+        params.gravity = warning ? Gravity.TOP | Gravity.START : Gravity.CENTER;
         params.setTitle("Kia sunroof");
-        if (!warning && Build.VERSION.SDK_INT >= 31) {
-            // Android 12+ uses window alpha, rather than transparent canvas pixels, when
-            // deciding whether touches may pass through an application overlay.
-            params.alpha = .79f;
-            try {
-                InputManager input = app.getSystemService(InputManager.class);
-                if (input != null) {
-                    params.alpha = Math.max(0f, Math.min(params.alpha,
-                            input.getMaximumObscuringOpacityForTouch()));
-                }
-            } catch (RuntimeException ignored) {
-                // The platform default limit is 0.8 when the optional setting is unavailable.
-            }
-        }
+        params.alpha = 1f;
         if (Build.VERSION.SDK_INT >= 28) {
             params.layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
         return params;
+    }
+
+    private int displayWidthPx() {
+        if (Build.VERSION.SDK_INT >= 30 && windowManager != null) {
+            try {
+                int width = windowManager.getCurrentWindowMetrics().getBounds().width();
+                if (width > 0) return width;
+            } catch (RuntimeException ignored) {
+                // Some vendor firmware does not supply metrics for an overlay window context.
+            }
+        }
+        DisplayMetrics metrics = new DisplayMetrics();
+        Display display = windowManager == null ? null : windowManager.getDefaultDisplay();
+        if (display != null) display.getRealMetrics(metrics);
+        else metrics.setTo(app.getResources().getDisplayMetrics());
+        return metrics.widthPixels;
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -447,12 +552,25 @@ public final class SunroofOverlayController {
         systemReceiver = new BroadcastReceiver() {
             @Override public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
-                if (Intent.ACTION_SCREEN_OFF.equals(action)
-                        || Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) dismissCurrent();
+                if (Intent.ACTION_SCREEN_OFF.equals(action)) {
+                    screenOff = true;
+                    cancelDemo();
+                    hide();
+                } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
+                    screenOff = false;
+                    asleep = false;
+                    apply();
+                } else if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
+                    String reason = intent.getStringExtra("reason");
+                    if ("homekey".equals(reason) || "recentapps".equals(reason)) {
+                        dismissCurrent();
+                    }
+                }
             }
         };
         IntentFilter states = new IntentFilter(AppIds.ACTION_STATE_CHANGED);
         IntentFilter system = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+        system.addAction(Intent.ACTION_SCREEN_ON);
         system.addAction(Intent.ACTION_CLOSE_SYSTEM_DIALOGS);
         if (Build.VERSION.SDK_INT >= 33) {
             app.registerReceiver(stateReceiver, states, Context.RECEIVER_NOT_EXPORTED);

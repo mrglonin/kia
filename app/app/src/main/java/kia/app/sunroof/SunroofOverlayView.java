@@ -20,7 +20,7 @@ import kia.app.R;
 
 /** The approved miniature, drawn in screen pixels without density-dependent scaling. */
 public final class SunroofOverlayView extends View {
-    static final float SCREEN_WIDTH_FRACTION = .161f;
+    static final float SCREEN_WIDTH_FRACTION = SunroofOverlayGeometry.SCREEN_WIDTH_FRACTION;
     static final long TRANSIENT_HOLD_MS = 3_000L;
     static final long FADE_MS = 400L;
     static final long TRANSIENT_DURATION_MS = TRANSIENT_HOLD_MS + FADE_MS;
@@ -38,6 +38,7 @@ public final class SunroofOverlayView extends View {
     private ValueAnimator pulse;
     private float roofOpen;
     private float warningPulse = 1f;
+    private float compactCarWidthPx;
     private boolean warning;
     private Runnable dismissAction;
 
@@ -61,7 +62,7 @@ public final class SunroofOverlayView extends View {
                 : kind == SunroofAlertPolicy.Kind.OPENING ? "Люк открывается" : "Люк закрывается");
         setFocusable(warning);
         setFocusableInTouchMode(warning);
-        setClickable(warning);
+        setClickable(true);
         setAlpha(1f);
         warningPulse = 1f;
         roofOpen = kind == SunroofAlertPolicy.Kind.CLOSING || warning ? 1f : 0f;
@@ -102,6 +103,11 @@ public final class SunroofOverlayView extends View {
         invalidate();
     }
 
+    public void setCompactCarWidthPx(float widthPx) {
+        compactCarWidthPx = Math.max(0f, widthPx);
+        invalidate();
+    }
+
     public void stopAnimations() {
         if (movement != null) movement.cancel();
         if (appearance != null) appearance.cancel();
@@ -119,14 +125,12 @@ public final class SunroofOverlayView extends View {
     }
 
     @Override public boolean onTouchEvent(MotionEvent event) {
-        if (!warning) return false;
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) performClick();
         return true;
     }
 
     @Override public boolean performClick() {
         super.performClick();
-        if (!warning) return false;
         acknowledge();
         return true;
     }
@@ -145,8 +149,9 @@ public final class SunroofOverlayView extends View {
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         if (car == null || getWidth() <= 0 || getHeight() <= 0) return;
-        float width = getWidth() * SCREEN_WIDTH_FRACTION;
-        float height = width * 1.5f;
+        float width = compactCarWidthPx > 0f ? compactCarWidthPx
+                : SunroofOverlayGeometry.carWidthPx(getWidth());
+        float height = width * SunroofOverlayGeometry.HEIGHT_PER_WIDTH;
         float left = (getWidth() - width) * .5f;
         float top = (getHeight() - height) * .5f;
         carBounds.set(left, top, left + width, top + height);

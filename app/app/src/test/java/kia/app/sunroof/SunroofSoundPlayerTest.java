@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import kia.app.R;
+
 import static org.junit.Assert.*;
 
 /** Exercises cancellation and timing without Android playback, speakers, or sleeping. */
@@ -13,6 +15,54 @@ public final class SunroofSoundPlayerTest {
     private final FakeScheduler clock = new FakeScheduler();
     private final FakeFactory factory = new FakeFactory();
     private final SunroofSoundPlayer sound = new SunroofSoundPlayer(clock, factory);
+
+    @Test public void openingAndClosingSelectTheSameNativeResourceAndRemainOneShot() {
+        sound.play(SunroofAlertPolicy.Kind.OPENING);
+        assertEquals(R.raw.sunroof_transition_teyes, (int) factory.resources.get(0));
+        clock.advanceTo(3_000);
+        sound.play(SunroofAlertPolicy.Kind.CLOSING);
+        assertEquals(R.raw.sunroof_transition_teyes, (int) factory.resources.get(1));
+        clock.advanceTo(20_000);
+        assertEquals(2, factory.resources.size());
+        assertEquals(2, factory.started);
+    }
+
+    @Test public void parkingWarningUsesItsOwnCueAtAllThreeFixedSlots() {
+        sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
+        clock.advanceTo(10_000);
+        assertEquals(3, factory.resources.size());
+        assertNotEquals(R.raw.sunroof_transition_teyes, R.raw.sunroof_warning_adas);
+        for (int resource : factory.resources) {
+            assertEquals(R.raw.sunroof_warning_adas, resource);
+        }
+        assertEquals(0, factory.live);
+    }
+
+    @Test public void replacingWarningWithClosingCancelsOldWarningCueAndCallbacks() {
+        sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
+        List<Runnable> stale = clock.pendingRunnables();
+        FakeClip warning = factory.clips.get(0);
+        clock.advanceTo(100);
+        sound.play(SunroofAlertPolicy.Kind.CLOSING);
+        warning.complete.run();
+        for (Runnable callback : stale) callback.run();
+        assertEquals(2, factory.resources.size());
+        assertEquals(R.raw.sunroof_transition_teyes, (int) factory.resources.get(1));
+        assertEquals(1, factory.live);
+        clock.advanceTo(20_000);
+        assertEquals(2, factory.resources.size());
+        assertEquals(0, factory.live);
+    }
+
+    @Test public void noneAndNullStopWithoutSelectingOrStartingAnyCue() {
+        sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
+        sound.play(SunroofAlertPolicy.Kind.NONE);
+        sound.play((SunroofAlertPolicy.Kind) null);
+        clock.advanceTo(20_000);
+        assertEquals(1, factory.resources.size());
+        assertEquals(1, factory.started);
+        assertEquals(0, factory.live);
+    }
 
     @Test public void transitionPlaysExactlyOnceAndReleasesOnCompletion() {
         sound.play(false);
@@ -257,6 +307,7 @@ public final class SunroofSoundPlayerTest {
 
     private final class FakeFactory implements SunroofSoundPlayer.Factory {
         private final List<FakeClip> clips = new ArrayList<>();
+        private final List<Integer> resources = new ArrayList<>();
         private boolean returnNull;
         private boolean throwOnCreate;
         private boolean throwOnStart;
@@ -266,7 +317,9 @@ public final class SunroofSoundPlayerTest {
         private int maxLive;
         private long createDelay;
 
-        @Override public SunroofSoundPlayer.Clip create(Runnable complete, Runnable error) {
+        @Override public SunroofSoundPlayer.Clip create(int resource,
+                Runnable complete, Runnable error) {
+            resources.add(resource);
             attempts++;
             if (throwOnCreate) throw new IllegalStateException("create");
             if (returnNull) return null;

@@ -354,4 +354,57 @@ public final class SunroofAlertPolicyTest {
         policy.dismiss();
         assertEquals(PARKING_WARNING, sample(true, 300, false).kind);
     }
+
+    private SunroofAlertPolicy.Input remembered(boolean connected, boolean liveKnown,
+            boolean liveOpen, boolean savedOpen, boolean acknowledged, boolean on, long now) {
+        return new SunroofAlertPolicy.Input(true, true, connected, 1L, liveKnown, liveOpen,
+                liveKnown ? 1L : 0L, liveKnown ? now : 0L, true, on, now,
+                true, savedOpen, acknowledged);
+    }
+
+    @Test public void savedOpenWarnsOnDisconnectedStartupWithoutAnyNewRoofFrame() {
+        assertEquals(PARKING_WARNING,
+                policy.update(remembered(false, false, false, true, false, false, 900_000L)).kind);
+    }
+
+    @Test public void savedClosedNeverWarnsOnDisconnectedStartup() {
+        assertEquals(NONE,
+                policy.update(remembered(false, false, false, false, false, false, 900_000L)).kind);
+    }
+
+    @Test public void sparseRoofUpdatesRemainUsableLongAfterUsbDisconnect() {
+        policy.update(remembered(true, true, true, true, false, true, 100L));
+        policy.update(remembered(false, false, false, true, false, true, 200L));
+        assertEquals(PARKING_WARNING,
+                policy.update(remembered(false, false, false, true, false, false, 900_000L)).kind);
+    }
+
+    @Test public void savedCloseClearsWarningImmediatelyWithoutFreshUsbPosition() {
+        policy.update(remembered(false, false, false, true, false, false, 100L));
+        assertEquals(NONE,
+                policy.update(remembered(false, false, false, false, false, false, 200L)).kind);
+    }
+
+    @Test public void savedClosedVetoesHistoricalOpenDisconnectGrace() {
+        sample(true, 100, true);
+        assertEquals(NONE,
+                policy.update(remembered(false, false, false, false, false, false, 200L)).kind);
+    }
+
+    @Test public void restoredAcknowledgementSuppressesSameOffEpisodeAndOnRearms() {
+        assertEquals(NONE,
+                policy.update(remembered(false, false, false, true, true, false, 100L)).kind);
+        policy.update(remembered(false, false, false, true, false, true, 200L));
+        assertEquals(PARKING_WARNING,
+                policy.update(remembered(false, false, false, true, false, false, 300L)).kind);
+    }
+
+    @Test public void savedPositionDoesNotInventAnOpeningAnimationOnReconnect() {
+        assertEquals(NONE,
+                policy.update(remembered(false, false, false, true, false, true, 100L)).kind);
+        assertEquals(NONE,
+                policy.update(remembered(true, true, true, true, false, true, 200L)).kind);
+        assertEquals(CLOSING,
+                policy.update(remembered(true, true, false, false, false, true, 300L)).kind);
+    }
 }

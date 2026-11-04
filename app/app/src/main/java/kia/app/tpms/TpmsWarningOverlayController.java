@@ -103,6 +103,11 @@ public final class TpmsWarningOverlayController {
         // TPMS warnings must stay in the real overlay layer, even while Kia is open.
     }
 
+    /** Main-thread window visibility, including acknowledgement and lost permission. */
+    public boolean isShowing() {
+        return overlay != null && overlay.isAttachedToWindow();
+    }
+
     private void applyOnMain(int[] levels, String details) {
         lifecycle.observe(levels, SystemClock.elapsedRealtime());
         if (!lifecycle.shouldShow()) {

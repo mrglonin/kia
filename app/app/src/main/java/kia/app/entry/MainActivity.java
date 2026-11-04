@@ -4102,25 +4102,12 @@ public final class MainActivity extends Activity {
                     AppSettings.setSunroofParkingWarningEnabled(this, checked);
                     SunroofOverlayController.get(this).apply();
                 });
-        addInlineSwitch(panel, "Звук предупреждения TEYES",
-                "короткий сигнал при открытом люке после выключения зажигания",
-                AppSettings.sunroofSoundEnabled(this), (button, checked) -> {
-                    AppSettings.setSunroofSoundEnabled(this, checked);
-                    SunroofOverlayController.get(this).apply();
-                });
         addInlineSwitch(panel, "Звук открытия и закрытия",
-                "сигнал вместе с короткой анимацией люка",
+                "один общий сигнал; звук предупреждения при выключении зажигания работает всегда",
                 AppSettings.sunroofTransitionSoundEnabled(this), (button, checked) -> {
                     AppSettings.setSunroofTransitionSoundEnabled(this, checked);
                     SunroofOverlayController.get(this).apply();
                 });
-        addActionGrid(panel,
-                action("Открытие", "посмотреть анимацию", COLOR_ACCENT_BLUE,
-                        () -> SunroofOverlayController.get(this).preview(true)),
-                action("Закрытие", "посмотреть анимацию", COLOR_ACCENT_BLUE,
-                        () -> SunroofOverlayController.get(this).preview(false)),
-                action("Предупреждение", "проверить показ и сигнал", COLOR_WARNING,
-                        () -> SunroofOverlayController.get(this).previewParkingWarning()));
         return panel;
     }
 

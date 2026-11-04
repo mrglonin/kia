@@ -13,10 +13,15 @@ import kia.app.media.domain.MediaFeature;
 import kia.app.rcta.RctaController;
 import kia.app.tpms.TpmsController;
 import kia.app.tpms.TeyesTpmsWidgetForwarder;
+import kia.app.sunroof.SunroofStateMemory;
 import kia.app.update.FirmwareUpdateController;
 
 public final class FrameRouter {
     private final Context app;
+    // This fence survives a USB disconnect clearing the live VehicleState. Old reader
+    // callbacks must not overwrite a newer persisted roof position after reconnect.
+    private long lastSunroofEpoch = -1L;
+    private long lastSunroofReceivedElapsed = -1L;
 
     public FrameRouter(Context context) {
         this.app = context.getApplicationContext();
@@ -108,16 +113,24 @@ public final class FrameRouter {
         if (parsed != null) applyCanFrame(parsed.canId, parsed.data);
     }
 
-    private boolean handleSunroof(byte[] frame, long connectionEpoch, long receivedElapsed) {
+    private synchronized boolean handleSunroof(byte[] frame, long connectionEpoch, long receivedElapsed) {
         int len = frame == null || frame.length < 6 ? 0 : Math.min(frame.length, frame[3] & 0xff);
         if (len != 7) return false;
+        if (connectionEpoch < lastSunroofEpoch
+                || (connectionEpoch == lastSunroofEpoch
+                && receivedElapsed < lastSunroofReceivedElapsed)) return true;
         boolean open = (frame[5] & 0xff) != 0;
         VehicleState current = StateStore.vehicle();
         if (current.sunroofKnown && (connectionEpoch < current.sunroofConnectionEpoch
                 || (connectionEpoch == current.sunroofConnectionEpoch
                 && receivedElapsed < current.sunroofReceivedElapsed))) return true;
         boolean changed = !current.sunroofKnown || current.sunroofOpen != open;
+        // The adapter may emit roof position only on a change. Keep the last actual
+        // position before notifying consumers; ACC-off need not bring another roof frame.
+        SunroofStateMemory.record(app, open, "0x76");
         StateStore.setVehicle(app, current.withSunroof(open, "0x76", receivedElapsed, connectionEpoch));
+        lastSunroofEpoch = connectionEpoch;
+        lastSunroofReceivedElapsed = receivedElapsed;
         if (changed) AppLog.line(app, "Sunroof: " + (open ? "open" : "closed"));
         return true;
     }

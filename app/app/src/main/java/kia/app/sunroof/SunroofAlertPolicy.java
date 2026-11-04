@@ -22,11 +22,24 @@ public final class SunroofAlertPolicy {
         public final boolean accKnown;
         public final boolean accOn;
         public final long nowElapsed;
+        public final boolean cachedRoofKnown;
+        public final boolean cachedRoofOpen;
+        public final boolean warningAcknowledged;
 
         public Input(boolean enabled, boolean parkingWarningEnabled, boolean connected,
                      long connectionEpoch, boolean roofKnown, boolean roofOpen,
                      long roofConnectionEpoch, long roofReceivedElapsed,
                      boolean accKnown, boolean accOn, long nowElapsed) {
+            this(enabled, parkingWarningEnabled, connected, connectionEpoch, roofKnown, roofOpen,
+                    roofConnectionEpoch, roofReceivedElapsed, accKnown, accOn, nowElapsed,
+                    false, false, false);
+        }
+
+        public Input(boolean enabled, boolean parkingWarningEnabled, boolean connected,
+                     long connectionEpoch, boolean roofKnown, boolean roofOpen,
+                     long roofConnectionEpoch, long roofReceivedElapsed,
+                     boolean accKnown, boolean accOn, long nowElapsed,
+                     boolean cachedRoofKnown, boolean cachedRoofOpen, boolean warningAcknowledged) {
             this.enabled = enabled;
             this.parkingWarningEnabled = parkingWarningEnabled;
             this.connected = connected;
@@ -38,6 +51,9 @@ public final class SunroofAlertPolicy {
             this.accKnown = accKnown;
             this.accOn = accOn;
             this.nowElapsed = nowElapsed;
+            this.cachedRoofKnown = cachedRoofKnown;
+            this.cachedRoofOpen = cachedRoofOpen;
+            this.warningAcknowledged = warningAcknowledged;
         }
     }
 
@@ -124,6 +140,13 @@ public final class SunroofAlertPolicy {
         epoch = input.connectionEpoch;
         connected = input.connected;
 
+        // The persisted real roof position is authoritative for parking warnings. Its age and
+        // USB connection are deliberately irrelevant: the adapter publishes only changes.
+        if (input.cachedRoofKnown) {
+            acknowledged = input.warningAcknowledged;
+            if (!input.cachedRoofOpen || acknowledged) warningLatched = false;
+        }
+
         // A fresh known ON ends the old ignition cycle, including through a temporary unknown
         // observation. Unknown and Android screen state never stand in for ACC OFF.
         if (input.accKnown) {
@@ -153,7 +176,9 @@ public final class SunroofAlertPolicy {
             roofBaseline = true;
             lastRoofElapsed = input.roofReceivedElapsed;
             lastRoofEpoch = input.roofConnectionEpoch;
-            if (!roofOpen) warningLatched = false;
+            if (!roofOpen && (!input.cachedRoofKnown || !input.cachedRoofOpen)) {
+                warningLatched = false;
+            }
         } else if (!input.connected || !input.roofKnown) {
             roofBaseline = false;
         }
@@ -163,8 +188,9 @@ public final class SunroofAlertPolicy {
                 && lastRoofEpoch == input.connectionEpoch);
 
         if (!input.parkingWarningEnabled) warningLatched = false;
-        boolean connectedHazard = roofUsable && roofOpen && input.accKnown && !input.accOn;
-        boolean graceHazard = !input.connected && confirmedAccOff && accOnAtDisconnect
+        boolean warningRoofOpen = input.cachedRoofKnown ? input.cachedRoofOpen : roofUsable && roofOpen;
+        boolean connectedHazard = warningRoofOpen && input.accKnown && !input.accOn;
+        boolean graceHazard = !input.cachedRoofKnown && !input.connected && confirmedAccOff && accOnAtDisconnect
                 && openAtDisconnect && disconnectedAt >= 0L
                 && input.connectionEpoch == disconnectedEpoch
                 && input.nowElapsed - disconnectedAt <= DISCONNECT_ACC_GRACE_MS;
@@ -186,6 +212,10 @@ public final class SunroofAlertPolicy {
         if (warningLatched || decision.kind == Kind.PARKING_WARNING) acknowledged = true;
         warningLatched = false;
         return present(Kind.NONE);
+    }
+
+    public Decision current() {
+        return decision;
     }
 
     /** A delayed animation completion cannot dismiss a new transition or a persistent warning. */

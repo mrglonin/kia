@@ -13,7 +13,7 @@ import java.util.List;
 import kia.app.R;
 import kia.app.core.AppLog;
 
-/** Finite TEYES cues. Main thread only; callers start sound only after showing the overlay. */
+/** Finite native cues. Main thread only; callers start sound only after showing the overlay. */
 public final class SunroofSoundPlayer {
     static final long WARNING_INTERVAL_MS = 3_000L;
     static final long WARNING_WINDOW_MS = 9_500L;
@@ -32,7 +32,7 @@ public final class SunroofSoundPlayer {
     }
 
     interface Factory {
-        Clip create(Runnable complete, Runnable error);
+        Clip create(int resource, Runnable complete, Runnable error);
     }
 
     private final Scheduler scheduler;
@@ -55,21 +55,29 @@ public final class SunroofSoundPlayer {
         this.factory = factory;
     }
 
-    /** One transition cue, or at most three warning cues starting three seconds apart. */
+    /** Compatibility with callers that previously distinguished only transition/warning. */
     public void play(boolean warning) {
+        play(warning ? SunroofAlertPolicy.Kind.PARKING_WARNING : SunroofAlertPolicy.Kind.OPENING);
+    }
+
+    /** One shared transition cue, or at most three ADAS warning cues three seconds apart. */
+    public void play(SunroofAlertPolicy.Kind kind) {
         stop();
-        if (!enabled) return;
+        if (!enabled || kind == null || kind == SunroofAlertPolicy.Kind.NONE) return;
+        boolean warning = kind == SunroofAlertPolicy.Kind.PARKING_WARNING;
+        // Both roof directions intentionally share one original TEYES Bibi UI effect.
+        int resource = warning ? R.raw.sunroof_warning_adas : R.raw.sunroof_transition_teyes;
         long current = generation;
         long now = scheduler.now();
         deadline = now + (warning ? WARNING_WINDOW_MS : TRANSITION_WINDOW_MS);
         lastStartedAt = -1L;
         if (warning) {
             for (int index = 1; index < WARNING_PLAYS; index++) {
-                schedule(current, () -> startClip(current), index * WARNING_INTERVAL_MS);
+                schedule(current, () -> startClip(current, resource), index * WARNING_INTERVAL_MS);
             }
         }
         schedule(current, this::stop, warning ? WARNING_WINDOW_MS : TRANSITION_WINDOW_MS);
-        startClip(current);
+        startClip(current, resource);
     }
 
     /** Cancels clips, delayed repeats and callbacks from the previous presentation immediately. */
@@ -94,7 +102,7 @@ public final class SunroofSoundPlayer {
         scheduler.postDelayed(guarded, delayMs);
     }
 
-    private void startClip(long current) {
+    private void startClip(long current, int resource) {
         if (current != generation || !enabled) return;
         long now = scheduler.now();
         if (now >= deadline) {
@@ -107,7 +115,7 @@ public final class SunroofSoundPlayer {
         releasePlayer();
         long token = ++clipToken;
         try {
-            Clip created = factory.create(() -> finished(current, token),
+            Clip created = factory.create(resource, () -> finished(current, token),
                     () -> finished(current, token));
             if (current != generation || !enabled) {
                 close(created);
@@ -165,14 +173,15 @@ public final class SunroofSoundPlayer {
             app = application == null ? context : application;
         }
 
-        @Override public Clip create(Runnable complete, Runnable error) {
+        @Override public Clip create(int resource, Runnable complete, Runnable error) {
             MediaPlayer media = null;
             try {
                 AudioAttributes attributes = new AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build();
-                media = MediaPlayer.create(app, R.raw.tpms6_error, attributes, 0);
+                // Selected resources are original TEYES Bibi / com.teyes.adas audio bytes.
+                media = MediaPlayer.create(app, resource, attributes, 0);
                 if (media == null) return null;
                 MediaPlayer created = media;
                 created.setLooping(false);

@@ -1,0 +1,98 @@
+{
+  "app": {
+    "version_name": "23.19-sunroof",
+    "version_code": 373,
+    "asset_name": "kia_373_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.19-373/kia_373_sunroof.apk",
+    "sha256": "99863a804118eafc41e7550ebc570f94442cb31a747d20548e65b6b6f6669042",
+    "size": 6920680
+  },
+  "base_commit": "7d0a5613871ab98ce6c980661529fed978421ac6",
+  "signing_certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "artifact_checks": {
+    "zip_crc": "PASS",
+    "zipalign_16k": "PASS",
+    "apksigner": "PASS",
+    "same_certificate_as_372": true
+  },
+  "unit_tests": {
+    "tests": 464,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 78
+  },
+  "production_harnesses": {
+    "controller_router_memory": {
+      "passed": true,
+      "assertions": 74
+    },
+    "router_ordering": {
+      "passed": true,
+      "assertions": 24,
+      "negative_controls_detected": 2
+    },
+    "tpms_usb": {
+      "passed": true,
+      "scenarios": 79
+    }
+  },
+  "android_instrumentation": {
+    "passed": true,
+    "device": "Pixel Tablet emulator",
+    "android": "15",
+    "display": "1280x720",
+    "scenarios": 14,
+    "assertions": 143,
+    "failures": 0,
+    "process_restart_verified": true,
+    "restart_roof_packets_injected": 0,
+    "qa_policy_used": false,
+    "boundary": "Real AppService, FrameRouter, StateStore, policy and WindowManager; physical USB and native ACC inputs replaced",
+    "scenario_names": [
+      "actual_general_settings_have_one_transition_sound_no_previews",
+      "background_normal_open_opaque_geometry",
+      "background_minor_tpms_open",
+      "background_minor_tpms_close",
+      "finished_activity_real_open",
+      "visible_critical_tpms_defers_then_ack_releases",
+      "acknowledged_critical_state_does_not_block_close",
+      "background_real_policy_acc_off_warning",
+      "cached_open_warns_after_disconnect_without_new_packet",
+      "screen_sleep_preserves_unacknowledged_cached_warning",
+      "real_closed_cache_prevents_warning_without_new_packet",
+      "seed_real_open_for_process_restart",
+      "restart_unknown_acc_does_not_invent_warning",
+      "restart_cached_open_known_off_without_roof_packet"
+    ],
+    "media_player_playing_with_both_sound_flags_false": true
+  },
+  "source_sha256": {
+    "app/app/src/main/java/kia/app/entry/MainActivity.java": "69da7d74ba1adeb5f7ab2a93245dadf97781c458543e130bc202a8f6efa80285",
+    "app/app/src/main/java/kia/app/protocol/adapter/FrameRouter.java": "8b9b8442e4cecba4b558d358a82d64d37f3980a5afc8ffb578354fb88460405b",
+    "app/app/src/main/java/kia/app/sunroof/SunroofAlertPolicy.java": "1729a1e39f88f38d85445946942b14ec28cdd619e3855246fa31e0652908723e",
+    "app/app/src/main/java/kia/app/sunroof/SunroofOverlayController.java": "7d7c5e086d32f5505ada07763674e1aed8b6a6dd566d84cc979c7ddaa33b30be",
+    "app/app/src/main/java/kia/app/sunroof/SunroofOverlayGeometry.java": "f6400da54a65b7883db4ddcb4d7445907a9ea6c844a60c952569a910f630b5d9",
+    "app/app/src/main/java/kia/app/sunroof/SunroofOverlayView.java": "679d33cf419c659c9824e9423140a128f3a0ea622145ff299478b7bd092d6d17",
+    "app/app/src/main/java/kia/app/sunroof/SunroofSoundPlayer.java": "4758ae5de94149b0095cd721209e6275eb624d3b16195e843935297aa457e096",
+    "app/app/src/main/java/kia/app/sunroof/SunroofStateMemory.java": "610294ba7f69b809bd437bd2dc2e11994c4397d5fb7c99a079a5468180c5ea99",
+    "app/app/src/main/java/kia/app/sunroof/TeyesSunroofObserver.java": "7f15d6298eff71b8205c5c6e722eda9851d842f57713829a7ba27283eceea065",
+    "app/app/src/main/java/kia/app/sunroof/TeyesSunroofSignals.java": "abc03af3cb39bd210b4049e26d90cb41998189351db28617d804e4a6a32bac25",
+    "app/app/src/main/java/kia/app/tpms/TpmsWarningOverlayController.java": "b5cc9c8a60f0847157aefbdefbb9ebd8bee8377b254f4885299f028cffa6664b",
+    "app/app/src/main/res/raw/sunroof_transition_teyes.mp3": "fe925643d68ab14bfc0644171cf5b18faa8d70919c9bf510d8131ff33208fa42",
+    "app/app/src/main/res/raw/sunroof_warning_adas.mp3": "0002f1c759f5895b80f2df2d81eec380cd347e73bf5791eb4408cd2fa4fe255d"
+  },
+  "physical_head_unit_tested": false,
+  "physical_audibility_tested": false,
+  "remembered_roof_survives_process_restart": true,
+  "car_width_growth_percent": 20,
+  "car_window_alpha": 1,
+  "open_close_use_same_sound": true,
+  "warning_audio_ignores_transition_switch": true,
+  "preview_buttons_present": false,
+  "navigator_unchanged": true,
+  "firmware_unchanged": true
+}
