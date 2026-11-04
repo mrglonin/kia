@@ -56,6 +56,10 @@ public final class SettingsTransfer {
 
     private static final Set<String> APP_BOOLEAN_KEYS = names(
             "auto_start",
+            "sunroof_overlay",
+            "sunroof_parking_warning",
+            "sunroof_sound",
+            "sunroof_transition_sound",
             "media_enabled",
             "media_profile_configured",
             "call_enabled",

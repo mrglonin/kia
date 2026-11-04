@@ -41,6 +41,7 @@ import kia.app.navigation.domain.NavigationFeature;
 import kia.app.navigation.overlay.NavigationOverlayController;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.rcta.RctaOverlayController;
+import kia.app.sunroof.SunroofOverlayController;
 import kia.app.tpms.TpmsController;
 import kia.app.tpms.TpmsAlertController;
 import kia.app.tpms.TeyesTpmsWidgetForwarder;
@@ -68,6 +69,7 @@ public final class AppService extends Service {
     private NavigationOverlayController navigationOverlay;
     private MediaOverlayController mediaOverlay;
     private RctaOverlayController rctaOverlay;
+    private SunroofOverlayController sunroofOverlay;
     private LegacyNavBroadcastReceiver navReceiver;
     private BluetoothCallReceiver bluetoothCallReceiver;
     private BroadcastReceiver locationProviderReceiver;
@@ -164,6 +166,8 @@ public final class AppService extends Service {
         mediaOverlay.start();
         rctaOverlay = RctaOverlayController.get(this);
         rctaOverlay.start();
+        sunroofOverlay = SunroofOverlayController.get(this);
+        sunroofOverlay.start();
         serviceRunning = true;
         updateCheckHandler.postDelayed(backgroundUpdateCheck, 10_000L);
     }
@@ -205,6 +209,8 @@ public final class AppService extends Service {
         mediaOverlay.start();
         if (rctaOverlay == null) rctaOverlay = RctaOverlayController.get(this);
         rctaOverlay.start();
+        if (sunroofOverlay == null) sunroofOverlay = SunroofOverlayController.get(this);
+        sunroofOverlay.start();
         return foregroundStartMode(true);
     }
 
@@ -227,6 +233,7 @@ public final class AppService extends Service {
         if (navigationOverlay != null) navigationOverlay.stop();
         if (mediaOverlay != null) mediaOverlay.stop();
         if (rctaOverlay != null) rctaOverlay.stop();
+        if (sunroofOverlay != null) sunroofOverlay.stop();
         unregisterNavReceiver();
         unregisterBluetoothCallReceiver();
         unregisterLocationProviderReceiver();

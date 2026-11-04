@@ -87,6 +87,8 @@ public final class DiagnosticBundleExporter {
                 .append(" state_age=").append(age(now, tpms.updatedAt)).append('\n');
         out.append("rcta=").append(rcta.summary())
                 .append(" state_age=").append(age(now, rcta.updatedAt)).append('\n');
+        out.append("sunroof=").append(kia.app.sunroof.SunroofOverlayController.get(context)
+                .statusSummary()).append('\n');
         out.append("overlay_permission=").append(Build.VERSION.SDK_INT < 23
                 || Settings.canDrawOverlays(context)).append('\n');
         out.append("auto_start=").append(AppSettings.autoStart(context))

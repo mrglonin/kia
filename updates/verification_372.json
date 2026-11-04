@@ -1,0 +1,63 @@
+{
+  "app": {
+    "version_name": "23.18-sunroof",
+    "version_code": 372,
+    "asset_name": "kia_372_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.18-372/kia_372_sunroof.apk",
+    "sha256": "16de8d4a3cf3d1dd4ac82d0f975179b76cfc8d6b57dba7ca8e7552fe76d39996",
+    "size": 6879288
+  },
+  "base_commit": "e5af812a0ec58bf41a93766fe4bc5b21fccab58c",
+  "signing_certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "artifact_checks": {
+    "zip_crc": "PASS",
+    "zipalign_16k": "PASS",
+    "apksigner": "PASS",
+    "same_certificate_as_370": true
+  },
+  "unit_tests": {
+    "tests": 453,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 78
+  },
+  "regressions": {
+    "tpms": {
+      "passed": true,
+      "scenarios": 79
+    },
+    "compass": {
+      "passed": true,
+      "scenarios": 35
+    },
+    "teyes_observer": {
+      "passed": true,
+      "assertions": 52
+    }
+  },
+  "android_emulator": {
+    "android": "15",
+    "device": "Pixel Tablet",
+    "display": "1280x720",
+    "checks_passed": 32
+  },
+  "feature_source_sha256": {
+    "app/app/src/main/java/kia/app/sunroof/SunroofAlertPolicy.java": "2819acf7b6127842ef8506a709056d874daa28969583d7ac1489dbb36eb27300",
+    "app/app/src/main/java/kia/app/sunroof/SunroofOverlayController.java": "61c12d70622e1cd9d44e125f72abdb73377f5cdd35900bcdfcec8df0f4479073",
+    "app/app/src/main/java/kia/app/sunroof/SunroofOverlayView.java": "635ddf36ddf36d4d77f85ff671f6de810a51960ae06e03674442c25441c0954c",
+    "app/app/src/main/java/kia/app/sunroof/SunroofSoundPlayer.java": "1f4c6aa53b72e001feb904284253eec78f6058e29caea930aca0926505530757",
+    "app/app/src/main/java/kia/app/sunroof/TeyesSunroofObserver.java": "7f15d6298eff71b8205c5c6e722eda9851d842f57713829a7ba27283eceea065",
+    "app/app/src/main/java/kia/app/sunroof/TeyesSunroofSignals.java": "abc03af3cb39bd210b4049e26d90cb41998189351db28617d804e4a6a32bac25"
+  },
+  "physical_head_unit_tested": false,
+  "physical_checks_pending": [
+    "Native ACC availability and timing",
+    "Audible warning after ignition off",
+    "Physical key routing"
+  ],
+  "sunroof_mode_default_enabled": false
+}

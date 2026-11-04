@@ -100,6 +100,7 @@ import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
 import kia.app.rcta.BlindSpotOverlayView;
 import kia.app.rcta.RctaOverlayController;
+import kia.app.sunroof.SunroofOverlayController;
 import kia.app.rcta.RctaSoundPlayer;
 import kia.app.tpms.DashboardNavigationSnapshot;
 import kia.app.tpms.TpmsAlertController;
@@ -659,6 +660,7 @@ public final class MainActivity extends Activity {
         syncTpmsPollingMode();
         TpmsWarningOverlayController.get(this).setActivityVisible(true);
         NavigationOverlayController.get(this).apply();
+        SunroofOverlayController.get(this).apply();
         applyImmersiveMode();
         if ((settingsMode || selectedTab == TAB_SETTINGS) && tabContent != null) renderTab();
         if (specialPermissionWaiting) {
@@ -2302,7 +2304,7 @@ public final class MainActivity extends Activity {
         if (containsAny(value, "rcta", "слеп", "задн", "стрелк")) {
             return SETTINGS_RCTA;
         }
-        if (containsAny(value, "обнов", "разреш", "прошив", "диагност", "экспорт",
+        if (containsAny(value, "люк", "sunroof", "обнов", "разреш", "прошив", "диагност", "экспорт",
                 "импорт", "backup", "резерв", "эксперт", "автозапуск", "версия")) {
             return SETTINGS_GENERAL;
         }
@@ -4047,6 +4049,7 @@ public final class MainActivity extends Activity {
 
     private void renderGeneralSettingsTab(LinearLayout root) {
         root.addView(generalHealthPanel());
+        root.addView(sunroofSettingsPanel());
         addPermissionSection(root);
         updatesPanelView = generalUpdatesPanel();
         root.addView(updatesPanelView);
@@ -4079,6 +4082,46 @@ public final class MainActivity extends Activity {
             root.addView(firmwarePanel());
         }
         root.addView(generalVersionFooter());
+    }
+
+    private LinearLayout sunroofSettingsPanel() {
+        LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
+        addSettingsPanelSwitchHeader(panel, "Люк",
+                "анимация белого Sportage поверх главного экрана",
+                AppSettings.sunroofOverlayEnabled(this), (button, checked) -> {
+                    AppSettings.setSunroofOverlayEnabled(this, checked);
+                    if (checked) AppService.start(this);
+                    SunroofOverlayController.get(this).apply();
+                    if (checked && !Settings.canDrawOverlays(this)) {
+                        Toast.makeText(this, "Разрешите показ поверх других приложений", Toast.LENGTH_LONG).show();
+                    }
+                });
+        addInlineSwitch(panel, "Предупреждать после выключения зажигания",
+                "если люк открыт — показывать до касания, кнопки или закрытия люка",
+                AppSettings.sunroofParkingWarningEnabled(this), (button, checked) -> {
+                    AppSettings.setSunroofParkingWarningEnabled(this, checked);
+                    SunroofOverlayController.get(this).apply();
+                });
+        addInlineSwitch(panel, "Звук предупреждения TEYES",
+                "короткий сигнал при открытом люке после выключения зажигания",
+                AppSettings.sunroofSoundEnabled(this), (button, checked) -> {
+                    AppSettings.setSunroofSoundEnabled(this, checked);
+                    SunroofOverlayController.get(this).apply();
+                });
+        addInlineSwitch(panel, "Звук открытия и закрытия",
+                "сигнал вместе с короткой анимацией люка",
+                AppSettings.sunroofTransitionSoundEnabled(this), (button, checked) -> {
+                    AppSettings.setSunroofTransitionSoundEnabled(this, checked);
+                    SunroofOverlayController.get(this).apply();
+                });
+        addActionGrid(panel,
+                action("Открытие", "посмотреть анимацию", COLOR_ACCENT_BLUE,
+                        () -> SunroofOverlayController.get(this).preview(true)),
+                action("Закрытие", "посмотреть анимацию", COLOR_ACCENT_BLUE,
+                        () -> SunroofOverlayController.get(this).preview(false)),
+                action("Предупреждение", "проверить показ и сигнал", COLOR_WARNING,
+                        () -> SunroofOverlayController.get(this).previewParkingWarning()));
+        return panel;
     }
 
     private LinearLayout generalHealthPanel() {
@@ -4146,6 +4189,7 @@ public final class MainActivity extends Activity {
         AppService.start(this);
         NavigationOverlayController.get(this).apply();
         RctaOverlayController.get(this).apply();
+        SunroofOverlayController.get(this).apply();
         TpmsWarningOverlayController.get(this).setActivityVisible(activityVisible);
         AppLog.line(this, "Self-check requested from UI");
         Toast.makeText(this, "Состояния обновлены", Toast.LENGTH_SHORT).show();
@@ -4750,7 +4794,8 @@ public final class MainActivity extends Activity {
         return AppSettings.navOverlayEnabled(this)
                 || AppSettings.mediaOverlayEnabled(this)
                 || AppSettings.tpmsAlertsEnabled(this)
-                || AppSettings.rctaOverlayEnabled(this);
+                || AppSettings.rctaOverlayEnabled(this)
+                || AppSettings.sunroofOverlayEnabled(this);
     }
 
     private boolean mediaListenerRequired() {
@@ -4795,6 +4840,7 @@ public final class MainActivity extends Activity {
         if (AppSettings.rctaOverlayEnabled(this)) names.add("RCTA");
         if (AppSettings.navOverlayEnabled(this)) names.add("навигация");
         if (AppSettings.mediaOverlayEnabled(this)) names.add("медиа");
+        if (AppSettings.sunroofOverlayEnabled(this)) names.add("люк");
         if (names.isEmpty()) return "не нужно";
         StringBuilder out = new StringBuilder();
         for (String name : names) {

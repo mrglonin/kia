@@ -28,6 +28,7 @@ import kia.app.protocol.adapter.AdapterCommand;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
 import kia.app.rcta.RctaController;
+import kia.app.sunroof.SunroofOverlayController;
 import kia.app.tpms.TpmsController;
 import kia.app.update.AppUpdateController;
 import kia.app.update.FirmwareUpdateController;
@@ -37,6 +38,24 @@ public final class QaReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         if (context == null || intent == null) return;
         String scenario = intent.getStringExtra("scenario");
+        if (scenario != null && scenario.startsWith("sunroof_qa_")) {
+            SunroofOverlayController.get(context).runQaScenario(scenario);
+            return;
+        }
+        if ("sunroof_overlay_on".equals(scenario) || "sunroof_overlay_off".equals(scenario)) {
+            AppSettings.setSunroofOverlayEnabled(context, "sunroof_overlay_on".equals(scenario));
+            AppService.start(context);
+            SunroofOverlayController.get(context).apply();
+            return;
+        }
+        if ("sunroof_preview_open".equals(scenario) || "sunroof_preview_closed".equals(scenario)) {
+            SunroofOverlayController.get(context).preview("sunroof_preview_open".equals(scenario));
+            return;
+        }
+        if ("sunroof_preview_warning".equals(scenario)) {
+            SunroofOverlayController.get(context).previewParkingWarning();
+            return;
+        }
         if ("media_scan".equals(scenario)) {
             MediaCaptureManager.scanOnce(context);
         } else if ("media_profile_teyes".equals(scenario)) {

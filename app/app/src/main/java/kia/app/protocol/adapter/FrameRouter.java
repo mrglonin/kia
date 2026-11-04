@@ -37,7 +37,7 @@ public final class FrameRouter {
                 AmpController.get(app).handleFrame(frame);
                 break;
             case AdapterProtocol.CMD_RAW_CAN:
-                if (!handleSunroof(frame)) handleRawCan(frame);
+                if (!handleSunroof(frame, usbConnectionEpoch, receivedElapsed)) handleRawCan(frame);
                 break;
             case AdapterProtocol.CMD_RAW_CAN_TX:
                 AppLog.line(app, "CAN TX ack: " + AdapterProtocol.hex(frame));
@@ -108,14 +108,17 @@ public final class FrameRouter {
         if (parsed != null) applyCanFrame(parsed.canId, parsed.data);
     }
 
-    private boolean handleSunroof(byte[] frame) {
+    private boolean handleSunroof(byte[] frame, long connectionEpoch, long receivedElapsed) {
         int len = frame == null || frame.length < 6 ? 0 : Math.min(frame.length, frame[3] & 0xff);
         if (len != 7) return false;
         boolean open = (frame[5] & 0xff) != 0;
         VehicleState current = StateStore.vehicle();
-        if (current.sunroofKnown && current.sunroofOpen == open) return true;
-        StateStore.setVehicle(app, current.withSunroof(open, "0x76"));
-        AppLog.line(app, "Sunroof: " + (open ? "open" : "closed"));
+        if (current.sunroofKnown && (connectionEpoch < current.sunroofConnectionEpoch
+                || (connectionEpoch == current.sunroofConnectionEpoch
+                && receivedElapsed < current.sunroofReceivedElapsed))) return true;
+        boolean changed = !current.sunroofKnown || current.sunroofOpen != open;
+        StateStore.setVehicle(app, current.withSunroof(open, "0x76", receivedElapsed, connectionEpoch));
+        if (changed) AppLog.line(app, "Sunroof: " + (open ? "open" : "closed"));
         return true;
     }
 

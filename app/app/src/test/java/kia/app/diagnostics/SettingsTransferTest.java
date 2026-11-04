@@ -13,7 +13,20 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 
 public final class SettingsTransferTest {
-    private static final int CURRENT_SCHEMA = 51;
+    private static final int CURRENT_SCHEMA = 52;
+
+    @Test
+    public void sunroofPreferencesRoundTripWithIndependentSoundFlags() {
+        Map<String, Object> app = new LinkedHashMap<>();
+        app.put("sunroof_overlay", true);
+        app.put("sunroof_parking_warning", true);
+        app.put("sunroof_sound", false);
+        app.put("sunroof_transition_sound", true);
+        SettingsTransfer.ValidatedImport result = SettingsTransfer.validatePreferenceMaps(
+                files(app, null), CURRENT_SCHEMA);
+        assertEquals(app, result.files.get("Kia"));
+        assertInvalidAppValue("sunroof_overlay", "true");
+    }
 
     @Test
     public void validDocumentProducesTypedPlanAndSkipsRuntimeMarkers() {

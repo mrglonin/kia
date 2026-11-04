@@ -531,6 +531,10 @@ public final class UsbTransport {
     }
 
     private void setUsb(boolean connected, String text) {
+        if (!connected) {
+            // A roof sample belongs to a USB session; temperatures must not make it current.
+            StateStore.setVehicle(app, StateStore.vehicle().withoutSunroof());
+        }
         AdapterState current = StateStore.adapter();
         StateStore.setAdapter(app, current.withUsb(connected, text));
     }

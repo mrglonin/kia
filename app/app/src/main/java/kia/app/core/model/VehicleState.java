@@ -15,6 +15,8 @@ public final class VehicleState {
     public final boolean sunroofKnown;
     public final boolean sunroofOpen;
     public final String sunroofSource;
+    public final long sunroofReceivedElapsed;
+    public final long sunroofConnectionEpoch;
     public final long updatedAt;
 
     public VehicleState(boolean engineTempKnown, int engineTempC, String engineTempSource,
@@ -25,7 +27,7 @@ public final class VehicleState {
         this(engineTempKnown, engineTempC, engineTempSource,
                 outsideTempKnown, outsideTempC, outsideTempSource,
                 cabinLeftKnown, cabinLeftTempC, cabinRightKnown, cabinRightTempC,
-                cabinTempSource, false, false, "", longTime(updatedAt));
+                cabinTempSource, false, false, "", 0L, 0L, longTime(updatedAt));
     }
 
     private VehicleState(boolean engineTempKnown, int engineTempC, String engineTempSource,
@@ -34,6 +36,7 @@ public final class VehicleState {
                          boolean cabinRightKnown, int cabinRightTempC,
                          String cabinTempSource,
                          boolean sunroofKnown, boolean sunroofOpen, String sunroofSource,
+                         long sunroofReceivedElapsed, long sunroofConnectionEpoch,
                          long updatedAt) {
         this.engineTempKnown = engineTempKnown;
         this.engineTempC = engineTempC;
@@ -49,6 +52,8 @@ public final class VehicleState {
         this.sunroofKnown = sunroofKnown;
         this.sunroofOpen = sunroofOpen;
         this.sunroofSource = safe(sunroofSource);
+        this.sunroofReceivedElapsed = Math.max(0L, sunroofReceivedElapsed);
+        this.sunroofConnectionEpoch = Math.max(0L, sunroofConnectionEpoch);
         this.updatedAt = updatedAt;
     }
 
@@ -62,6 +67,7 @@ public final class VehicleState {
                 outsideTempKnown, outsideTempC, outsideTempSource,
                 cabinLeftKnown, cabinLeftTempC, cabinRightKnown, cabinRightTempC,
                 cabinTempSource, sunroofKnown, sunroofOpen, sunroofSource,
+                sunroofReceivedElapsed, sunroofConnectionEpoch,
                 System.currentTimeMillis());
     }
 
@@ -70,6 +76,7 @@ public final class VehicleState {
                 true, clampTemp(value), source,
                 cabinLeftKnown, cabinLeftTempC, cabinRightKnown, cabinRightTempC,
                 cabinTempSource, sunroofKnown, sunroofOpen, sunroofSource,
+                sunroofReceivedElapsed, sunroofConnectionEpoch,
                 System.currentTimeMillis());
     }
 
@@ -80,14 +87,29 @@ public final class VehicleState {
                 outsideTempKnown, outsideTempC, outsideTempSource,
                 leftKnown, clampTemp(leftValue), rightKnown, clampTemp(rightValue),
                 source, sunroofKnown, sunroofOpen, sunroofSource,
+                sunroofReceivedElapsed, sunroofConnectionEpoch,
                 System.currentTimeMillis());
     }
 
     public VehicleState withSunroof(boolean open, String source) {
+        return withSunroof(open, source, 0L, 0L);
+    }
+
+    public VehicleState withSunroof(boolean open, String source,
+                                    long receivedElapsed, long connectionEpoch) {
         return new VehicleState(engineTempKnown, engineTempC, engineTempSource,
                 outsideTempKnown, outsideTempC, outsideTempSource,
                 cabinLeftKnown, cabinLeftTempC, cabinRightKnown, cabinRightTempC,
-                cabinTempSource, true, open, source, System.currentTimeMillis());
+                cabinTempSource, true, open, source, receivedElapsed, connectionEpoch,
+                System.currentTimeMillis());
+    }
+
+    public VehicleState withoutSunroof() {
+        if (!sunroofKnown) return this;
+        return new VehicleState(engineTempKnown, engineTempC, engineTempSource,
+                outsideTempKnown, outsideTempC, outsideTempSource,
+                cabinLeftKnown, cabinLeftTempC, cabinRightKnown, cabinRightTempC,
+                cabinTempSource, false, false, "", 0L, 0L, System.currentTimeMillis());
     }
 
     public String summary() {

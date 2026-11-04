@@ -16,6 +16,10 @@ public final class AppSettings {
     private static final String NAME = "Kia";
     private static final String LEGACY_NAME = "Kia" + "Clean";
     private static final String KEY_SCHEMA = "schema";
+    private static final String KEY_SUNROOF_OVERLAY = "sunroof_overlay";
+    private static final String KEY_SUNROOF_PARKING_WARNING = "sunroof_parking_warning";
+    private static final String KEY_SUNROOF_SOUND = "sunroof_sound";
+    private static final String KEY_SUNROOF_TRANSITION_SOUND = "sunroof_transition_sound";
     private static final String KEY_AUTO_START = "auto_start";
     private static final String KEY_MEDIA = "media_enabled";
     private static final String KEY_MEDIA_PROFILE = "media_profile";
@@ -125,7 +129,7 @@ public final class AppSettings {
     public static final int RCTA_ARROW_COUNT_MIN = 3;
     public static final int RCTA_ARROW_COUNT_MAX = 6;
     public static final int RCTA_ARROW_COUNT_DEFAULT = RCTA_ARROW_COUNT_MIN;
-    private static final int SCHEMA = 51;
+    private static final int SCHEMA = 52;
     public static final int MEDIA_SOURCE_DELAY_MIN_MS = 0;
     public static final int MEDIA_SOURCE_DELAY_MAX_MS = 3000;
     public static final int MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS = 300;
@@ -403,6 +407,10 @@ public final class AppSettings {
                 edit.putBoolean(KEY_MEDIA_OVERLAY, false);
             }
         }
+        if (!prefs.contains(KEY_SUNROOF_OVERLAY)) edit.putBoolean(KEY_SUNROOF_OVERLAY, false);
+        if (!prefs.contains(KEY_SUNROOF_PARKING_WARNING)) edit.putBoolean(KEY_SUNROOF_PARKING_WARNING, true);
+        if (!prefs.contains(KEY_SUNROOF_SOUND)) edit.putBoolean(KEY_SUNROOF_SOUND, true);
+        if (!prefs.contains(KEY_SUNROOF_TRANSITION_SOUND)) edit.putBoolean(KEY_SUNROOF_TRANSITION_SOUND, false);
         edit.putInt(KEY_SCHEMA, SCHEMA).apply();
     }
 
@@ -799,6 +807,38 @@ public final class AppSettings {
 
     public static boolean rctaOverlayEnabled(Context context) {
         return prefs(context).getBoolean(KEY_RCTA_OVERLAY, true);
+    }
+
+    public static boolean sunroofOverlayEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_SUNROOF_OVERLAY, false);
+    }
+
+    public static void setSunroofOverlayEnabled(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_SUNROOF_OVERLAY, value).apply();
+    }
+
+    public static boolean sunroofParkingWarningEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_SUNROOF_PARKING_WARNING, true);
+    }
+
+    public static void setSunroofParkingWarningEnabled(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_SUNROOF_PARKING_WARNING, value).apply();
+    }
+
+    public static boolean sunroofSoundEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_SUNROOF_SOUND, true);
+    }
+
+    public static void setSunroofSoundEnabled(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_SUNROOF_SOUND, value).apply();
+    }
+
+    public static boolean sunroofTransitionSoundEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_SUNROOF_TRANSITION_SOUND, false);
+    }
+
+    public static void setSunroofTransitionSoundEnabled(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_SUNROOF_TRANSITION_SOUND, value).apply();
     }
 
     public static void setRctaOverlayEnabled(Context context, boolean value) {
