@@ -7,18 +7,13 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import kia.app.R;
 import kia.app.core.AppLog;
 
 /** Finite roof speech and ADAS cues. Main thread only; callers sound only a shown overlay. */
 public final class SunroofSoundPlayer {
-    static final long WARNING_INTERVAL_MS = 3_000L;
     static final long WARNING_WINDOW_MS = 9_500L;
     static final long TRANSITION_WINDOW_MS = 2_500L;
-    static final int WARNING_PLAYS = 3;
 
     interface Scheduler {
         long now();
@@ -37,12 +32,11 @@ public final class SunroofSoundPlayer {
 
     private final Scheduler scheduler;
     private final Factory factory;
-    private final List<Runnable> pending = new ArrayList<>();
+    private Runnable expiration;
     private boolean enabled = true;
     private long generation;
     private long clipToken;
     private long deadline;
-    private long lastStartedAt = -1L;
     private Clip player;
 
     public SunroofSoundPlayer(Context context) {
@@ -60,7 +54,7 @@ public final class SunroofSoundPlayer {
         play(warning ? SunroofAlertPolicy.Kind.PARKING_WARNING : SunroofAlertPolicy.Kind.OPENING);
     }
 
-    /** One phrase for the actual transition, or at most three ADAS warning cues three seconds apart. */
+    /** One phrase for a transition, or one combined ADAS signal and roof-warning phrase. */
     public void play(SunroofAlertPolicy.Kind kind) {
         stop();
         if (!enabled || kind == null || kind == SunroofAlertPolicy.Kind.NONE) return;
@@ -71,36 +65,24 @@ public final class SunroofSoundPlayer {
         long current = generation;
         long now = scheduler.now();
         deadline = now + (warning ? WARNING_WINDOW_MS : TRANSITION_WINDOW_MS);
-        lastStartedAt = -1L;
-        if (warning) {
-            for (int index = 1; index < WARNING_PLAYS; index++) {
-                schedule(current, () -> startClip(current, resource), index * WARNING_INTERVAL_MS);
-            }
-        }
-        schedule(current, this::stop, warning ? WARNING_WINDOW_MS : TRANSITION_WINDOW_MS);
+        expiration = () -> {
+            if (current == generation && enabled) stop();
+        };
+        scheduler.postDelayed(expiration, warning ? WARNING_WINDOW_MS : TRANSITION_WINDOW_MS);
         startClip(current, resource);
     }
 
-    /** Cancels clips, delayed repeats and callbacks from the previous presentation immediately. */
+    /** Cancels the clip, its deadline and callbacks from the previous presentation immediately. */
     public void stop() {
         generation++;
-        for (Runnable runnable : pending) scheduler.remove(runnable);
-        pending.clear();
+        if (expiration != null) scheduler.remove(expiration);
+        expiration = null;
         releasePlayer();
-        lastStartedAt = -1L;
     }
 
     public void setEnabled(boolean value) {
         enabled = value;
         if (!value) stop();
-    }
-
-    private void schedule(long current, Runnable action, long delayMs) {
-        Runnable guarded = () -> {
-            if (current == generation && enabled) action.run();
-        };
-        pending.add(guarded);
-        scheduler.postDelayed(guarded, delayMs);
     }
 
     private void startClip(long current, int resource) {
@@ -110,10 +92,6 @@ public final class SunroofSoundPlayer {
             stop();
             return;
         }
-        // Delayed Handler callbacks can arrive together after a stall/sleep. Never turn them
-        // into a burst, or carry a reminder into a later waking session.
-        if (lastStartedAt >= 0L && now - lastStartedAt < WARNING_INTERVAL_MS) return;
-        releasePlayer();
         long token = ++clipToken;
         try {
             Clip created = factory.create(resource, () -> finished(current, token),
@@ -128,17 +106,16 @@ public final class SunroofSoundPlayer {
                 return;
             }
             player = created;
-            lastStartedAt = now;
             if (created != null) created.start();
+            else stop();
         } catch (RuntimeException error) {
-            // This attempt is consumed. Later fixed slots are bounded; there is no retry loop.
-            lastStartedAt = now;
-            releasePlayer();
+            // A failed cue is consumed; it must never become an automatic retry.
+            stop();
         }
     }
 
     private void finished(long current, long token) {
-        if (current == generation && token == clipToken) releasePlayer();
+        if (current == generation && token == clipToken) stop();
     }
 
     private void releasePlayer() {
@@ -179,12 +156,10 @@ public final class SunroofSoundPlayer {
             try {
                 AudioAttributes attributes = new AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
-                        .setContentType(resource == R.raw.sunroof_warning_adas
-                                ? AudioAttributes.CONTENT_TYPE_SONIFICATION
-                                : AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build();
-                // Speech is a copied generated master. The rear ADAS cue preserves the
-                // original active waveform, routed identically to both speakers.
+                // Each resource contains speech. The warning combines its ADAS signal and
+                // phrase into one clip so cancellation cannot leave a delayed phrase behind.
                 media = MediaPlayer.create(app, resource, attributes, 0);
                 if (media == null) return null;
                 MediaPlayer created = media;

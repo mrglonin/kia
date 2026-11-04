@@ -28,29 +28,51 @@ public final class SunroofSoundPlayerTest {
         assertEquals(2, factory.started);
     }
 
-    @Test public void parkingWarningUsesItsOwnCueAtAllThreeFixedSlots() {
+    @Test public void parkingWarningSelectsOneCombinedCueAndNeverRepeatsAfterCompletion() {
         sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
-        clock.advanceTo(10_000);
-        assertEquals(3, factory.resources.size());
-        assertNotEquals(R.raw.sunroof_open_voice, R.raw.sunroof_warning_adas);
-        assertNotEquals(R.raw.sunroof_close_voice, R.raw.sunroof_warning_adas);
-        for (int resource : factory.resources) {
-            assertEquals(R.raw.sunroof_warning_adas, resource);
-        }
+        assertEquals(1, factory.attempts);
+        assertEquals(R.raw.sunroof_warning_adas, (int) factory.resources.get(0));
+        FakeClip warning = factory.clips.get(0);
+        warning.complete.run();
+        warning.complete.run();
+        warning.error.run();
+        assertEquals(1, warning.closed);
+        assertEquals(0, clock.pending.size());
+        clock.advanceTo(1_000_000);
+        assertEquals(1, factory.attempts);
+        assertEquals(1, factory.started);
         assertEquals(0, factory.live);
     }
 
-    @Test public void replacingWarningWithClosingCancelsOldWarningCueAndCallbacks() {
+    @Test public void unfinishedWarningHasNoThreeOrSixSecondRemindersAndOneHardDeadline() {
+        sound.play(true);
+        assertEquals(1, clock.pending.size());
+        clock.advanceTo(3_000);
+        clock.advanceTo(6_000);
+        clock.advanceTo(9_499);
+        assertEquals(1, factory.started);
+        assertEquals(1, factory.live);
+        clock.advanceTo(9_500);
+        assertEquals(1, factory.clips.get(0).closed);
+        assertEquals(0, factory.live);
+        assertEquals(0, clock.pending.size());
+        clock.advanceTo(1_000_000);
+        assertEquals(1, factory.attempts);
+    }
+
+    @Test public void replacingWarningWithClosingCancelsClipAndEveryOldCallback() {
         sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
         List<Runnable> stale = clock.pendingRunnables();
         FakeClip warning = factory.clips.get(0);
         clock.advanceTo(100);
         sound.play(SunroofAlertPolicy.Kind.CLOSING);
         warning.complete.run();
+        warning.error.run();
         for (Runnable callback : stale) callback.run();
-        assertEquals(2, factory.resources.size());
+        assertEquals(1, warning.closed);
         assertEquals(R.raw.sunroof_close_voice, (int) factory.resources.get(1));
         assertEquals(1, factory.live);
+        assertEquals(1, factory.maxLive);
         clock.advanceTo(20_000);
         assertEquals(2, factory.resources.size());
         assertEquals(0, factory.live);
@@ -85,7 +107,7 @@ public final class SunroofSoundPlayerTest {
         assertEquals(0, factory.live);
     }
 
-    @Test public void newWarningInterruptsPhraseAndOldVoiceDeadlineCannotCancelItsReminders() {
+    @Test public void newWarningInterruptsNormalPhraseAndOldDeadlineCannotCancelWarning() {
         sound.play(SunroofAlertPolicy.Kind.OPENING);
         FakeClip opening = factory.clips.get(0);
         List<Runnable> oldCallbacks = clock.pendingRunnables();
@@ -93,13 +115,31 @@ public final class SunroofSoundPlayerTest {
         sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
         opening.complete.run();
         for (Runnable callback : oldCallbacks) callback.run();
-        clock.advanceTo(10_000);
-        assertEquals(4, factory.resources.size());
-        assertEquals(R.raw.sunroof_open_voice, (int) factory.resources.get(0));
-        for (int i = 1; i < factory.resources.size(); i++) {
-            assertEquals(R.raw.sunroof_warning_adas, (int) factory.resources.get(i));
-        }
+        clock.advanceTo(9_999);
+        assertEquals(2, factory.resources.size());
+        assertEquals(R.raw.sunroof_warning_adas, (int) factory.resources.get(1));
+        assertEquals(1, factory.live);
         assertEquals(1, factory.maxLive);
+        clock.advanceTo(10_000);
+        assertEquals(0, factory.live);
+    }
+
+    @Test public void newWarningEpisodePlaysOnceAndOldEpisodeCannotCloseItsClip() {
+        sound.play(true);
+        FakeClip first = factory.clips.get(0);
+        List<Runnable> stale = clock.pendingRunnables();
+        sound.play(true);
+        FakeClip second = factory.clips.get(1);
+        first.complete.run();
+        first.error.run();
+        for (Runnable callback : stale) callback.run();
+        assertEquals(1, first.closed);
+        assertEquals(0, second.closed);
+        assertEquals(1, factory.live);
+        assertEquals(1, factory.maxLive);
+        second.complete.run();
+        clock.advanceTo(100_000);
+        assertEquals(2, factory.started);
         assertEquals(0, factory.live);
     }
 
@@ -109,51 +149,25 @@ public final class SunroofSoundPlayerTest {
         FakeClip clip = factory.clips.get(0);
         clip.complete.run();
         assertEquals(1, clip.closed);
+        assertEquals(0, clock.pending.size());
         clock.advanceTo(100_000);
         assertEquals(1, factory.started);
-        assertEquals(0, clock.pending.size());
     }
 
-    @Test public void warningPlaysOnlyAtZeroThreeAndSixSeconds() {
-        sound.play(true);
-        assertEquals(1, factory.started);
-        clock.advanceTo(2_999);
-        assertEquals(1, factory.started);
-        clock.advanceTo(3_000);
-        assertEquals(2, factory.started);
-        clock.advanceTo(5_999);
-        assertEquals(2, factory.started);
-        clock.advanceTo(6_000);
-        assertEquals(3, factory.started);
-        clock.advanceTo(9_499);
-        assertEquals(3, factory.started);
-        clock.advanceTo(9_500);
-        assertEquals(3, factory.started);
-        assertEquals(1, factory.clips.get(2).closed);
-        assertEquals(0, clock.pending.size());
-        clock.advanceTo(1_000_000);
-        assertEquals(3, factory.started);
-    }
-
-    @Test public void unfinishedClipIsReleasedBeforeNextSlotNoOverlap() {
-        sound.play(true);
-        clock.advanceTo(3_000);
-        assertEquals(1, factory.clips.get(0).closed);
-        assertEquals(0, factory.clips.get(1).closed);
-        assertEquals(1, factory.live);
-        assertEquals(1, factory.maxLive);
-        clock.advanceTo(9_500);
-        assertEquals(0, factory.live);
-    }
-
-    @Test public void stopImmediatelyReleasesAndCancelsEveryPendingRepeat() {
+    @Test public void stopImmediatelyReleasesAndStaleCallbacksNeverReplayAudio() {
         sound.play(true);
         FakeClip clip = factory.clips.get(0);
+        List<Runnable> stale = clock.pendingRunnables();
         sound.stop();
         assertEquals(1, clip.closed);
         assertEquals(0, clock.pending.size());
+        clip.complete.run();
+        clip.error.run();
+        for (Runnable callback : stale) callback.run();
         clock.advanceTo(30_000);
         assertEquals(1, factory.started);
+        assertEquals(1, clip.closed);
+        assertEquals(0, factory.live);
     }
 
     @Test public void disablingStopsAndEnablingDoesNotAutoReplay() {
@@ -169,95 +183,57 @@ public final class SunroofSoundPlayerTest {
         assertEquals(2, factory.started);
     }
 
-    @Test public void replacementCancelsOldRepeatsAndOldCompletionCannotCloseNewClip() {
-        sound.play(true);
-        FakeClip oldClip = factory.clips.get(0);
-        List<Runnable> cancelled = clock.pendingRunnables();
-        clock.advanceTo(100);
-        sound.play(false);
-        FakeClip replacement = factory.clips.get(1);
-        oldClip.complete.run();
-        oldClip.error.run();
-        for (Runnable stale : cancelled) stale.run();
-        assertEquals(0, replacement.closed);
-        assertEquals(2, factory.started);
-        clock.advanceTo(2_600);
-        assertEquals(1, replacement.closed);
-        clock.advanceTo(30_000);
-        assertEquals(2, factory.started);
-    }
-
-    @Test public void oldClipCompletionWithinSameWarningCannotReleaseTheNextClip() {
-        sound.play(true);
-        FakeClip first = factory.clips.get(0);
-        clock.advanceTo(3_000);
-        FakeClip second = factory.clips.get(1);
-        first.complete.run();
-        first.error.run();
-        assertEquals(0, second.closed);
-        assertEquals(1, factory.live);
-    }
-
-    @Test public void errorReleasesOnceAndDoesNotAddAnUnboundedRetryLoop() {
+    @Test public void errorReleasesOnceAndNeverRetriesOrSchedulesAnotherCue() {
         sound.play(true);
         FakeClip first = factory.clips.get(0);
         first.error.run();
         first.complete.run();
         assertEquals(1, first.closed);
+        assertEquals(0, clock.pending.size());
+        clock.advanceTo(100_000);
+        assertEquals(1, factory.attempts);
         assertEquals(1, factory.started);
-        clock.advanceTo(9_500);
-        assertEquals(3, factory.started);
         assertEquals(0, factory.live);
     }
 
-    @Test public void nullFactoryResultConsumesFixedSlotsAndEventuallyCancels() {
+    @Test public void nullFactoryResultIsConsumedOnceWithoutLeavingDelayedWork() {
         factory.returnNull = true;
         sound.play(true);
         clock.advanceTo(20_000);
-        assertEquals(3, factory.attempts);
+        assertEquals(1, factory.attempts);
         assertEquals(0, factory.started);
         assertEquals(0, clock.pending.size());
     }
 
-    @Test public void createAndStartFailuresRemainBoundedAndReleaseAllocatedPlayers() {
+    @Test public void createAndStartFailuresNeverRetryAndReleaseAllocatedPlayers() {
         factory.throwOnCreate = true;
         sound.play(true);
         clock.advanceTo(20_000);
-        assertEquals(3, factory.attempts);
+        assertEquals(1, factory.attempts);
         assertEquals(0, factory.live);
+        assertEquals(0, clock.pending.size());
         factory.throwOnCreate = false;
         factory.throwOnStart = true;
         sound.play(true);
         clock.advanceTo(40_000);
-        assertEquals(6, factory.attempts);
+        assertEquals(2, factory.attempts);
         assertEquals(0, factory.live);
+        assertEquals(0, clock.pending.size());
         for (FakeClip clip : factory.clips) assertEquals(1, clip.closed);
     }
 
-    @Test public void completedFirstClipDoesNotPreventTheRemainingBoundedSlots() {
-        sound.play(true);
-        factory.clips.get(0).complete.run();
-        clock.advanceTo(3_000);
-        factory.clips.get(1).complete.run();
-        clock.advanceTo(6_000);
-        factory.clips.get(2).complete.run();
-        clock.advanceTo(100_000);
-        assertEquals(3, factory.started);
-        assertEquals(0, factory.live);
-    }
-
-    @Test public void stalledCallbacksCannotPlayBackToBackCues() {
+    @Test public void stalledSchedulerCannotStartExtraWarningCues() {
         sound.play(true);
         clock.stallTo(7_000);
         clock.runDue();
-        assertEquals(2, factory.started);
+        assertEquals(1, factory.attempts);
+        assertEquals(1, factory.started);
         assertEquals(1, factory.live);
         clock.advanceTo(9_500);
-        assertEquals(2, factory.started);
         assertEquals(0, factory.live);
     }
 
-    @Test public void elapsedDeadlinePreventsReplayAfterSleepOrLongUiStall() {
+    @Test public void elapsedDeadlineNeverReplaysAfterSleepOrLongUiStall() {
         sound.play(true);
         clock.stallTo(100_000);
         clock.runDue();
@@ -275,13 +251,24 @@ public final class SunroofSoundPlayerTest {
         assertEquals(0, clock.pending.size());
     }
 
-    @Test public void playerCreationThatOutlivesTheDeadlineNeverStartsAudio() {
+    @Test public void playerCreationThatOutlivesDeadlineNeverStartsAudio() {
         factory.createDelay = 10_000;
         sound.play(true);
         assertEquals(1, factory.attempts);
         assertEquals(0, factory.started);
         assertEquals(1, factory.clips.get(0).closed);
         assertEquals(0, clock.pending.size());
+    }
+
+    @Test public void cancellationDuringCreationClosesReturnedPlayerWithoutStartingIt() {
+        factory.duringCreate = sound::stop;
+        sound.play(true);
+        assertEquals(1, factory.attempts);
+        assertEquals(0, factory.started);
+        assertEquals(1, factory.clips.get(0).closed);
+        assertEquals(0, clock.pending.size());
+        clock.advanceTo(100_000);
+        assertEquals(1, factory.attempts);
     }
 
     @Test public void stopAndErrorsAreIdempotentAfterEverythingWasReleased() {
@@ -355,6 +342,7 @@ public final class SunroofSoundPlayerTest {
         private int live;
         private int maxLive;
         private long createDelay;
+        private Runnable duringCreate;
 
         @Override public SunroofSoundPlayer.Clip create(int resource,
                 Runnable complete, Runnable error) {
@@ -365,6 +353,7 @@ public final class SunroofSoundPlayerTest {
             clock.stallTo(clock.now() + createDelay);
             FakeClip clip = new FakeClip(complete, error);
             clips.add(clip);
+            if (duringCreate != null) duringCreate.run();
             return clip;
         }
     }

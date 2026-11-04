@@ -25,7 +25,7 @@ Build the target release and debug classes first, then run from the repository r
 ```sh
 JAVA_HOME=/path/to/jdk17 \
 python3 tools/sunroof_background_device/run.py \
-  --app-apk app/app/build/outputs/apk/release/kia_374_sunroof.apk \
+  --app-apk app/app/build/outputs/apk/release/kia_375_sunroof.apk \
   --serial emulator-5570 \
   --output /absolute/path/to/evidence
 ```
@@ -65,12 +65,21 @@ selection, verifies PCM16 / 24 kHz / mono voice metadata, and derives its expect
 duration from the audio frame count. Both clips must complete and release
 naturally. Turning the shared preference off must
 silence both real transitions. With that preference and the legacy warning
-preference both false, ACC OFF must still play the mandatory rear ADAS warning
-with its original 23552 frames at 44.1 kHz / stereo (about 534 ms); an actual input
-tap must release it. The report retains resource hashes and PCM metadata in
+preference both false, ACC OFF must still play the mandatory combined warning
+once: the unchanged rear ADAS signal, a 140 ms silent gap, then the spoken roof
+warning. Its 105578-frame PCM16 / 44.1 kHz / stereo resource lasts about 2394 ms.
+The fixture verifies the selected whole-file hash, original 23552-frame beep PCM
+hash, 6174 zero gap frames, voice boundaries and identical speaker channels.
+An actual input tap and a separate real roof-close packet must each stop playback
+during the spoken part. A separate episode must complete naturally while its
+overlay persists; actual duplicate packets and controller refreshes at 3 s and
+6 s must leave audio silent. The fixture polls the production MediaPlayer about
+every 100 ms through at least 9.8 s to detect replay beyond the 9.5 s hard guard.
+The report retains resource hashes and PCM metadata in
 `audioAssets`, with measured durations and preference values in `audioProofs`. This phase tests
 the deployed 24 kHz mono voice and 44.1 kHz stereo warning WAV decoding through
-Android, without repeating the full background/cache suite.
+Android, without repeating the full background/cache suite. Timing observations
+and cancellation positions are retained in `warningPlaybackProbes`.
 
 Each phase writes a JSON report with the installed APK hash, process ID, assertion
 counts and number of injected roof packets. Screenshots, WindowManager dumps and

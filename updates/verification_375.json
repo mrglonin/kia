@@ -1,0 +1,288 @@
+{
+  "app": {
+    "version_name": "23.21-sunroof",
+    "version_code": 375,
+    "asset_name": "kia_375_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.21-375/kia_375_sunroof.apk",
+    "sha256": "2f03faad447b248945aac8e297baae25fd1c8a7d3bc9a3deee8d4280dc7a4dcf",
+    "size": 7429084
+  },
+  "base_commit": "636874f6630572b60485d1ee9e11ab493a0c2c8f",
+  "signing_certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "artifact_checks": {
+    "zip_crc": "PASS",
+    "zipalign_16k": "PASS",
+    "apksigner": "PASS",
+    "same_certificate_as_374": true,
+    "exact_selected_audio_resources_embedded": true
+  },
+  "unit_tests": {
+    "tests": 464,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "sound_player_unit_tests": 20,
+  "lint": {
+    "errors": 0,
+    "warnings": 78
+  },
+  "android_audio_instrumentation": {
+    "passed": true,
+    "scenarios": 7,
+    "assertions": 79,
+    "failures": 0,
+    "boundary": "Real Android app/service/router/state/policy/windows; USB hardware and native ACC input replaced; no QA policy/scenario used",
+    "qa_policy_used": false,
+    "physical_head_unit_tested": false,
+    "audio_proofs": [
+      {
+        "role": "opening_voice",
+        "playerClass": "android.media.MediaPlayer",
+        "clipClass": "kia.app.sunroof.SunroofSoundPlayer$AndroidFactory$1",
+        "isPlaying": true,
+        "durationMs": 1160,
+        "expectedDurationMs": 1160,
+        "expectedFromInstalledPcmWav": {
+          "resourceName": "sunroof_open_voice",
+          "sha256": "7d1eb7b2b2929b604a4871119a9b1f3f49a2cce365bb17fc08f8465f40579898",
+          "encoding": "PCM16",
+          "channels": 1,
+          "sampleRateHz": 24000,
+          "frames": 27840,
+          "durationExactMs": 1160,
+          "expectedDurationMs": 1160
+        },
+        "transitionSoundPreference": true,
+        "legacyWarningSoundPreference": false,
+        "physicalAudibilityVerified": false
+      },
+      {
+        "role": "closing_voice",
+        "playerClass": "android.media.MediaPlayer",
+        "clipClass": "kia.app.sunroof.SunroofSoundPlayer$AndroidFactory$1",
+        "isPlaying": true,
+        "durationMs": 1400,
+        "expectedDurationMs": 1400,
+        "expectedFromInstalledPcmWav": {
+          "resourceName": "sunroof_close_voice",
+          "sha256": "da57b0919d9e790aadb009b90c577ad4181cab9d4ddbde4720926c70c998d83f",
+          "encoding": "PCM16",
+          "channels": 1,
+          "sampleRateHz": 24000,
+          "frames": 33600,
+          "durationExactMs": 1400,
+          "expectedDurationMs": 1400
+        },
+        "transitionSoundPreference": true,
+        "legacyWarningSoundPreference": false,
+        "physicalAudibilityVerified": false
+      },
+      {
+        "role": "mandatory_rear_adas_warning",
+        "playerClass": "android.media.MediaPlayer",
+        "clipClass": "kia.app.sunroof.SunroofSoundPlayer$AndroidFactory$1",
+        "isPlaying": true,
+        "durationMs": 2394,
+        "expectedDurationMs": 2394,
+        "expectedFromInstalledPcmWav": {
+          "resourceName": "sunroof_warning_adas",
+          "sha256": "493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70",
+          "encoding": "PCM16",
+          "channels": 2,
+          "sampleRateHz": 44100,
+          "frames": 105578,
+          "durationExactMs": 2394.0589569160998,
+          "expectedDurationMs": 2394,
+          "originalBeepFrames": 23552,
+          "originalBeepPcmSha256": "ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141",
+          "silentGapFrames": 6174,
+          "silentGapAllZero": true,
+          "voiceStartFrame": 29726,
+          "voiceFrames": 75852,
+          "channelsIdentical": true
+        },
+        "transitionSoundPreference": false,
+        "legacyWarningSoundPreference": false,
+        "physicalAudibilityVerified": false
+      },
+      {
+        "role": "mandatory_warning_natural_completion",
+        "playerClass": "android.media.MediaPlayer",
+        "clipClass": "kia.app.sunroof.SunroofSoundPlayer$AndroidFactory$1",
+        "isPlaying": true,
+        "durationMs": 2394,
+        "expectedDurationMs": 2394,
+        "expectedFromInstalledPcmWav": {
+          "resourceName": "sunroof_warning_adas",
+          "sha256": "493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70",
+          "encoding": "PCM16",
+          "channels": 2,
+          "sampleRateHz": 44100,
+          "frames": 105578,
+          "durationExactMs": 2394.0589569160998,
+          "expectedDurationMs": 2394,
+          "originalBeepFrames": 23552,
+          "originalBeepPcmSha256": "ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141",
+          "silentGapFrames": 6174,
+          "silentGapAllZero": true,
+          "voiceStartFrame": 29726,
+          "voiceFrames": 75852,
+          "channelsIdentical": true
+        },
+        "transitionSoundPreference": false,
+        "legacyWarningSoundPreference": false,
+        "physicalAudibilityVerified": false
+      },
+      {
+        "role": "mandatory_warning_roof_close_cancellation",
+        "playerClass": "android.media.MediaPlayer",
+        "clipClass": "kia.app.sunroof.SunroofSoundPlayer$AndroidFactory$1",
+        "isPlaying": true,
+        "durationMs": 2394,
+        "expectedDurationMs": 2394,
+        "expectedFromInstalledPcmWav": {
+          "resourceName": "sunroof_warning_adas",
+          "sha256": "493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70",
+          "encoding": "PCM16",
+          "channels": 2,
+          "sampleRateHz": 44100,
+          "frames": 105578,
+          "durationExactMs": 2394.0589569160998,
+          "expectedDurationMs": 2394,
+          "originalBeepFrames": 23552,
+          "originalBeepPcmSha256": "ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141",
+          "silentGapFrames": 6174,
+          "silentGapAllZero": true,
+          "voiceStartFrame": 29726,
+          "voiceFrames": 75852,
+          "channelsIdentical": true
+        },
+        "transitionSoundPreference": false,
+        "legacyWarningSoundPreference": false,
+        "physicalAudibilityVerified": false
+      }
+    ],
+    "audio_assets": {
+      "opening_voice": {
+        "resourceName": "sunroof_open_voice",
+        "sha256": "7d1eb7b2b2929b604a4871119a9b1f3f49a2cce365bb17fc08f8465f40579898",
+        "encoding": "PCM16",
+        "channels": 1,
+        "sampleRateHz": 24000,
+        "frames": 27840,
+        "durationExactMs": 1160,
+        "expectedDurationMs": 1160
+      },
+      "closing_voice": {
+        "resourceName": "sunroof_close_voice",
+        "sha256": "da57b0919d9e790aadb009b90c577ad4181cab9d4ddbde4720926c70c998d83f",
+        "encoding": "PCM16",
+        "channels": 1,
+        "sampleRateHz": 24000,
+        "frames": 33600,
+        "durationExactMs": 1400,
+        "expectedDurationMs": 1400
+      },
+      "mandatory_rear_adas_warning": {
+        "resourceName": "sunroof_warning_adas",
+        "sha256": "493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70",
+        "encoding": "PCM16",
+        "channels": 2,
+        "sampleRateHz": 44100,
+        "frames": 105578,
+        "durationExactMs": 2394.0589569160998,
+        "expectedDurationMs": 2394,
+        "originalBeepFrames": 23552,
+        "originalBeepPcmSha256": "ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141",
+        "silentGapFrames": 6174,
+        "silentGapAllZero": true,
+        "voiceStartFrame": 29726,
+        "voiceFrames": 75852,
+        "channelsIdentical": true
+      }
+    },
+    "scenario_names": [
+      "actual_single_voice_toggle_and_no_preview_buttons",
+      "actual_opening_voice_pcm24k",
+      "actual_closing_voice_pcm24k",
+      "shared_toggle_off_silences_both_real_transitions",
+      "combined_warning_plays_despite_flags_off_and_tap_cancels_during_voice",
+      "combined_warning_completes_once_with_overlay_and_no_three_six_second_replay",
+      "real_roof_close_cancels_combined_warning_during_voice"
+    ],
+    "warning_replay_watch": {
+      "sample_count": 72,
+      "first_elapsed_ms": 2812,
+      "last_elapsed_ms": 9950,
+      "all_players_absent": true,
+      "all_warning_windows_attached": true,
+      "actual_duplicate_roof_packets_and_refresh_at_three_six_seconds": true
+    },
+    "speech_cancellation_probes": [
+      {
+        "event": "tap_during_spoken_warning",
+        "elapsedMs": 1384,
+        "playerPresent": true,
+        "isPlaying": true,
+        "positionMs": 1086,
+        "windowShowing": true
+      },
+      {
+        "event": "real_roof_close_during_spoken_warning",
+        "elapsedMs": 1185,
+        "playerPresent": true,
+        "isPlaying": true,
+        "positionMs": 1059,
+        "windowShowing": true
+      }
+    ]
+  },
+  "inherited_background_validation": {
+    "release": 373,
+    "assertions": 143,
+    "changed_core_files": [],
+    "verified_unchanged_source_sha256": {
+      "app/app/src/main/java/kia/app/protocol/adapter/FrameRouter.java": "8b9b8442e4cecba4b558d358a82d64d37f3980a5afc8ffb578354fb88460405b",
+      "app/app/src/main/java/kia/app/sunroof/SunroofAlertPolicy.java": "1729a1e39f88f38d85445946942b14ec28cdd619e3855246fa31e0652908723e",
+      "app/app/src/main/java/kia/app/sunroof/SunroofOverlayController.java": "7d7c5e086d32f5505ada07763674e1aed8b6a6dd566d84cc979c7ddaa33b30be",
+      "app/app/src/main/java/kia/app/sunroof/SunroofOverlayGeometry.java": "f6400da54a65b7883db4ddcb4d7445907a9ea6c844a60c952569a910f630b5d9",
+      "app/app/src/main/java/kia/app/sunroof/SunroofOverlayView.java": "679d33cf419c659c9824e9423140a128f3a0ea622145ff299478b7bd092d6d17",
+      "app/app/src/main/java/kia/app/sunroof/SunroofStateMemory.java": "610294ba7f69b809bd437bd2dc2e11994c4397d5fb7c99a079a5468180c5ea99",
+      "app/app/src/main/java/kia/app/sunroof/TeyesSunroofObserver.java": "7f15d6298eff71b8205c5c6e722eda9851d842f57713829a7ba27283eceea065",
+      "app/app/src/main/java/kia/app/sunroof/TeyesSunroofSignals.java": "abc03af3cb39bd210b4049e26d90cb41998189351db28617d804e4a6a32bac25",
+      "app/app/src/main/java/kia/app/tpms/TpmsWarningOverlayController.java": "b5cc9c8a60f0847157aefbdefbb9ebd8bee8377b254f4885299f028cffa6664b"
+    },
+    "rerun_in_375": false
+  },
+  "source_sha256": {
+    "app/app/src/main/java/kia/app/entry/MainActivity.java": "13fb2075f05aff7d1e7c911b7514836492316e6bfae39de6473b58be942a9699",
+    "app/app/src/main/java/kia/app/sunroof/SunroofSoundPlayer.java": "b714238b034c6bf71aeb06cce1a215cf528c748e0c5c66b816dd55eb3c55834c",
+    "app/app/src/main/res/raw/sunroof_open_voice.wav": "7d1eb7b2b2929b604a4871119a9b1f3f49a2cce365bb17fc08f8465f40579898",
+    "app/app/src/main/res/raw/sunroof_close_voice.wav": "da57b0919d9e790aadb009b90c577ad4181cab9d4ddbde4720926c70c998d83f",
+    "app/app/src/main/res/raw/sunroof_warning_adas.wav": "493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70"
+  },
+  "warning_audio": {
+    "phrase": "Внимание, люк открыт.",
+    "sequence": [
+      "Original balanced rear ADAS beep",
+      "140 ms silence",
+      "Female reference-conditioned warning phrase"
+    ],
+    "plays_per_presentation": 1,
+    "three_six_second_repeats_removed": true,
+    "natural_completion_keeps_overlay": true,
+    "warning_audio_ignores_transition_switch": true,
+    "acknowledgement_or_roof_close_cancels_speech": true,
+    "voice_asr": "Внимание, люк открыт.",
+    "combined_asr": "Внимание, люк открыт.",
+    "provenance": "docs/sunroof-warning-375.json"
+  },
+  "normal_open_close_voices_unchanged": true,
+  "car_width_growth_percent": 20,
+  "car_window_alpha": 1,
+  "preview_buttons_present": false,
+  "navigator_unchanged": true,
+  "firmware_unchanged": true,
+  "physical_audibility_tested": false
+}

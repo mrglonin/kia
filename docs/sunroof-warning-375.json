@@ -1,0 +1,141 @@
+{
+  "version_code": 375,
+  "generation": {
+    "phrase": "Внимание, люк открыт.",
+    "engine": "MLX Audio / Qwen3-TTS Base reference-conditioned zero-shot synthesis",
+    "checkpoint": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+    "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+    "seed": 20261105,
+    "parameters": {
+      "temperature": 0.7,
+      "top_k": 50,
+      "top_p": 1.0,
+      "repetition_penalty": 1.05,
+      "max_tokens": 100,
+      "lang_code": "russian",
+      "stream": false,
+      "verbose": false
+    },
+    "conditioning": {
+      "file": "conditioning-teyes-left-right.wav",
+      "sha256": "720421a702dbb8c5bb65a14b5f9174ec98a242ff1cf203b9ae1ff0bbd02e9964",
+      "text": "Внимание, слева сзади. Внимание, справа сзади.",
+      "text_source": "Independent mlx-community/whisper-small-mlx ASR of original left and right warning files, concatenated in that order.",
+      "preprocessing": "FFmpeg decode, select the active LEFT channel from the left warning and active RIGHT channel from the right warning, resample to mono 24 kHz PCM16 and concatenate left then right; no stereo averaging, no added effects, no pitch or rate changes.",
+      "source_left_sha256": "0f9e2c0f886a218a2397c946bb9328a440104176611602b404c3f0615bcc11d4",
+      "source_right_sha256": "76d94e825799a7216d74c661b6b928d382a2692ddd508ba2e2b058bab265d266",
+      "path": "conditioning-teyes-left-right.wav"
+    },
+    "packages": {
+      "mlx-audio": "0.6.4",
+      "mlx": "0.32.4",
+      "numpy": "2.5.4",
+      "transformers": "5.22.1",
+      "soundfile": "0.14.0"
+    },
+    "normal_status_files_preserved": {
+      "sunroof-open.wav": "7d1eb7b2b2929b604a4871119a9b1f3f49a2cce365bb17fc08f8465f40579898",
+      "sunroof-closed.wav": "da57b0919d9e790aadb009b90c577ad4181cab9d4ddbde4720926c70c998d83f"
+    },
+    "generation_seconds": 2.0258469581604004,
+    "raw_generation": {
+      "file": "sunroof-warning-voice-generated.wav",
+      "subtype": "FLOAT",
+      "sample_rate": 24000,
+      "channels": 1,
+      "duration_seconds": 1.52,
+      "sha256": "206e7cba081e788f998d9f4ac8781510c326bc6f48f4462aa18e28b69a151788"
+    },
+    "processing": {
+      "fixed_gain_db": -2.1416778564453125,
+      "target_raw_waveform_rms_dbfs": -17,
+      "added_leading_silence_seconds": 0.08,
+      "added_trailing_silence_seconds": 0.12,
+      "pitch_or_rate_change": false,
+      "effects_or_compression": false
+    },
+    "master": {
+      "file": "sunroof-warning-voice.wav",
+      "subtype": "PCM_16",
+      "sample_rate": 24000,
+      "channels": 1,
+      "duration_seconds": 1.72,
+      "peak_dbfs": -2.7024924755096436,
+      "clipped_samples": 0,
+      "sha256": "b96a69354e2681d2f34b741967e9963dc0bce3fb4737336808dbe004f28636ba"
+    },
+    "preview": {
+      "file": "sunroof-warning-voice.mp3",
+      "sha256": "dfdf33fb1b0e1f9b8156f7f84af45738f9e4a42bf75269eb99973a63acc9c104"
+    },
+    "identity_limit": "The anonymous TEYES ADAS speaker is not identified. This is model-generated speech conditioned on the original files, not proof of exact speaker identity or a recording made by the original speaker.",
+    "primary_sources": [
+      "https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/tts/models/qwen3_tts/README.md",
+      "https://github.com/QwenLM/Qwen3-TTS",
+      "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"
+    ]
+  },
+  "composition": {
+    "output": "sunroof-warning-chime-voice.wav",
+    "output_sha256": "493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70",
+    "format": {
+      "sample_rate": 44100,
+      "channels": 2,
+      "bits_per_sample": 16
+    },
+    "duration_seconds": 2.3940589569161,
+    "phrase": "Внимание, люк открыт.",
+    "parts_in_order": [
+      {
+        "part": "original_rear_adas_chime",
+        "source": "rear_warning_both_speakers.wav",
+        "file_sha256": "9ec65ca92ddde1f6227e7b06fb9c8921d403e99dacdecc20364c80be575c7623",
+        "start_frame": 0,
+        "frames": 23552,
+        "duration_seconds": 0.5340589569160997,
+        "audio_payload_sha256": "ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141",
+        "output_segment_sha256": "ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141",
+        "copied_pcm_bit_for_bit": true,
+        "gain_change_db": 0,
+        "occurrences": 1
+      },
+      {
+        "part": "silence_gap",
+        "start_frame": 23552,
+        "frames": 6174,
+        "duration_seconds": 0.14,
+        "all_samples_zero": true
+      },
+      {
+        "part": "female_voice_warning",
+        "source": "sunroof-warning-voice.wav",
+        "source_sha256": "b96a69354e2681d2f34b741967e9963dc0bce3fb4737336808dbe004f28636ba",
+        "start_frame": 29726,
+        "frames": 75852,
+        "duration_seconds": 1.72,
+        "resampled_stereo_file": "sunroof-warning-voice-stereo-44100.wav",
+        "resampled_stereo_sha256": "1c3265cd6d9541195f2c5da426695d0e6569e4d84ae820b02ff7635ea6ba4eee",
+        "resampled_audio_payload_sha256": "7aaa5181b28955f177d8c10dfb626e0d89fb756d7d7c1bc46bcf27c8e4f7830f",
+        "output_segment_sha256": "7aaa5181b28955f177d8c10dfb626e0d89fb756d7d7c1bc46bcf27c8e4f7830f",
+        "resampling": "24 kHz mono PCM16 to 44.1 kHz PCM16; mono duplicated identically into LEFT and RIGHT; no additional gain",
+        "left_and_right_identical": true,
+        "occurrences": 1
+      }
+    ],
+    "peak_dbfs": -0.0007952533512092487,
+    "clipped_samples": 0,
+    "loop_metadata": false,
+    "playback_intent": "Play this complete file once on the ACC-off open-sunroof warning.",
+    "source_original_unchanged": true
+  },
+  "validation": {
+    "independent_asr_voice": "Внимание, люк открыт.",
+    "independent_asr_combined": "Внимание, люк открыт.",
+    "exact_beep_pcm_prefix": true,
+    "zero_gap_frames": 6174,
+    "voice_left_right_identical": true,
+    "clipped_samples": 0,
+    "normal_voice_masters_unchanged": true,
+    "runtime_playback_is_separately_verified": true
+  }
+}

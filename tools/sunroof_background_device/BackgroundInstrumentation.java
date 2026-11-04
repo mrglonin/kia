@@ -68,6 +68,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
     private JSONObject warningAudioProof;
     private final JSONArray audioProofs = new JSONArray();
     private final JSONObject audioAssets = new JSONObject();
+    private final JSONArray warningPlaybackProbes = new JSONArray();
 
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
@@ -294,8 +295,6 @@ public final class BackgroundInstrumentation extends Instrumentation {
         JSONObject opening = readPcmWav("sunroof_open_voice", 24000, 1);
         JSONObject closing = readPcmWav("sunroof_close_voice", 24000, 1);
         JSONObject warning = readPcmWav("sunroof_warning_adas", 44100, 2);
-        if (warning.getLong("frames") != 23552L)
-            throw new AssertionError("mandatory rear ADAS warning must retain its original 23552 frames");
         audioAssets.put("opening_voice", opening);
         audioAssets.put("closing_voice", closing);
         audioAssets.put("mandatory_rear_adas_warning", warning);
@@ -342,19 +341,109 @@ public final class BackgroundInstrumentation extends Instrumentation {
             check(onMain(() -> actualMediaPlayer() == null), "shared toggle OFF silences real closing");
             check(windowShowing(), "silent closing still shows its real roof window");
         });
-        scenario("rear_adas_pcm44100_plays_despite_both_sound_preferences_false", () -> {
+        scenario("combined_warning_plays_despite_flags_off_and_tap_cancels_during_voice", () -> {
             dismissRoof();
             nativeAcc(true);
             injectRoof(true);
+            long started = SystemClock.elapsedRealtime();
             nativeAcc(false);
             check(!AppSettings.sunroofSoundEnabled(app) && !AppSettings.sunroofTransitionSoundEnabled(app),
                     "legacy warning and shared voice sound settings are both OFF");
             assertAudioCue("mandatory_rear_adas_warning", warning);
             assertRoofWindow(true, true);
             capture("mandatory_rear_adas_warning_before_tap");
+            waitForSpokenPart(started, "tap_during_spoken_warning");
             shell("input tap 640 400");
             waitUntil(() -> !windowShowing(), 1800L, "mandatory warning accepts actual input tap");
             check(onMain(() -> actualMediaPlayer() == null), "actual tap releases warning MediaPlayer");
+        });
+        scenario("combined_warning_completes_once_with_overlay_and_no_three_six_second_replay", () -> {
+            dismissRoof();
+            nativeAcc(true);
+            injectRoof(true);
+            long started = SystemClock.elapsedRealtime();
+            nativeAcc(false);
+            assertAudioCue("mandatory_warning_natural_completion", warning);
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null), warning.getInt("expectedDurationMs") + 900L,
+                    "combined ADAS and voice complete and release the real MediaPlayer naturally");
+            check(windowShowing(), "warning overlay persists after natural audio completion");
+            boolean refreshedAtThree = false, refreshedAtSix = false;
+            int samples = 0;
+            long nextProbeAt = SystemClock.elapsedRealtime();
+            while (SystemClock.elapsedRealtime() - started < 9800L) {
+                long elapsed = SystemClock.elapsedRealtime() - started;
+                if ((!refreshedAtThree && elapsed >= 3000L) || (!refreshedAtSix && elapsed >= 6000L)) {
+                    injectRoof(true); // Actual duplicate 0x76 packet; no synthetic policy call.
+                    onMain(() -> { controller.apply(); return null; });
+                    if (elapsed >= 6000L) refreshedAtSix = true;
+                    else refreshedAtThree = true;
+                }
+                JSONObject probe = warningPlaybackProbe("post_completion_replay_watch", started);
+                warningPlaybackProbes.put(probe);
+                if (probe.getBoolean("playerPresent"))
+                    throw new AssertionError("warning audio replayed after natural completion at " + elapsed + " ms");
+                if (!probe.getBoolean("windowShowing"))
+                    throw new AssertionError("warning overlay disappeared after natural completion at " + elapsed + " ms");
+                samples++;
+                nextProbeAt += 100L;
+                long remaining = nextProbeAt - SystemClock.elapsedRealtime();
+                if (remaining > 0) SystemClock.sleep(remaining);
+            }
+            JSONObject finalProbe = warningPlaybackProbe("post_completion_replay_watch_final", started);
+            warningPlaybackProbes.put(finalProbe);
+            check(refreshedAtThree && refreshedAtSix, "real duplicate packets and service apply exercised the 3 s and 6 s points");
+            check(samples >= 60, "MediaPlayer inspected every ~100 ms through at least 9.8 s without replay");
+            check(finalProbe.getLong("elapsedMs") >= 9800L && !finalProbe.getBoolean("playerPresent")
+                            && finalProbe.getBoolean("windowShowing"),
+                    "persistent warning remains silent past 9.8 s and the 9.5 s audio hard guard");
+            check(!activityVisible() && AppService.isRunning(), "once-only warning remained over Home with real service alive");
+            capture("combined_warning_persists_after_9800ms_without_audio_replay");
+        });
+        scenario("real_roof_close_cancels_combined_warning_during_voice", () -> {
+            dismissRoof();
+            nativeAcc(true);
+            injectRoof(true);
+            long started = SystemClock.elapsedRealtime();
+            nativeAcc(false);
+            assertAudioCue("mandatory_warning_roof_close_cancellation", warning);
+            waitForSpokenPart(started, "real_roof_close_during_spoken_warning");
+            injectRoof(false);
+            waitUntil(() -> onMain(() -> controller.statusSummary().contains("kind=CLOSING")), 1800L,
+                    "real roof closed packet replaces parking warning with the ordinary closing animation");
+            check(onMain(() -> actualMediaPlayer() == null), "real roof closed packet releases the warning MediaPlayer");
+            assertRoofWindow(false, false);
+            check(StateStore.vehicle().sunroofKnown && !StateStore.vehicle().sunroofOpen,
+                    "roof close cancellation came from the actual FrameRouter state");
+            SystemClock.sleep(1500L);
+            check(onMain(() -> actualMediaPlayer() == null), "roof close leaves no delayed spoken phrase or audio retry");
+            waitUntil(() -> !windowShowing(), 3500L, "ordinary closing animation fades after warning cancellation");
+        });
+    }
+
+    private void waitForSpokenPart(long started, String event) throws Exception {
+        long remaining = 1100L - (SystemClock.elapsedRealtime() - started);
+        if (remaining > 0) SystemClock.sleep(remaining);
+        JSONObject probe = warningPlaybackProbe(event, started);
+        warningPlaybackProbes.put(probe);
+        check(probe.getBoolean("playerPresent") && probe.optBoolean("isPlaying")
+                        && probe.optInt("positionMs") >= 674 && probe.optInt("positionMs") < 2394,
+                event + " occurs during the spoken portion of the actual combined MediaPlayer cue");
+    }
+
+    private JSONObject warningPlaybackProbe(String event, long started) throws Exception {
+        return onMain(() -> {
+            JSONObject probe = new JSONObject();
+            android.media.MediaPlayer player = actualMediaPlayer();
+            View view = (View) field(controller, "overlay");
+            probe.put("event", event);
+            probe.put("elapsedMs", SystemClock.elapsedRealtime() - started);
+            probe.put("playerPresent", player != null);
+            if (player != null) {
+                probe.put("isPlaying", player.isPlaying());
+                probe.put("positionMs", player.getCurrentPosition());
+            }
+            probe.put("windowShowing", view != null && view.isAttachedToWindow());
+            return probe;
         });
     }
 
@@ -403,6 +492,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
         if (riffEnd != wav.length) throw new AssertionError(name + " has inconsistent RIFF length");
         int format = -1, channels = -1, rate = -1, bits = -1, blockAlign = -1;
         long dataBytes = -1;
+        int dataOffset = -1;
         for (long position = 12; position + 8 <= riffEnd;) {
             int offset = (int) position;
             long chunkLength = unsignedLe(wav, offset + 4, 4);
@@ -418,6 +508,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             } else if (asciiAt(wav, offset, "data")) {
                 if (dataBytes != -1) throw new AssertionError(name + " has multiple data chunks");
                 dataBytes = chunkLength;
+                dataOffset = offset + 8;
             }
             position = next + (chunkLength & 1L);
         }
@@ -440,6 +531,28 @@ public final class BackgroundInstrumentation extends Instrumentation {
         value.put("frames", frames);
         value.put("durationExactMs", durationMs);
         value.put("expectedDurationMs", Math.round(durationMs));
+        if ("sunroof_warning_adas".equals(name)) {
+            if (frames != 105578L || !"493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70".equals(hash.toString()))
+                throw new AssertionError("combined warning differs from the selected 105578-frame master");
+            java.security.MessageDigest prefix = java.security.MessageDigest.getInstance("SHA-256");
+            prefix.update(wav, dataOffset, 23552 * blockAlign);
+            StringBuilder prefixHash = new StringBuilder();
+            for (byte item : prefix.digest()) prefixHash.append(String.format(java.util.Locale.ROOT, "%02x", item & 255));
+            if (!"ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141".equals(prefixHash.toString()))
+                throw new AssertionError("combined warning changed the original rear ADAS PCM prefix");
+            for (int index = dataOffset + 23552 * blockAlign; index < dataOffset + 29726 * blockAlign; index++)
+                if (wav[index] != 0) throw new AssertionError("combined warning gap must contain 6174 silent frames");
+            for (int index = dataOffset; index < dataOffset + dataBytes; index += blockAlign)
+                if (wav[index] != wav[index + 2] || wav[index + 1] != wav[index + 3])
+                    throw new AssertionError("combined warning must send identical PCM to both speaker channels");
+            value.put("originalBeepFrames", 23552);
+            value.put("originalBeepPcmSha256", prefixHash.toString());
+            value.put("silentGapFrames", 6174);
+            value.put("silentGapAllZero", true);
+            value.put("voiceStartFrame", 29726);
+            value.put("voiceFrames", 75852);
+            value.put("channelsIdentical", true);
+        }
         return value;
     }
 
@@ -488,6 +601,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             report.put("warningAudioProof", warningAudioProof);
             report.put("audioProofs", audioProofs);
             report.put("audioAssets", audioAssets);
+            report.put("warningPlaybackProbes", warningPlaybackProbes);
             report.put("results", results);
             report.put("assertions", assertions);
             report.put("failures", failures);
@@ -531,7 +645,9 @@ public final class BackgroundInstrumentation extends Instrumentation {
                     EPOCH, SystemClock.elapsedRealtime());
             return null;
         });
-        waitForIdleSync();
+        // A persistent warning intentionally animates continuously. Waiting for
+        // queue idleness here can skip whole playback/replay observation periods.
+        onMain(() -> null);
     }
 
     private void injectTpms(int[] pressure) throws Exception {
