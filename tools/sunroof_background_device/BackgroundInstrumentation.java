@@ -66,6 +66,8 @@ public final class BackgroundInstrumentation extends Instrumentation {
     private String phase = "main";
     private int roofPacketsInjected;
     private JSONObject warningAudioProof;
+    private final JSONArray audioProofs = new JSONArray();
+    private final JSONObject audioAssets = new JSONObject();
 
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
@@ -118,6 +120,11 @@ public final class BackgroundInstrumentation extends Instrumentation {
             }
             if ("ui".equals(phase)) {
                 scenario("actual_general_settings_have_one_transition_sound_no_previews", this::verifyGeneralSettings);
+                completeReport(report);
+                return;
+            }
+            if ("audio".equals(phase)) {
+                runAudioPhase();
                 completeReport(report);
                 return;
             }
@@ -281,6 +288,188 @@ public final class BackgroundInstrumentation extends Instrumentation {
         });
     }
 
+    private void runAudioPhase() throws Exception {
+        // Read the installed target's resources, independently of the production
+        // cue selection. A stale fixture must not expect an earlier voice take.
+        JSONObject opening = readPcmWav("sunroof_open_voice", 24000, 1);
+        JSONObject closing = readPcmWav("sunroof_close_voice", 24000, 1);
+        JSONObject warning = readPcmWav("sunroof_warning_adas", 44100, 2);
+        if (warning.getLong("frames") != 23552L)
+            throw new AssertionError("mandatory rear ADAS warning must retain its original 23552 frames");
+        audioAssets.put("opening_voice", opening);
+        audioAssets.put("closing_voice", closing);
+        audioAssets.put("mandatory_rear_adas_warning", warning);
+        scenario("actual_single_voice_toggle_and_no_preview_buttons", this::verifyGeneralSettings);
+        installUsbBoundary();
+        injectTpms(new int[]{128, 128, 128, 128});
+        injectRoof(false);
+        onMain(() -> {
+            AppSettings.setSunroofTransitionSoundEnabled(app, true);
+            controller.apply();
+            return null;
+        });
+        shell("input keyevent KEYCODE_HOME");
+        waitUntil(() -> !activityVisible(), 2500L, "audio test moves actual MainActivity behind Home");
+        SystemClock.sleep(250L);
+        scenario("actual_opening_voice_pcm24k", () -> {
+            injectRoof(true);
+            assertAudioCue("opening_voice", opening);
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null), opening.getInt("expectedDurationMs") + 900L,
+                    "opening voice completes and releases real MediaPlayer");
+        });
+        scenario("actual_closing_voice_pcm24k", () -> {
+            dismissRoof();
+            injectRoof(false);
+            assertAudioCue("closing_voice", closing);
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null), closing.getInt("expectedDurationMs") + 900L,
+                    "closing voice completes and releases real MediaPlayer");
+        });
+        scenario("shared_toggle_off_silences_both_real_transitions", () -> {
+            onMain(() -> {
+                AppSettings.setSunroofTransitionSoundEnabled(app, false);
+                AppSettings.setSunroofSoundEnabled(app, false);
+                controller.apply();
+                return null;
+            });
+            dismissRoof();
+            injectRoof(true);
+            SystemClock.sleep(100L);
+            check(onMain(() -> actualMediaPlayer() == null), "shared toggle OFF silences real opening");
+            check(windowShowing(), "silent opening still shows its real roof window");
+            dismissRoof();
+            injectRoof(false);
+            SystemClock.sleep(100L);
+            check(onMain(() -> actualMediaPlayer() == null), "shared toggle OFF silences real closing");
+            check(windowShowing(), "silent closing still shows its real roof window");
+        });
+        scenario("rear_adas_pcm44100_plays_despite_both_sound_preferences_false", () -> {
+            dismissRoof();
+            nativeAcc(true);
+            injectRoof(true);
+            nativeAcc(false);
+            check(!AppSettings.sunroofSoundEnabled(app) && !AppSettings.sunroofTransitionSoundEnabled(app),
+                    "legacy warning and shared voice sound settings are both OFF");
+            assertAudioCue("mandatory_rear_adas_warning", warning);
+            assertRoofWindow(true, true);
+            capture("mandatory_rear_adas_warning_before_tap");
+            shell("input tap 640 400");
+            waitUntil(() -> !windowShowing(), 1800L, "mandatory warning accepts actual input tap");
+            check(onMain(() -> actualMediaPlayer() == null), "actual tap releases warning MediaPlayer");
+        });
+    }
+
+    private void assertAudioCue(String role, JSONObject asset) throws Exception {
+        int expectedDurationMs = asset.getInt("expectedDurationMs");
+        SystemClock.sleep(100L);
+        JSONObject proof = onMain(() -> {
+            android.media.MediaPlayer player = actualMediaPlayer();
+            check(player != null, role + " uses a production Android MediaPlayer");
+            check(player.isPlaying(), role + " is playing about 100 ms after actual input");
+            int duration = player.getDuration();
+            check(Math.abs(duration - expectedDurationMs) <= 12,
+                    role + " decoded duration " + duration + " ms matches expected " + expectedDurationMs + " ms");
+            check(!activityVisible() && AppService.isRunning(), role + " plays with Activity behind Home and real service alive");
+            check("0x76".equals(StateStore.vehicle().sunroofSource), role + " follows actual FrameRouter roof source");
+            JSONObject value = new JSONObject();
+            value.put("role", role);
+            value.put("playerClass", player.getClass().getName());
+            value.put("clipClass", field(field(controller, "sound"), "player").getClass().getName());
+            value.put("isPlaying", player.isPlaying());
+            value.put("durationMs", duration);
+            value.put("expectedDurationMs", expectedDurationMs);
+            value.put("expectedFromInstalledPcmWav", asset);
+            value.put("transitionSoundPreference", AppSettings.sunroofTransitionSoundEnabled(app));
+            value.put("legacyWarningSoundPreference", AppSettings.sunroofSoundEnabled(app));
+            value.put("physicalAudibilityVerified", false);
+            return value;
+        });
+        audioProofs.put(proof);
+        if (role.contains("warning")) warningAudioProof = proof;
+    }
+
+    private JSONObject readPcmWav(String name, int expectedRate, int expectedChannels) throws Exception {
+        int resource = app.getResources().getIdentifier(name, "raw", app.getPackageName());
+        if (resource == 0) throw new AssertionError("missing target PCM WAV resource " + name);
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.io.InputStream input = app.getResources().openRawResource(resource)) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) bytes.write(buffer, 0, count);
+        }
+        byte[] wav = bytes.toByteArray();
+        if (wav.length < 12 || !asciiAt(wav, 0, "RIFF") || !asciiAt(wav, 8, "WAVE"))
+            throw new AssertionError(name + " is not a RIFF/WAVE resource");
+        long riffEnd = 8L + unsignedLe(wav, 4, 4);
+        if (riffEnd != wav.length) throw new AssertionError(name + " has inconsistent RIFF length");
+        int format = -1, channels = -1, rate = -1, bits = -1, blockAlign = -1;
+        long dataBytes = -1;
+        for (long position = 12; position + 8 <= riffEnd;) {
+            int offset = (int) position;
+            long chunkLength = unsignedLe(wav, offset + 4, 4);
+            long next = position + 8L + chunkLength;
+            if (next > riffEnd) throw new AssertionError(name + " has a truncated WAV chunk");
+            if (asciiAt(wav, offset, "fmt ")) {
+                if (chunkLength < 16) throw new AssertionError(name + " has a truncated PCM format");
+                format = (int) unsignedLe(wav, offset + 8, 2);
+                channels = (int) unsignedLe(wav, offset + 10, 2);
+                rate = (int) unsignedLe(wav, offset + 12, 4);
+                blockAlign = (int) unsignedLe(wav, offset + 20, 2);
+                bits = (int) unsignedLe(wav, offset + 22, 2);
+            } else if (asciiAt(wav, offset, "data")) {
+                if (dataBytes != -1) throw new AssertionError(name + " has multiple data chunks");
+                dataBytes = chunkLength;
+            }
+            position = next + (chunkLength & 1L);
+        }
+        if (format != 1 || channels != expectedChannels || rate != expectedRate || bits != 16
+                || blockAlign != channels * 2 || dataBytes <= 0 || dataBytes % blockAlign != 0)
+            throw new AssertionError(name + " must be PCM16 at " + expectedRate + " Hz / " + expectedChannels + " channels");
+        long frames = dataBytes / blockAlign;
+        double durationMs = frames * 1000.0 / rate;
+        if (durationMs < 200 || durationMs > 10000)
+            throw new AssertionError(name + " has an implausible cue duration " + durationMs);
+        StringBuilder hash = new StringBuilder();
+        for (byte value : java.security.MessageDigest.getInstance("SHA-256").digest(wav))
+            hash.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
+        JSONObject value = new JSONObject();
+        value.put("resourceName", name);
+        value.put("sha256", hash.toString());
+        value.put("encoding", "PCM16");
+        value.put("channels", channels);
+        value.put("sampleRateHz", rate);
+        value.put("frames", frames);
+        value.put("durationExactMs", durationMs);
+        value.put("expectedDurationMs", Math.round(durationMs));
+        return value;
+    }
+
+    private static boolean asciiAt(byte[] bytes, int offset, String expected) {
+        if (offset < 0 || offset + expected.length() > bytes.length) return false;
+        for (int i = 0; i < expected.length(); i++)
+            if (bytes[offset + i] != expected.charAt(i)) return false;
+        return true;
+    }
+
+    private static long unsignedLe(byte[] bytes, int offset, int length) {
+        if (offset < 0 || offset + length > bytes.length)
+            throw new AssertionError("truncated little-endian WAV field");
+        long value = 0;
+        for (int i = 0; i < length; i++) value |= ((long) bytes[offset + i] & 255L) << (i * 8);
+        return value;
+    }
+
+    private android.media.MediaPlayer actualMediaPlayer() throws Exception {
+        Object clip = field(field(controller, "sound"), "player");
+        if (clip == null) return null;
+        for (Field item : clip.getClass().getDeclaredFields()) {
+            if (android.media.MediaPlayer.class.isAssignableFrom(item.getType())) {
+                item.setAccessible(true);
+                return (android.media.MediaPlayer) item.get(clip);
+            }
+        }
+        return null;
+    }
+
     private void completeReport(JSONObject report) throws Exception {
             report.put("boundary", "Real Android app/service/router/state/policy/windows; USB hardware and native ACC input replaced; no QA policy/scenario used");
             report.put("usbHardwareReplaced", true);
@@ -297,6 +486,8 @@ public final class BackgroundInstrumentation extends Instrumentation {
             report.put("phase", phase);
             report.put("roofPacketsInjected", roofPacketsInjected);
             report.put("warningAudioProof", warningAudioProof);
+            report.put("audioProofs", audioProofs);
+            report.put("audioAssets", audioAssets);
             report.put("results", results);
             report.put("assertions", assertions);
             report.put("failures", failures);

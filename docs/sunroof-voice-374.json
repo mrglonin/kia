@@ -1,0 +1,125 @@
+{
+  "engine": "MLX Audio / Qwen3-TTS Base reference-conditioned zero-shot synthesis",
+  "checkpoint": "mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit",
+  "revision": "e7dd0585652209fa0d7783659aad4e8a324de11c",
+  "model_license": "Apache-2.0",
+  "packages": {
+    "mlx-audio": "0.6.4",
+    "mlx": "0.32.4",
+    "numpy": "2.5.4",
+    "transformers": "5.22.1",
+    "soundfile": "0.14.0"
+  },
+  "seed_reset_before_each_phrase": 20261105,
+  "parameters": {
+    "temperature": 0.7,
+    "top_k": 50,
+    "top_p": 1.0,
+    "repetition_penalty": 1.05,
+    "max_tokens": 100,
+    "lang_code": "russian",
+    "stream": false,
+    "verbose": false
+  },
+  "conditioning": {
+    "file": "conditioning-teyes-left-right.wav",
+    "sha256": "720421a702dbb8c5bb65a14b5f9174ec98a242ff1cf203b9ae1ff0bbd02e9964",
+    "text": "Внимание, слева сзади. Внимание, справа сзади.",
+    "text_source": "Independent mlx-community/whisper-small-mlx ASR of original left and right warning files, concatenated in that order.",
+    "preprocessing": "FFmpeg decode, select the active LEFT channel from the left warning and active RIGHT channel from the right warning, resample to mono 24 kHz PCM16 and concatenate left then right; no stereo averaging, no added effects, no pitch or rate changes.",
+    "source_left_sha256": "0f9e2c0f886a218a2397c946bb9328a440104176611602b404c3f0615bcc11d4",
+    "source_right_sha256": "76d94e825799a7216d74c661b6b928d382a2692ddd508ba2e2b058bab265d266"
+  },
+  "primary_sources": [
+    "https://github.com/Blaizzy/mlx-audio/blob/main/mlx_audio/tts/models/qwen3_tts/README.md",
+    "https://github.com/QwenLM/Qwen3-TTS",
+    "https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-1.7B-Base-8bit"
+  ],
+  "identity_limit": "The anonymous TEYES ADAS speaker is not identified. This is model-generated speech conditioned on the original files, not proof of exact speaker identity or a recording made by the original speaker.",
+  "selected_audio": [
+    {
+      "stem": "sunroof-open",
+      "sample_rate": 24000,
+      "channels": 1,
+      "selected_duration_seconds": 1.16,
+      "source_generation_duration_seconds": 0.96,
+      "fixed_gain_db": 1.1689376831054688,
+      "peak_dbfs": -0.8966268301010132,
+      "leading_silence_added_seconds": 0.08,
+      "trailing_silence_added_seconds": 0.12,
+      "processing": "Fixed gain to -17 dBFS RMS of generated waveform; short silence padding only. No pitch/rate processing, filtering, reverb or compression.",
+      "files": [
+        {
+          "file": "sunroof-open.wav",
+          "bytes": 55724,
+          "sha256": "7d1eb7b2b2929b604a4871119a9b1f3f49a2cce365bb17fc08f8465f40579898"
+        },
+        {
+          "file": "sunroof-open.mp3",
+          "bytes": 20012,
+          "sha256": "e48fa42f67c028f5e87728bfe154f238d468d26db2f78fa4f063088aaa34b06a"
+        }
+      ]
+    },
+    {
+      "stem": "sunroof-closed",
+      "sample_rate": 24000,
+      "channels": 1,
+      "selected_duration_seconds": 1.4,
+      "source_generation_duration_seconds": 1.2,
+      "fixed_gain_db": 0.6049575805664062,
+      "peak_dbfs": -1.2725231647491455,
+      "leading_silence_added_seconds": 0.08,
+      "trailing_silence_added_seconds": 0.12,
+      "processing": "Fixed gain to -17 dBFS RMS of generated waveform; short silence padding only. No pitch/rate processing, filtering, reverb or compression.",
+      "files": [
+        {
+          "file": "sunroof-closed.wav",
+          "bytes": 67244,
+          "sha256": "da57b0919d9e790aadb009b90c577ad4181cab9d4ddbde4720926c70c998d83f"
+        },
+        {
+          "file": "sunroof-closed.mp3",
+          "bytes": 23852,
+          "sha256": "f755db4c64686c45a5a7ad027d8247bc80b04a41988757c19d3ab1e4099f3077"
+        }
+      ]
+    },
+    {
+      "stem": "control-left-warning",
+      "sample_rate": 24000,
+      "channels": 1,
+      "selected_duration_seconds": 1.88,
+      "source_generation_duration_seconds": 1.68,
+      "fixed_gain_db": -2.855916976928711,
+      "peak_dbfs": -3.5037527084350586,
+      "leading_silence_added_seconds": 0.08,
+      "trailing_silence_added_seconds": 0.12,
+      "processing": "Fixed gain to -17 dBFS RMS of generated waveform; short silence padding only. No pitch/rate processing, filtering, reverb or compression.",
+      "files": [
+        {
+          "file": "control-left-warning.wav",
+          "bytes": 90284,
+          "sha256": "037b108b2758122164a7cf6a21ad0c283959b30e7313d20c7e1203d8257b844f"
+        },
+        {
+          "file": "control-left-warning.mp3",
+          "bytes": 31532,
+          "sha256": "8aff1872ed61a1e2c9cab778df3431be1e9183f850447cf1eaafa6ba6c833328"
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "independent_final_master_asr": [
+      "Люк открыт.",
+      "Люк закрыт.",
+      "Внимание, слева сзади."
+    ],
+    "clipped_samples": 0,
+    "same_phrase_control_cosine_to_original_left": 0.9096,
+    "similarity_is_not_a_percentage": true,
+    "human_head_unit_audibility_measured": false,
+    "original_speaker_identity_established": false
+  }
+}

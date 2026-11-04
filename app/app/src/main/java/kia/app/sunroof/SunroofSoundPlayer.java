@@ -13,7 +13,7 @@ import java.util.List;
 import kia.app.R;
 import kia.app.core.AppLog;
 
-/** Finite native cues. Main thread only; callers start sound only after showing the overlay. */
+/** Finite roof speech and ADAS cues. Main thread only; callers sound only a shown overlay. */
 public final class SunroofSoundPlayer {
     static final long WARNING_INTERVAL_MS = 3_000L;
     static final long WARNING_WINDOW_MS = 9_500L;
@@ -60,13 +60,14 @@ public final class SunroofSoundPlayer {
         play(warning ? SunroofAlertPolicy.Kind.PARKING_WARNING : SunroofAlertPolicy.Kind.OPENING);
     }
 
-    /** One shared transition cue, or at most three ADAS warning cues three seconds apart. */
+    /** One phrase for the actual transition, or at most three ADAS warning cues three seconds apart. */
     public void play(SunroofAlertPolicy.Kind kind) {
         stop();
         if (!enabled || kind == null || kind == SunroofAlertPolicy.Kind.NONE) return;
         boolean warning = kind == SunroofAlertPolicy.Kind.PARKING_WARNING;
-        // Both roof directions intentionally share one original TEYES Bibi UI effect.
-        int resource = warning ? R.raw.sunroof_warning_adas : R.raw.sunroof_transition_teyes;
+        int resource = warning ? R.raw.sunroof_warning_adas
+                : kind == SunroofAlertPolicy.Kind.OPENING
+                ? R.raw.sunroof_open_voice : R.raw.sunroof_close_voice;
         long current = generation;
         long now = scheduler.now();
         deadline = now + (warning ? WARNING_WINDOW_MS : TRANSITION_WINDOW_MS);
@@ -178,9 +179,12 @@ public final class SunroofSoundPlayer {
             try {
                 AudioAttributes attributes = new AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setContentType(resource == R.raw.sunroof_warning_adas
+                                ? AudioAttributes.CONTENT_TYPE_SONIFICATION
+                                : AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build();
-                // Selected resources are original TEYES Bibi / com.teyes.adas audio bytes.
+                // Speech is a copied generated master. The rear ADAS cue preserves the
+                // original active waveform, routed identically to both speakers.
                 media = MediaPlayer.create(app, resource, attributes, 0);
                 if (media == null) return null;
                 MediaPlayer created = media;

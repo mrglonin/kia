@@ -16,12 +16,13 @@ public final class SunroofSoundPlayerTest {
     private final FakeFactory factory = new FakeFactory();
     private final SunroofSoundPlayer sound = new SunroofSoundPlayer(clock, factory);
 
-    @Test public void openingAndClosingSelectTheSameNativeResourceAndRemainOneShot() {
+    @Test public void openingAndClosingSelectTheirDistinctVoiceResourcesAndRemainOneShot() {
         sound.play(SunroofAlertPolicy.Kind.OPENING);
-        assertEquals(R.raw.sunroof_transition_teyes, (int) factory.resources.get(0));
+        assertEquals(R.raw.sunroof_open_voice, (int) factory.resources.get(0));
         clock.advanceTo(3_000);
         sound.play(SunroofAlertPolicy.Kind.CLOSING);
-        assertEquals(R.raw.sunroof_transition_teyes, (int) factory.resources.get(1));
+        assertEquals(R.raw.sunroof_close_voice, (int) factory.resources.get(1));
+        assertNotEquals(R.raw.sunroof_open_voice, R.raw.sunroof_close_voice);
         clock.advanceTo(20_000);
         assertEquals(2, factory.resources.size());
         assertEquals(2, factory.started);
@@ -31,7 +32,8 @@ public final class SunroofSoundPlayerTest {
         sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
         clock.advanceTo(10_000);
         assertEquals(3, factory.resources.size());
-        assertNotEquals(R.raw.sunroof_transition_teyes, R.raw.sunroof_warning_adas);
+        assertNotEquals(R.raw.sunroof_open_voice, R.raw.sunroof_warning_adas);
+        assertNotEquals(R.raw.sunroof_close_voice, R.raw.sunroof_warning_adas);
         for (int resource : factory.resources) {
             assertEquals(R.raw.sunroof_warning_adas, resource);
         }
@@ -47,7 +49,7 @@ public final class SunroofSoundPlayerTest {
         warning.complete.run();
         for (Runnable callback : stale) callback.run();
         assertEquals(2, factory.resources.size());
-        assertEquals(R.raw.sunroof_transition_teyes, (int) factory.resources.get(1));
+        assertEquals(R.raw.sunroof_close_voice, (int) factory.resources.get(1));
         assertEquals(1, factory.live);
         clock.advanceTo(20_000);
         assertEquals(2, factory.resources.size());
@@ -61,6 +63,43 @@ public final class SunroofSoundPlayerTest {
         clock.advanceTo(20_000);
         assertEquals(1, factory.resources.size());
         assertEquals(1, factory.started);
+        assertEquals(0, factory.live);
+    }
+
+    @Test public void reversingRoofStopsOldPhraseAndOldCompletionCannotStopNewPhrase() {
+        sound.play(SunroofAlertPolicy.Kind.OPENING);
+        FakeClip opening = factory.clips.get(0);
+        List<Runnable> oldCallbacks = clock.pendingRunnables();
+        clock.advanceTo(200);
+        sound.play(SunroofAlertPolicy.Kind.CLOSING);
+        assertEquals(1, opening.closed);
+        opening.complete.run();
+        opening.error.run();
+        for (Runnable callback : oldCallbacks) callback.run();
+        assertEquals(R.raw.sunroof_close_voice, (int) factory.resources.get(1));
+        assertEquals(1, factory.live);
+        assertEquals(1, factory.maxLive);
+        factory.clips.get(1).complete.run();
+        clock.advanceTo(20_000);
+        assertEquals(2, factory.started);
+        assertEquals(0, factory.live);
+    }
+
+    @Test public void newWarningInterruptsPhraseAndOldVoiceDeadlineCannotCancelItsReminders() {
+        sound.play(SunroofAlertPolicy.Kind.OPENING);
+        FakeClip opening = factory.clips.get(0);
+        List<Runnable> oldCallbacks = clock.pendingRunnables();
+        clock.advanceTo(500);
+        sound.play(SunroofAlertPolicy.Kind.PARKING_WARNING);
+        opening.complete.run();
+        for (Runnable callback : oldCallbacks) callback.run();
+        clock.advanceTo(10_000);
+        assertEquals(4, factory.resources.size());
+        assertEquals(R.raw.sunroof_open_voice, (int) factory.resources.get(0));
+        for (int i = 1; i < factory.resources.size(); i++) {
+            assertEquals(R.raw.sunroof_warning_adas, (int) factory.resources.get(i));
+        }
+        assertEquals(1, factory.maxLive);
         assertEquals(0, factory.live);
     }
 

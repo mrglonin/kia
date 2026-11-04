@@ -4103,7 +4103,7 @@ public final class MainActivity extends Activity {
                     SunroofOverlayController.get(this).apply();
                 });
         addInlineSwitch(panel, "Звук открытия и закрытия",
-                "один общий сигнал; звук предупреждения при выключении зажигания работает всегда",
+                "голос «Люк открыт / Люк закрыт»; звук предупреждения работает всегда",
                 AppSettings.sunroofTransitionSoundEnabled(this), (button, checked) -> {
                     AppSettings.setSunroofTransitionSoundEnabled(this, checked);
                     SunroofOverlayController.get(this).apply();

@@ -25,7 +25,7 @@ Build the target release and debug classes first, then run from the repository r
 ```sh
 JAVA_HOME=/path/to/jdk17 \
 python3 tools/sunroof_background_device/run.py \
-  --app-apk app/app/build/outputs/apk/release/kia_373_sunroof.apk \
+  --app-apk app/app/build/outputs/apk/release/kia_374_sunroof.apk \
   --serial emulator-5570 \
   --output /absolute/path/to/evidence
 ```
@@ -33,8 +33,8 @@ python3 tools/sunroof_background_device/run.py \
 The default SDK is `~/Library/Android/sdk`, Android 36 with build-tools 37.0.0.
 Override `ANDROID_HOME` and `JAVA_HOME` when needed. `--classes` selects the target's
 compile classes JAR. `--build-only` produces the fixture without touching a device.
-`--phase main`, `--phase restart` or `--phase ui` runs one phase; the default `full`
-runs the main and restart phases.
+`--phase main`, `--phase restart`, `--phase ui` or `--phase audio` runs one phase;
+the default `full` runs the main and restart phases.
 
 The main phase checks background open/close over Home, a destroyed Activity with a
 live foreground service, minor TPMS warnings, critical TPMS deferral and real
@@ -55,6 +55,22 @@ That establishes Android playback state, not physical audibility.
 The restart phase runs in a new target process after force-stop. It does not
 install a USB proxy or inject any roof packet. Unknown ACC must remain silent;
 known ACC OFF must display the warning from the persisted real roof observation.
+
+The targeted audio phase checks the same actual settings controls, then sends
+real roof packets through `FrameRouter` with the transition sound enabled. The
+production `MediaPlayer` must report opening and closing voice durations of
+the installed PCM WAV assets while playing about 100 ms after each transition.
+The fixture reads each target raw resource independently of production cue
+selection, verifies PCM16 / 24 kHz / mono voice metadata, and derives its expected
+duration from the audio frame count. Both clips must complete and release
+naturally. Turning the shared preference off must
+silence both real transitions. With that preference and the legacy warning
+preference both false, ACC OFF must still play the mandatory rear ADAS warning
+with its original 23552 frames at 44.1 kHz / stereo (about 534 ms); an actual input
+tap must release it. The report retains resource hashes and PCM metadata in
+`audioAssets`, with measured durations and preference values in `audioProofs`. This phase tests
+the deployed 24 kHz mono voice and 44.1 kHz stereo warning WAV decoding through
+Android, without repeating the full background/cache suite.
 
 Each phase writes a JSON report with the installed APK hash, process ID, assertion
 counts and number of injected roof packets. Screenshots, WindowManager dumps and

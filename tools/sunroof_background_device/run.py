@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--app-apk", type=Path)
     parser.add_argument("--classes", type=Path)
     parser.add_argument("--build-only", action="store_true")
-    parser.add_argument("--phase", choices=("full", "main", "restart", "ui"), default="full")
+    parser.add_argument("--phase", choices=("full", "main", "restart", "ui", "audio"), default="full")
     args = parser.parse_args()
     if not args.serial.startswith("emulator-"):
         parser.error("This fixture changes USB/settings boundaries and may run only on an emulator")
