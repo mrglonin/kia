@@ -1,0 +1,96 @@
+{
+  "app": {
+    "version_name": "23.22-sunroof",
+    "version_code": 376,
+    "asset_name": "kia_376_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.22-376/kia_376_sunroof.apk",
+    "sha256": "4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd",
+    "size": 7431964
+  },
+  "source_commit": "5168b2275704920a24ea9533e0f4e856225b4287",
+  "base_commit": "d5ff955551e9dec9a54cd64b361fa2d991c406ce",
+  "signing_certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "artifact_checks": {
+    "zip_crc": "PASS",
+    "zipalign_16k": "PASS",
+    "apksigner": "PASS",
+    "same_certificate_as_375": true
+  },
+  "unit_tests": {
+    "tests": 469,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "suites": 72,
+    "lint": {
+      "Error": 0,
+      "Warning": 79
+    }
+  },
+  "teyes_binder_assertions": 167,
+  "controller_assertions": 74,
+  "router_order_assertions": 24,
+  "android_runtime": {
+    "assertions": 421,
+    "failures": 0,
+    "phases": [
+      {
+        "phase": "startup",
+        "assertions": 100,
+        "failures": 0,
+        "installed_apk_sha256": "4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd"
+      },
+      {
+        "phase": "teyes",
+        "assertions": 99,
+        "failures": 0,
+        "installed_apk_sha256": "4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd"
+      },
+      {
+        "phase": "main",
+        "assertions": 128,
+        "failures": 0,
+        "installed_apk_sha256": "4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd"
+      },
+      {
+        "phase": "restart",
+        "assertions": 15,
+        "failures": 0,
+        "installed_apk_sha256": "4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd"
+      },
+      {
+        "phase": "audio",
+        "assertions": 79,
+        "failures": 0,
+        "installed_apk_sha256": "4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd"
+      }
+    ],
+    "hardware_boundaries_replaced": [
+      "USB transport",
+      "TEYES service endpoint for Binder tests",
+      "native ACC input for inherited controller/audio tests"
+    ],
+    "android_api": 35,
+    "display": "1280x720",
+    "physical_head_unit": false,
+    "actual_audio_output_audibility": false
+  },
+  "negative_control_375": "Installed original 375: first OPEN produces no window/player; CLOSE and following OPEN succeed.",
+  "source_sha256": {
+    "app/app/build.gradle": "b5ba3c13a19b73868244b117669769a73b95519fdba703c0da117c025a3f5b88",
+    "app/app/src/main/java/kia/app/sunroof/SunroofAlertPolicy.java": "6e3059fc04d52a4d8aae16c7a32a119d9193fc05028148b39c02d807d04fda54",
+    "app/app/src/main/java/kia/app/sunroof/TeyesSunroofBinder.java": "356d29818fe4bbe06d68cff0d04fb730cbbc6804fbd37607f6bb8945f94df204",
+    "app/app/src/main/java/kia/app/sunroof/TeyesSunroofObserver.java": "c219ca552fc9bc351270afce2dfdb75d09679d8f8d9dc99483204279e29c5514",
+    "app/app/src/test/java/kia/app/sunroof/SunroofAlertPolicyTest.java": "86c7c62d9ddbe372cfd39f42f446e633f1e82c2e2ad6ef3e3f4c39d2525612e3"
+  },
+  "normal_open_close_and_warning_audio_unchanged": true,
+  "navigator_unchanged": true,
+  "firmware_unchanged": true,
+  "physical_head_unit_tested": false,
+  "physical_audibility_tested": false,
+  "limits": [
+    "Physical head-unit service access, real ACC timing and amplifier audibility require validation on the car.",
+    "ServiceManager lookup remains an optional firmware-dependent legacy interface; failure remains unknown ACC.",
+    "Sleep/wake presentation rules preserved. Duplicate events do not replay audio; restoring a hidden warning after sleep retains existing behavior."
+  ]
+}

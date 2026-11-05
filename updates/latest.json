@@ -1,11 +1,11 @@
 {
   "app": {
-    "version_name": "23.21-sunroof",
-    "version_code": 375,
-    "asset_name": "kia_375_sunroof.apk",
-    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.21-375/kia_375_sunroof.apk",
-    "sha256": "2f03faad447b248945aac8e297baae25fd1c8a7d3bc9a3deee8d4280dc7a4dcf",
-    "size": 7429084
+    "version_name": "23.22-sunroof",
+    "version_code": 376,
+    "asset_name": "kia_376_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.22-376/kia_376_sunroof.apk",
+    "sha256": "4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd",
+    "size": 7431964
   },
   "navigator": {
     "name": "Yandex Navigator Kia mod",
