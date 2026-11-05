@@ -2,17 +2,15 @@ package kia.app.sunroof;
 
 import android.content.Context;
 import android.os.Binder;
+import android.os.DeadObjectException;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.IInterface;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.RemoteException;
 import android.os.SystemClock;
 
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -37,9 +35,11 @@ public final class TeyesSunroofObserver {
         }
     }
 
+    interface ServiceLocator {
+        IBinder findService() throws ReflectiveOperationException;
+    }
+
     static final String CALLBACK_DESCRIPTOR = "com.spd.system.aidl.ISpdServiceCallback";
-    private static final String MANAGER_CLASS = "com.spd.system.service.SpdManager";
-    private static final String DEVICE_CLASS = "com.spd.system.entity.aidl.DeviceStatusInfo";
     private static final String BASELINE_SOURCE = "teyes:DeviceStatusInfo.accStatus";
     private static final String CALLBACK_SOURCE = "teyes:cmd5";
     private static final long POLL_MS = 1_000L;
@@ -47,6 +47,7 @@ public final class TeyesSunroofObserver {
 
     private final Context app;
     private final Listener listener;
+    private final ServiceLocator serviceLocator;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = new ThreadPoolExecutor(0, 1, 30L, TimeUnit.SECONDS,
             new LinkedBlockingQueue<>(), runnable -> {
@@ -58,28 +59,36 @@ public final class TeyesSunroofObserver {
     private volatile boolean running;
     private volatile long generation;
     private volatile String status = "TEYES ACC: наблюдение выключено";
-    private volatile long callbackToken;
+    private final AtomicLong callbackToken = new AtomicLong();
 
     // Main-thread state. In-flight work always rechecks its generation before delivery.
     private Runnable pendingPoll;
     private long deliveredOrder;
     private boolean stateDelivered;
     private boolean lastKnown;
+    private long lastKnownToken;
     private long lastErrorLogElapsed = -ERROR_LOG_INTERVAL_MS;
 
     // Worker-thread state. Registration/reads/unregistration never run on the UI thread.
     private long bindingGeneration;
+    private long bindingToken;
     private long nextCallbackToken;
-    private Object manager;
-    private Method getSourceInfo;
-    private Method unregister;
-    private IInterface callback;
+    private TeyesSunroofBinder service;
+    private CallbackBinder callback;
+    private IBinder.DeathRecipient deathRecipient;
 
     public TeyesSunroofObserver(Context context, Listener listener) {
-        if (context == null || listener == null) throw new IllegalArgumentException("context/listener");
+        this(context, listener, TeyesSunroofBinder::findService);
+    }
+
+    TeyesSunroofObserver(Context context, Listener listener, ServiceLocator serviceLocator) {
+        if (context == null || listener == null || serviceLocator == null) {
+            throw new IllegalArgumentException("context/listener/serviceLocator");
+        }
         Context application = context.getApplicationContext();
         this.app = application == null ? context : application;
         this.listener = listener;
+        this.serviceLocator = serviceLocator;
     }
 
     public void start() {
@@ -123,23 +132,26 @@ public final class TeyesSunroofObserver {
             // read is in flight must supersede both its value and its eventual failure.
             long observationOrder = signalOrder.incrementAndGet();
             try {
-                ensureBinding(current);
-                if (!active(current)) return;
-                Object wrapper = getSourceInfo.invoke(manager, "android");
-                if (wrapper == null) throw new IllegalStateException("native service has no device state");
-                Object device = wrapper.getClass().getMethod("getSourceInfo").invoke(wrapper);
-                // Do not trust a similarly named field in another source or default object.
-                if (device == null || !DEVICE_CLASS.equals(device.getClass().getName())) {
-                    throw new IllegalStateException("native device state unavailable");
+                try {
+                    ensureBinding(current);
+                } catch (ReflectiveOperationException | RemoteException | RuntimeException | LinkageError error) {
+                    clearBinding(current);
+                    reportUnavailable(current, error, observationOrder);
+                    return;
                 }
-                int acc = TeyesSunroofSignals.aggregateAcc(device.getClass().getField("accStatus").get(device));
+                long observedToken = callbackToken.get();
+                if (!active(current) || observedToken == 0L) return;
+                int acc = service.readAcc();
                 if (acc == TeyesSunroofSignals.UNKNOWN) {
                     publishUnknown(current, "TEYES ACC: неизвестное значение", "teyes:invalid", observationOrder);
                 } else {
-                    publishAcc(current, acc, SystemClock.elapsedRealtime(), BASELINE_SOURCE, observationOrder);
+                    publishAcc(current, acc, SystemClock.elapsedRealtime(), BASELINE_SOURCE, observationOrder, observedToken);
                 }
-            } catch (ReflectiveOperationException | RuntimeException | LinkageError error) {
-                clearBinding(current);
+            } catch (RemoteException | RuntimeException | LinkageError error) {
+                // An unavailable aggregate must not remove a successfully registered
+                // callback: the command-5 ACC channel is independent of baseline reads.
+                // Only a dead Binder or an explicit disconnect invalidates that binding.
+                if (isDeadBinder(error)) clearBinding(current);
                 reportUnavailable(current, error, observationOrder);
             } finally {
                 main.post(() -> {
@@ -151,79 +163,102 @@ public final class TeyesSunroofObserver {
         });
     }
 
-    private void ensureBinding(long current) throws ReflectiveOperationException {
-        if (manager != null && bindingGeneration == current) return;
-        if (manager != null) clearBinding(bindingGeneration);
-        Class<?> managerType = Class.forName(MANAGER_CLASS);
-        Class<?> callbackType = Class.forName(CALLBACK_DESCRIPTOR);
-        if (!callbackType.isInterface() || !IInterface.class.isAssignableFrom(callbackType)) {
-            throw new IllegalStateException("native callback interface unavailable");
+    private static boolean isDeadBinder(Throwable error) {
+        for (int depth = 0; error != null && depth < 8; depth++, error = error.getCause()) {
+            if (error instanceof DeadObjectException) return true;
         }
-        Object nativeManager = managerType.getMethod("getInstance", Context.class).invoke(null, app);
-        if (nativeManager == null) throw new IllegalStateException("native manager unavailable");
-        Method read = managerType.getMethod("getSourceInfo", String.class);
-        Method remove = managerType.getMethod("unRegisterSpdServiceCallback", String.class);
-        Method register = managerType.getMethod("registerSpdServiceCallback", String.class, callbackType);
+        return false;
+    }
+
+    private void ensureBinding(long current) throws ReflectiveOperationException, RemoteException {
+        if (service != null && bindingGeneration == current && callbackToken.get() == bindingToken
+                && service.asBinder().isBinderAlive()) return;
+        if (service != null) clearBinding(bindingGeneration);
+        TeyesSunroofBinder nativeService = new TeyesSunroofBinder(serviceLocator.findService());
         long token = ++nextCallbackToken;
         CallbackBinder binder = new CallbackBinder(current, token);
-        Object nativeCallback = Proxy.newProxyInstance(callbackType.getClassLoader(),
-                new Class<?>[]{callbackType}, (proxy, method, args) -> {
-                    String name = method.getName();
-                    if ("asBinder".equals(name)) return binder;
-                    if (method.getDeclaringClass() == Object.class) {
-                        if ("equals".equals(name)) return proxy == args[0];
-                        if ("hashCode".equals(name)) return System.identityHashCode(proxy);
-                        if ("toString".equals(name)) return "KiaSunroofTeyesCallback";
-                    }
-                    handleNativeCallback(current, token, name, args);
-                    // Acknowledge an observed key without consuming the panel's normal action.
-                    return method.getReturnType() == int.class ? -1 : null;
-                });
-        binder.attachInterface((IInterface) nativeCallback, CALLBACK_DESCRIPTOR);
-        manager = nativeManager;
-        getSourceInfo = read;
-        unregister = remove;
-        callback = (IInterface) nativeCallback;
+        IBinder.DeathRecipient death = () -> invalidateBinding(current, token,
+                "TEYES ACC: служба отключена", "teyes:binder-died");
+        service = nativeService;
+        callback = binder;
+        deathRecipient = death;
         bindingGeneration = current;
-        callbackToken = token;
+        bindingToken = token;
+        callbackToken.set(token);
         if (!active(current)) {
             clearBinding(current);
             return;
         }
-        register.invoke(nativeManager, app.getPackageName(), nativeCallback);
+        nativeService.asBinder().linkToDeath(death, 0);
+        nativeService.register(app.getPackageName(), binder);
     }
 
     private void clearBinding(long current) {
-        if (manager == null || bindingGeneration != current) return;
-        Object oldManager = manager;
-        Method remove = unregister;
-        manager = null;
-        getSourceInfo = null;
-        unregister = null;
+        if (service == null || bindingGeneration != current) return;
+        TeyesSunroofBinder oldService = service;
+        IBinder.DeathRecipient oldDeath = deathRecipient;
+        service = null;
         callback = null;
+        deathRecipient = null;
         bindingGeneration = 0L;
-        callbackToken = 0L;
-        if (remove != null) {
+        bindingToken = 0L;
+        callbackToken.set(0L);
+        if (oldDeath != null) {
             try {
-                remove.invoke(oldManager, app.getPackageName());
-            } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
-                // Native reconnect/stop is allowed to race unregistration.
+                oldService.asBinder().unlinkToDeath(oldDeath, 0);
+            } catch (RuntimeException ignored) {
+                // Death can race cleanup.
             }
+        }
+        try {
+            oldService.unregister(app.getPackageName());
+        } catch (RemoteException | RuntimeException | LinkageError ignored) {
+            // Native reconnect/stop is allowed to race unregistration.
         }
     }
 
+    private void invalidateBinding(long current, long token, String summary, String source) {
+        invalidateBinding(current, token, summary, source, signalOrder.incrementAndGet());
+    }
+
+    private void invalidateBinding(long current, long token, String summary, String source, long disconnectedOrder) {
+        if (!active(current) || !callbackToken.compareAndSet(token, 0L)) return;
+        // Fence both newly arriving and already queued callbacks before worker cleanup.
+        publishDisconnected(current, token, summary, source, disconnectedOrder);
+        worker.execute(() -> {
+            if (bindingGeneration == current && bindingToken == token) clearBinding(current);
+        });
+    }
+
+    private void publishDisconnected(long current, long token, String summary, String source, long order) {
+        long receivedElapsed = SystemClock.elapsedRealtime();
+        main.post(() -> {
+            if (!active(current)) return;
+            // A callback may finish between reserving the disconnect order and its CAS.
+            // It cannot keep an invalidated binding known, but a new binding's accepted
+            // baseline/callback must not be replaced by this old disconnect either.
+            if (callbackToken.get() != 0L && (!lastKnown || lastKnownToken != token)) return;
+            deliveredOrder = Math.max(deliveredOrder, order);
+            status = summary;
+            if (stateDelivered && !lastKnown) return;
+            stateDelivered = true;
+            lastKnown = false;
+            listener.onAcc(false, false, receivedElapsed, source);
+        });
+    }
+
     private void handleNativeCallback(long current, long token, String name, Object[] args) {
-        if (!active(current) || callbackToken != token) return;
+        if (!active(current) || callbackToken.get() != token) return;
         if ("sendCommonToSouce".equals(name) && threeIntegers(args)) {
             int acc = TeyesSunroofSignals.callbackAcc((Integer) args[0], (Integer) args[1], (Integer) args[2]);
             if (acc != TeyesSunroofSignals.UNKNOWN) {
                 long receivedOrder = signalOrder.incrementAndGet();
-                publishAcc(current, acc, SystemClock.elapsedRealtime(), CALLBACK_SOURCE, receivedOrder);
+                publishAcc(current, acc, SystemClock.elapsedRealtime(), CALLBACK_SOURCE, receivedOrder, token);
             }
             int asleep = TeyesSunroofSignals.callbackSleep((Integer) args[0], (Integer) args[1], (Integer) args[2]);
             if (asleep != TeyesSunroofSignals.UNKNOWN) {
                 main.post(() -> {
-                    if (active(current) && callbackToken == token) listener.onSleep(asleep == 1);
+                    if (active(current) && callbackToken.get() == token) listener.onSleep(asleep == 1);
                 });
             }
         } else if ("sendKeyCode".equals(name) && threeIntegers(args)) {
@@ -232,15 +267,12 @@ public final class TeyesSunroofObserver {
             int action = (Integer) args[2];
             if (TeyesSunroofSignals.hardwareAction(keyCode, repeatCount, action)) {
                 main.post(() -> {
-                    if (active(current) && callbackToken == token) listener.onHardwareAction(keyCode, action);
+                    if (active(current) && callbackToken.get() == token) listener.onHardwareAction(keyCode, action);
                 });
             }
         } else if ("onServiceConnect".equals(name) && args != null && args.length == 1
                 && Boolean.FALSE.equals(args[0])) {
-            publishUnknown(current, "TEYES ACC: служба отключена", "teyes:disconnected");
-            worker.execute(() -> {
-                if (callbackToken == token) clearBinding(current);
-            });
+            invalidateBinding(current, token, "TEYES ACC: служба отключена", "teyes:disconnected");
         }
     }
 
@@ -249,12 +281,13 @@ public final class TeyesSunroofObserver {
                 && values[1] instanceof Integer && values[2] instanceof Integer;
     }
 
-    private void publishAcc(long current, int state, long receivedElapsed, String source, long order) {
+    private void publishAcc(long current, int state, long receivedElapsed, String source, long order, long token) {
         main.post(() -> {
-            if (!active(current) || order <= deliveredOrder) return;
+            if (!active(current) || callbackToken.get() != token || order <= deliveredOrder) return;
             deliveredOrder = order;
             stateDelivered = true;
             lastKnown = true;
+            lastKnownToken = token;
             status = state == TeyesSunroofSignals.ON ? "TEYES ACC: включено" : "TEYES ACC: выключено";
             // Identical valid polls still refresh the sample time; consumers detect transitions.
             listener.onAcc(true, state == TeyesSunroofSignals.ON, receivedElapsed, source);
@@ -305,6 +338,7 @@ public final class TeyesSunroofObserver {
         CallbackBinder(long current, long token) {
             this.current = current;
             this.token = token;
+            attachInterface(null, CALLBACK_DESCRIPTOR);
         }
 
         @Override
@@ -318,6 +352,7 @@ public final class TeyesSunroofObserver {
             }
             data.enforceInterface(CALLBACK_DESCRIPTOR);
             if (code == TeyesSunroofSignals.COMMON_TRANSACTION || code == TeyesSunroofSignals.KEY_TRANSACTION) {
+                requireBytes(data, 12);
                 int first = data.readInt();
                 int second = data.readInt();
                 int third = data.readInt();
@@ -334,9 +369,12 @@ public final class TeyesSunroofObserver {
             if (code == 12) {
                 data.readHashMap(getClass().getClassLoader());
             } else {
+                requireBytes(data, code == 5 || code == 6 || code == 11 ? 8 : 4);
                 int first = data.readInt();
                 if (code == 5 || code == 6 || code == 11) data.readInt();
+                requireEnd(data);
                 if (code == 1) handleNativeCallback(current, token, "onServiceConnect", new Object[]{first != 0});
+                return true;
             }
             requireEnd(data);
             return true;
@@ -344,6 +382,10 @@ public final class TeyesSunroofObserver {
 
         private void requireEnd(Parcel data) {
             if (data.dataAvail() != 0) throw new IllegalArgumentException("Unexpected TEYES callback data");
+        }
+
+        private void requireBytes(Parcel data, int count) {
+            if (data.dataAvail() < count) throw new IllegalArgumentException("Truncated TEYES callback data");
         }
     }
 }

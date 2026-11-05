@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--app-apk", type=Path)
     parser.add_argument("--classes", type=Path)
     parser.add_argument("--build-only", action="store_true")
-    parser.add_argument("--phase", choices=("full", "main", "restart", "ui", "audio"), default="full")
+    parser.add_argument("--phase", choices=("full", "startup", "teyes", "main", "restart", "ui", "audio"), default="full")
     args = parser.parse_args()
     if not args.serial.startswith("emulator-"):
         parser.error("This fixture changes USB/settings boundaries and may run only on an emulator")
@@ -81,7 +81,7 @@ def main():
             receipt["appApkSha256"] = hashlib.sha256(args.app_apk.read_bytes()).hexdigest()
         run(adb + ["install", "-r", apk], "install-fixture")
         run(adb + ["shell", "appops", "set", "kia.app", "SYSTEM_ALERT_WINDOW", "allow"], "overlay-permission")
-        phases = ("main", "restart") if args.phase == "full" else (args.phase,)
+        phases = ("startup", "teyes", "main", "restart") if args.phase == "full" else (args.phase,)
         phase_results = []
         for phase in phases:
             run(adb + ["shell", "am", "force-stop", "kia.app"], phase + "-force-stop")

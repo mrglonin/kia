@@ -10,9 +10,11 @@ Only two hardware boundaries are replaced:
 - A reflective `UsbSerialPort` proxy makes the existing gateway connected. Writes
   are nonblocking; the normal health worker remains active. Roof and TPMS packets
   enter the real `FrameRouter.onFrame` method with USB epoch 99.
-- Known ACC input enters the existing TEYES observer's actual listener. This tests
-  the controller/policy response, without claiming native TEYES Binder or physical
-  ignition validation.
+- In `main`, `restart` and `audio`, known ACC input enters the existing TEYES
+  observer's actual listener. The separate `teyes` phase instead replaces only
+  the system-service locator and exercises the actual observer's Android Binder
+  registration, aggregate reads and callback decoding. Neither path establishes
+  physical ignition or the installed TEYES service's availability.
 
 The runner accepts only `emulator-*` serials. It changes the emulator's overlay
 permission, installs the signed fixture and optionally the supplied target APK,
@@ -25,7 +27,7 @@ Build the target release and debug classes first, then run from the repository r
 ```sh
 JAVA_HOME=/path/to/jdk17 \
 python3 tools/sunroof_background_device/run.py \
-  --app-apk app/app/build/outputs/apk/release/kia_375_sunroof.apk \
+  --app-apk app/app/build/outputs/apk/release/kia_376_sunroof.apk \
   --serial emulator-5570 \
   --output /absolute/path/to/evidence
 ```
@@ -33,8 +35,58 @@ python3 tools/sunroof_background_device/run.py \
 The default SDK is `~/Library/Android/sdk`, Android 36 with build-tools 37.0.0.
 Override `ANDROID_HOME` and `JAVA_HOME` when needed. `--classes` selects the target's
 compile classes JAR. `--build-only` produces the fixture without touching a device.
-`--phase main`, `--phase restart`, `--phase ui` or `--phase audio` runs one phase;
-the default `full` runs the main and restart phases.
+`--phase startup`, `--phase teyes`, `--phase main`, `--phase restart`, `--phase ui`
+or `--phase audio` runs one phase; the default `full` runs startup, teyes, main and restart in separate
+force-stopped target processes. The audio phase remains a separate targeted gate.
+
+The startup phase clears only the emulator target's `kia_sunroof_state` roof cache
+before launching the Activity/service. It verifies both saved and live roof state
+are unknown and injects **OPEN as the first roof packet**, with no manufactured
+CLOSED baseline. The real policy must enter OPENING, WindowManager must attach the
+background overlay and the production MediaPlayer must play the installed opening
+voice. Three duplicate OPEN packets must retain the same presentation sequence
+and player; another duplicate after natural completion must not replay audio.
+Actual CLOSE and reopening packets must then each show their window and play the
+corresponding installed voice. `roofInputs` preserves every injected packet in
+order, and `startupProbes` records policy sequence, window and player observations.
+This phase does not inject ACC or call a preview/QA scenario.
+Two further startup scenarios retain a real CLOSED observation over USB loss,
+reconnect the proxy with epoch 100 and require the first OPEN to play without a
+new CLOSED packet; another reconnect at epoch 101 with the same accepted OPEN
+must remain silent. These checks cover warm reconnect as well as a new process.
+
+Run `--phase startup` against both the released 375 APK and the fixed APK using
+classes matching each target. On 375 the first-OPEN scenario is expected to fail
+because its policy treats that first packet as a silent baseline; closing and
+reopening should still pass. That negative control distinguishes this test from
+the older main/audio tests, which seed a CLOSED packet before checking opening.
+
+The `teyes` phase also begins with an empty roof cache. After stopping the real
+controller, reflection replaces its observer with another production observer
+constructed with a test-only `ServiceLocator`. The locator returns a local
+Android `Binder` implementing the retained `ISpdService` contract: registration
+transaction 1, unregistration 3 and `getSourceInfo("android")` transaction 9.
+The service initially returns a null aggregate. The actual observer must retain its
+registered callback across those reads. The fixture then invokes the observer's
+actual `CallbackBinder` using real Android `Parcel` objects, never `listener.onAcc`.
+
+One real OPEN packet is persisted and USB is disconnected for more than three
+seconds. Malformed, truncated and invalid-enum callbacks must not invent ACC OFF.
+Transaction 13 with command 5 / arguments 1,0 must produce the fullscreen warning
+and actual mandatory MediaPlayer cue from the saved roof state. Duplicate OFF
+callbacks must not restart the active player or replay it after completion.
+Command 8 sleep/wake must hide and restore the unacknowledged warning; its existing
+audio behavior on redisplay is recorded rather than changed by this test.
+Transaction 14 must acknowledge the warning without consuming the native key,
+and saved callbacks invoked after stop must not change state or show/play again.
+An additional restart changes the fixture to a real Parcel aggregate prefix with
+the exact DeviceStatusInfo class string, platform ID 73, ACC ON/OFF and an ignored
+tail. This verifies Android string/int framing and that ACC is read after the
+platform ID. The saved callback from the earlier observer run must not override
+the new aggregate ON; aggregate OFF must reach the real window and audio path.
+`teyesInputs` and `teyesProbes` retain callback payloads, registration/read counts,
+observer state and actual player/window observations. This phase tests Binder
+wire handling on Android, not privileged service discovery on a physical TEYES.
 
 The main phase checks background open/close over Home, a destroyed Activity with a
 live foreground service, minor TPMS warnings, critical TPMS deferral and real

@@ -7,9 +7,13 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.os.Bundle;
+import android.os.Binder;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
+import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
+import android.os.RemoteException;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.View;
@@ -38,7 +42,9 @@ import kia.app.entry.MainActivity;
 import kia.app.protocol.adapter.AdapterGateway;
 import kia.app.protocol.adapter.AdapterProtocol;
 import kia.app.protocol.adapter.FrameRouter;
+import kia.app.sunroof.SunroofAlertPolicy;
 import kia.app.sunroof.SunroofOverlayController;
+import kia.app.sunroof.SunroofStateMemory;
 import kia.app.sunroof.TeyesSunroofObserver;
 import kia.app.tpms.TpmsAlertController;
 import kia.app.tpms.TpmsWarningOverlayController;
@@ -69,6 +75,12 @@ public final class BackgroundInstrumentation extends Instrumentation {
     private final JSONArray audioProofs = new JSONArray();
     private final JSONObject audioAssets = new JSONObject();
     private final JSONArray warningPlaybackProbes = new JSONArray();
+    private final JSONArray startupProbes = new JSONArray();
+    private final JSONArray roofInputs = new JSONArray();
+    private final JSONArray teyesInputs = new JSONArray();
+    private final JSONArray teyesProbes = new JSONArray();
+    private long usbEpoch = EPOCH;
+    private TeyesServiceBoundary teyesService;
 
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
@@ -92,6 +104,15 @@ public final class BackgroundInstrumentation extends Instrumentation {
             output = new File(app.getExternalFilesDir(null), "sunroof-background-regression");
             output.mkdirs();
             oldSettings = app.getSharedPreferences("Kia", Context.MODE_PRIVATE).getAll();
+            if ("startup".equals(phase) || "teyes".equals(phase)) {
+                // This phase runs in a force-stopped emulator process. Do not manufacture a
+                // CLOSED roof packet: the first accepted source observation must be OPEN.
+                check(app.getSharedPreferences("kia_sunroof_state", Context.MODE_PRIVATE)
+                        .edit().clear().commit(), "cold-start roof memory cleared before service launch");
+                check(!AppService.isRunning(), "cold-start phase begins before AppService launch");
+                check(!StateStore.vehicle().sunroofKnown, "cold-start live roof begins unknown");
+                check(!SunroofStateMemory.snapshot(app).known, "cold-start saved roof begins unknown");
+            }
             onMain(() -> {
                 AppSettings.applyDefaults(app);
                 AppSettings.setMediaProfileConfigured(app, true);
@@ -114,6 +135,16 @@ public final class BackgroundInstrumentation extends Instrumentation {
             waitForIdleSync();
             waitUntil(() -> AppService.isRunning(), 4000L, "foreground service started");
             controller = onMain(() -> SunroofOverlayController.get(app));
+            if ("teyes".equals(phase)) {
+                runTeyesPhase();
+                completeReport(report);
+                return;
+            }
+            if ("startup".equals(phase)) {
+                runStartupPhase();
+                completeReport(report);
+                return;
+            }
             if ("restart".equals(phase)) {
                 runRestartPhase();
                 completeReport(report);
@@ -268,6 +299,428 @@ public final class BackgroundInstrumentation extends Instrumentation {
             summary.putString("reportPath", output == null ? "" : new File(output, "report.json").getAbsolutePath());
             finish(failures == 0 ? Activity.RESULT_OK : Activity.RESULT_CANCELED, summary);
         }
+    }
+
+    private void runStartupPhase() throws Exception {
+        JSONObject opening = readPcmWav("sunroof_open_voice", 24000, 1);
+        JSONObject closing = readPcmWav("sunroof_close_voice", 24000, 1);
+        audioAssets.put("opening_voice", opening);
+        audioAssets.put("closing_voice", closing);
+        installUsbBoundary();
+        injectTpms(new int[]{128, 128, 128, 128});
+        onMain(() -> {
+            AppSettings.setSunroofTransitionSoundEnabled(app, true);
+            controller.apply();
+            return null;
+        });
+        shell("input keyevent KEYCODE_HOME");
+        waitUntil(() -> !activityVisible(), 2500L, "cold-start Activity moved behind Home");
+        check(roofPacketsInjected == 0 && roofInputs.length() == 0,
+                "no synthetic CLOSED baseline or any earlier roof packet was injected");
+        check(!StateStore.vehicle().sunroofKnown && !SunroofStateMemory.snapshot(app).known,
+                "both live and persisted roof are unknown before first OPEN");
+        check(!windowShowing() && onMain(() -> actualMediaPlayer() == null),
+                "unknown roof has no window or player before first OPEN");
+        startupProbe("before_first_packet");
+
+        scenario("cold_start_first_real_open_with_no_closed_baseline", () -> {
+            injectRoof(true);
+            check(roofPacketsInjected == 1 && roofInputs.getJSONObject(0).getBoolean("open"),
+                    "the first and only initial roof packet is real OPEN through FrameRouter");
+            startupProbe("first_open_delivered");
+            waitUntil(() -> onMain(() -> roofDecision().kind == SunroofAlertPolicy.Kind.OPENING),
+                    1500L, "first real OPEN creates an OPENING episode");
+            assertRoofWindow(true, false);
+            assertAudioCue("cold_start_first_opening_voice", opening);
+            android.media.MediaPlayer firstPlayer = onMain(this::actualMediaPlayer);
+            long firstSequence = onMain(() -> roofDecision().sequence);
+            for (int duplicate = 0; duplicate < 3; duplicate++) {
+                injectRoof(true);
+                onMain(() -> { controller.apply(); return null; });
+                check(onMain(() -> roofDecision().sequence == firstSequence),
+                        "duplicate OPEN does not create another presentation sequence");
+                check(onMain(() -> actualMediaPlayer() == firstPlayer),
+                        "duplicate OPEN retains the same actual MediaPlayer");
+                startupProbe("first_open_duplicate_" + (duplicate + 1));
+                SystemClock.sleep(60L);
+            }
+            capture("cold_start_first_open_without_closed_baseline");
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null),
+                    opening.getInt("expectedDurationMs") + 900L,
+                    "first-opening voice completes and releases MediaPlayer");
+            injectRoof(true);
+            onMain(() -> { controller.apply(); return null; });
+            SystemClock.sleep(150L);
+            check(onMain(() -> actualMediaPlayer() == null),
+                    "duplicate OPEN after natural completion cannot replay the opening voice");
+            check(onMain(() -> roofDecision().sequence == firstSequence
+                            || roofDecision().kind == SunroofAlertPolicy.Kind.NONE),
+                    "duplicate after completion does not start a new opening episode");
+            startupProbe("duplicate_after_first_voice_completed");
+        });
+        scenario("cold_start_real_close_after_first_open", () -> {
+            injectRoof(false);
+            waitUntil(() -> onMain(() -> roofDecision().kind == SunroofAlertPolicy.Kind.CLOSING),
+                    1500L, "real CLOSE after the first OPEN creates a CLOSING episode");
+            assertRoofWindow(false, false);
+            assertAudioCue("cold_start_closing_voice", closing);
+            startupProbe("real_close_playing");
+            capture("cold_start_close_after_first_open");
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null),
+                    closing.getInt("expectedDurationMs") + 900L,
+                    "closing voice completes and releases MediaPlayer");
+        });
+        scenario("cold_start_real_reopen_after_close", () -> {
+            injectRoof(true);
+            waitUntil(() -> onMain(() -> roofDecision().kind == SunroofAlertPolicy.Kind.OPENING),
+                    1500L, "real reopening still creates an OPENING episode");
+            assertRoofWindow(true, false);
+            assertAudioCue("cold_start_reopening_voice", opening);
+            startupProbe("real_reopen_playing");
+            capture("cold_start_reopen_after_close");
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null),
+                    opening.getInt("expectedDurationMs") + 900L,
+                    "reopening voice completes and releases MediaPlayer");
+        });
+        scenario("warm_reconnect_closed_to_first_open_without_closed_reseed", () -> {
+            injectRoof(false);
+            waitUntil(() -> onMain(() -> roofDecision().kind == SunroofAlertPolicy.Kind.CLOSING),
+                    1500L, "real CLOSED is accepted before warm reconnect");
+            dismissRoof();
+            check(!SunroofStateMemory.snapshot(app).open, "warm reconnect starts from a real saved CLOSED");
+            disconnectUsbBoundary();
+            onMain(() -> { controller.apply(); return null; });
+            usbEpoch++;
+            installUsbBoundary();
+            int beforeOpen = roofPacketsInjected;
+            injectRoof(true);
+            check(roofPacketsInjected == beforeOpen + 1,
+                    "warm reconnect receives only OPEN, without another CLOSED baseline");
+            waitUntil(() -> onMain(() -> roofDecision().kind == SunroofAlertPolicy.Kind.OPENING),
+                    1500L, "first OPEN after reconnect preserves the earlier real CLOSED transition");
+            assertRoofWindow(true, false);
+            assertAudioCue("warm_reconnect_first_opening_voice", opening);
+            startupProbe("warm_reconnect_closed_to_open");
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null),
+                    opening.getInt("expectedDurationMs") + 900L,
+                    "warm opening voice completes");
+        });
+        scenario("warm_reconnect_same_open_does_not_repeat", () -> {
+            dismissRoof();
+            check(SunroofStateMemory.snapshot(app).open, "repeat reconnect starts from accepted OPEN");
+            disconnectUsbBoundary();
+            onMain(() -> { controller.apply(); return null; });
+            usbEpoch++;
+            installUsbBoundary();
+            injectRoof(true);
+            onMain(() -> { controller.apply(); return null; });
+            SystemClock.sleep(150L);
+            check(onMain(() -> roofDecision().kind == SunroofAlertPolicy.Kind.NONE),
+                    "same OPEN after reconnect does not become another opening episode");
+            check(!windowShowing() && onMain(() -> actualMediaPlayer() == null),
+                    "same OPEN after reconnect has no repeated window or voice");
+            startupProbe("warm_reconnect_same_open_silent");
+        });
+    }
+
+    private void runTeyesPhase() throws Exception {
+        JSONObject warning = readPcmWav("sunroof_warning_adas", 44100, 2);
+        audioAssets.put("mandatory_rear_adas_warning", warning);
+        installTeyesServiceBoundary();
+        shell("input keyevent KEYCODE_HOME");
+        waitUntil(() -> !activityVisible(), 2500L, "TEYES phase Activity moved behind Home");
+        installUsbBoundary();
+        injectTpms(new int[]{128, 128, 128, 128});
+        injectRoof(true);
+        waitUntil(() -> SunroofStateMemory.snapshot(app).known && SunroofStateMemory.snapshot(app).open,
+                1500L, "real OPEN is persisted before USB loss");
+        dismissRoof();
+        disconnectUsbBoundary();
+        SystemClock.sleep(3500L); // Exceed the old disconnect grace without sending another roof packet.
+
+        scenario("teyes_null_aggregate_retains_actual_registered_callback", () -> {
+            waitUntil(() -> teyesService.registers == 1 && teyesService.polls >= 2
+                            && teyesService.callback != null,
+                    2000L, "actual observer registers once and polls a null aggregate repeatedly");
+            check(teyesService.unregisters == 0, "null aggregate does not unregister the real callback");
+            check(TeyesServiceBoundary.CALLBACK.equals(teyesService.callback.getInterfaceDescriptor()),
+                    "actual observer exposes the retained TEYES callback descriptor");
+            check(!onMain(() -> (Boolean) field(controller, "accKnown")), "null aggregate leaves ACC unknown");
+            check(!windowShowing(), "unknown ACC does not invent a parking warning");
+            teyesProbe("registered_null_aggregate");
+        });
+        scenario("teyes_malformed_callbacks_never_become_acc_off", () -> {
+            IBinder callback = requireTeyesCallback();
+            teyesCallback(callback, 13, 5, 2, 0);
+            teyesCallback(callback, 13, 5, 1, 1);
+            boolean rejected = false;
+            try { teyesCallback(callback, 13, 5, 1, 0, 99); }
+            catch (RuntimeException | RemoteException expected) { rejected = true; }
+            check(rejected, "actual CallbackBinder rejects trailing malformed payload");
+            rejected = false;
+            try { teyesCallback(callback, 13, 5); }
+            catch (RuntimeException | RemoteException expected) { rejected = true; }
+            check(rejected, "actual CallbackBinder rejects truncated numeric payload");
+            onMain(() -> null);
+            check(!onMain(() -> (Boolean) field(controller, "accKnown")),
+                    "invalid enum, second argument and trailing data cannot produce known ACC OFF");
+            check(!windowShowing() && onMain(() -> actualMediaPlayer() == null),
+                    "malformed callbacks do not warn despite a saved open roof");
+            teyesProbe("malformed_callbacks_ignored");
+        });
+        scenario("teyes_cmd5_off_warns_from_saved_open_after_usb_loss_once", () -> {
+            IBinder callback = requireTeyesCallback();
+            int packets = roofPacketsInjected;
+            teyesCallback(callback, 13, 5, 1, 0);
+            waitUntil(() -> onMain(() -> roofDecision().kind == SunroofAlertPolicy.Kind.PARKING_WARNING),
+                    1500L, "actual cmd5 OFF enters PARKING_WARNING");
+            assertAudioCue("teyes_cmd5_mandatory_warning", warning, false);
+            assertRoofWindow(true, true, false);
+            check(roofPacketsInjected == packets && !AdapterGateway.get(app).usbReady(),
+                    "warning uses saved real OPEN with no USB and no fresh roof packet");
+            android.media.MediaPlayer player = onMain(this::actualMediaPlayer);
+            long sequence = onMain(() -> roofDecision().sequence);
+            for (int i = 0; i < 3; i++) {
+                teyesCallback(callback, 13, 5, 1, 0);
+                check(onMain(() -> actualMediaPlayer() == player && roofDecision().sequence == sequence),
+                        "duplicate cmd5 OFF does not restart the active warning player or sequence");
+            }
+            teyesProbe("cmd5_warning_playing");
+            waitUntil(() -> onMain(() -> actualMediaPlayer() == null),
+                    warning.getInt("expectedDurationMs") + 900L, "actual mandatory warning completes once");
+            for (int i = 0; i < 3; i++) {
+                teyesCallback(callback, 13, 5, 1, 0);
+                SystemClock.sleep(150L);
+                check(onMain(() -> actualMediaPlayer() == null && roofDecision().sequence == sequence),
+                        "duplicate cmd5 OFF after completion cannot replay the warning");
+            }
+            check(windowShowing(), "warning window persists after natural completion and duplicates");
+            teyesProbe("cmd5_duplicates_after_completion");
+        });
+        scenario("teyes_cmd8_sleep_wake_preserves_unacknowledged_warning", () -> {
+            IBinder callback = requireTeyesCallback();
+            teyesCallback(callback, 13, 8, 6, 0);
+            waitUntil(() -> !windowShowing(), 1500L, "actual cmd8 sleep hides the warning");
+            check(onMain(() -> actualMediaPlayer() == null), "cmd8 sleep releases the actual audio player");
+            check(!SunroofStateMemory.snapshot(app).acknowledged, "cmd8 sleep does not acknowledge roof warning");
+            teyesProbe("cmd8_sleep");
+            teyesCallback(callback, 13, 8, 0, 0);
+            assertRoofWindow(true, true, false);
+            check(!SunroofStateMemory.snapshot(app).acknowledged, "cmd8 wake restores without acknowledgement");
+            // Current controller behavior may replay audio when a hidden warning is shown again.
+            // Preserve that behavior here; duplicate OFF replay is tested separately above.
+            teyesProbe("cmd8_wake_restored");
+        });
+        scenario("teyes_cmd14_acknowledges_and_stopped_callback_is_fenced", () -> {
+            IBinder callback = requireTeyesCallback();
+            teyesCallback(callback, 14, 24, 0, 0);
+            waitUntil(() -> !windowShowing(), 1500L, "actual hardware callback dismisses the warning");
+            check(SunroofStateMemory.snapshot(app).acknowledged,
+                    "actual callback key acknowledgement is persisted");
+            onMain(() -> { controller.stop(); return null; });
+            waitUntil(() -> teyesService.unregisters == 1 && teyesService.callback == null,
+                    1500L, "stopping actual observer unregisters through transaction 3");
+            teyesCallback(callback, 13, 5, 0, 0);
+            teyesCallback(callback, 13, 5, 1, 0);
+            teyesCallback(callback, 13, 8, 0, 0);
+            SystemClock.sleep(250L);
+            check(!windowShowing() && onMain(() -> actualMediaPlayer() == null),
+                    "old callback after observer stop cannot show a window or start audio");
+            check(!onMain(() -> (Boolean) field(controller, "accKnown")),
+                    "old callback cannot alter the stopped controller ACC state");
+            check(SunroofStateMemory.snapshot(app).acknowledged,
+                    "old ACC ON cannot reset persisted acknowledgement after stop");
+            teyesProbe("stopped_callback_ignored");
+        });
+        scenario("teyes_android_aggregate_prefix_reads_acc_after_platform_id", () -> {
+            IBinder stale = teyesService.retiredCallback;
+            teyesService.aggregateAcc = 1;
+            onMain(() -> { controller.start(); return null; });
+            waitUntil(() -> onMain(() -> (Boolean) field(controller, "accKnown")
+                            && (Boolean) field(controller, "accOn")),
+                    2000L, "actual Android Parcel class/platform/ACC prefix decodes known ON");
+            check(teyesService.registers == 2, "restart registers a fresh actual CallbackBinder");
+            check(!SunroofStateMemory.snapshot(app).acknowledged,
+                    "aggregate ON begins the next ignition cycle through the actual observer");
+            teyesCallback(stale, 13, 5, 1, 0);
+            check(onMain(() -> (Boolean) field(controller, "accKnown")
+                            && (Boolean) field(controller, "accOn")) && !windowShowing(),
+                    "prior-run callback cannot replace newer aggregate ON or display a warning");
+            teyesProbe("aggregate_on_platform_73");
+            teyesService.aggregateAcc = 0;
+            waitUntil(() -> onMain(() -> (Boolean) field(controller, "accKnown")
+                            && !(Boolean) field(controller, "accOn")
+                            && roofDecision().kind == SunroofAlertPolicy.Kind.PARKING_WARNING),
+                    2000L, "actual Android aggregate OFF reaches the warning policy");
+            assertAudioCue("teyes_aggregate_mandatory_warning", warning, false);
+            assertRoofWindow(true, true, false);
+            teyesProbe("aggregate_off_platform_73");
+            onMain(() -> { controller.stop(); return null; });
+            waitUntil(() -> teyesService.unregisters == 2, 1500L,
+                    "aggregate scenario releases its actual observer registration");
+        });
+    }
+
+    private void installTeyesServiceBoundary() throws Exception {
+        onMain(() -> {
+            controller.stop();
+            TeyesSunroofObserver original = (TeyesSunroofObserver) field(controller, "observer");
+            TeyesSunroofObserver.Listener listener = (TeyesSunroofObserver.Listener) field(original, "listener");
+            Class<?> locatorType = Class.forName(TeyesSunroofObserver.class.getName() + "$ServiceLocator");
+            teyesService = new TeyesServiceBoundary();
+            Object locator = Proxy.newProxyInstance(locatorType.getClassLoader(), new Class<?>[]{locatorType},
+                    (proxy, method, args) -> {
+                        if ("findService".equals(method.getName())) return teyesService;
+                        if ("toString".equals(method.getName())) return "Emulator TEYES Binder service locator";
+                        if ("hashCode".equals(method.getName())) return System.identityHashCode(proxy);
+                        if ("equals".equals(method.getName())) return proxy == args[0];
+                        throw new UnsupportedOperationException(method.getName());
+                    });
+            java.lang.reflect.Constructor<?> constructor = TeyesSunroofObserver.class.getDeclaredConstructor(
+                    Context.class, TeyesSunroofObserver.Listener.class, locatorType);
+            constructor.setAccessible(true);
+            set(controller, "observer", constructor.newInstance(app, listener, locator));
+            controller.start();
+            return null;
+        });
+    }
+
+    private IBinder requireTeyesCallback() throws Exception {
+        waitUntil(() -> teyesService != null && teyesService.callback != null, 1500L,
+                "actual TEYES callback is still registered");
+        return teyesService.callback;
+    }
+
+    private void teyesCallback(IBinder callback, int transaction, int... values) throws Exception {
+        Parcel data = Parcel.obtain();
+        Parcel reply = transaction == 14 ? Parcel.obtain() : null;
+        JSONObject input = new JSONObject();
+        input.put("transaction", transaction);
+        JSONArray arguments = new JSONArray();
+        for (int value : values) arguments.put(value);
+        input.put("values", arguments);
+        input.put("elapsedRealtimeMs", SystemClock.elapsedRealtime());
+        teyesInputs.put(input);
+        try {
+            data.writeInterfaceToken(TeyesServiceBoundary.CALLBACK);
+            for (int value : values) data.writeInt(value);
+            check(callback.transact(transaction, data, reply, reply == null ? IBinder.FLAG_ONEWAY : 0),
+                    "actual CallbackBinder accepts transaction " + transaction);
+            if (reply != null) {
+                reply.readException();
+                check(reply.readInt() == -1 && reply.dataAvail() == 0,
+                        "hardware callback reply preserves the native key action");
+            }
+            input.put("accepted", true);
+        } catch (RuntimeException | RemoteException error) {
+            input.put("accepted", false);
+            input.put("exception", error.getClass().getSimpleName());
+            throw error;
+        } finally {
+            data.recycle();
+            if (reply != null) reply.recycle();
+        }
+        onMain(() -> null); // Drain the actual observer's posted callback delivery.
+    }
+
+    private void teyesProbe(String event) throws Exception {
+        teyesProbes.put(onMain(() -> {
+            JSONObject value = warningPlaybackProbe(event, 0L);
+            value.put("accKnown", field(controller, "accKnown"));
+            value.put("accOn", field(controller, "accOn"));
+            value.put("asleep", field(controller, "asleep"));
+            value.put("kind", roofDecision().kind.name());
+            value.put("sequence", roofDecision().sequence);
+            value.put("cachedAcknowledged", SunroofStateMemory.snapshot(app).acknowledged);
+            value.put("observerStatus", ((TeyesSunroofObserver) field(controller, "observer")).statusSummary());
+            value.put("registers", teyesService.registers);
+            value.put("unregisters", teyesService.unregisters);
+            value.put("aggregateReads", teyesService.polls);
+            value.put("nullAggregateReads", teyesService.nullPolls);
+            return value;
+        }));
+    }
+
+    /** Only the system service is simulated; all observer and callback code is production. */
+    private final class TeyesServiceBoundary extends Binder {
+        static final String SERVICE = "com.spd.system.aidl.ISpdService";
+        static final String CALLBACK = "com.spd.system.aidl.ISpdServiceCallback";
+        volatile IBinder callback;
+        volatile IBinder retiredCallback;
+        volatile int registers, unregisters, polls, nullPolls;
+        volatile int aggregateAcc = -1;
+
+        TeyesServiceBoundary() { attachInterface(null, SERVICE); }
+
+        @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                throws RemoteException {
+            if (code == IBinder.INTERFACE_TRANSACTION) { reply.writeString(SERVICE); return true; }
+            data.enforceInterface(SERVICE);
+            String source = data.readString();
+            if (code == 1) {
+                if (!app.getPackageName().equals(source)) throw new IllegalArgumentException("registration package");
+                IBinder incoming = data.readStrongBinder();
+                if (incoming == null || data.dataAvail() != 0) throw new IllegalArgumentException("registration payload");
+                callback = incoming;
+                registers++;
+                reply.writeNoException();
+                return true;
+            }
+            if (code == 3) {
+                if (!app.getPackageName().equals(source) || data.dataAvail() != 0)
+                    throw new IllegalArgumentException("unregistration payload");
+                retiredCallback = callback;
+                callback = null;
+                unregisters++;
+                reply.writeNoException();
+                return true;
+            }
+            if (code == 9) {
+                if (!"android".equals(source) || data.dataAvail() != 0)
+                    throw new IllegalArgumentException("aggregate source payload");
+                polls++;
+                reply.writeNoException();
+                int acc = aggregateAcc;
+                reply.writeInt(acc < 0 ? 0 : 1);
+                if (acc < 0) {
+                    nullPolls++;
+                } else {
+                    reply.writeString("com.spd.system.entity.aidl.DeviceStatusInfo");
+                    reply.writeInt(73); // Platform ID must not be mistaken for ACC.
+                    reply.writeInt(acc);
+                    reply.writeInt(999); // A retained vendor tail must not become part of ACC.
+                }
+                return true;
+            }
+            return super.onTransact(code, data, reply, flags);
+        }
+    }
+
+    private SunroofAlertPolicy.Decision roofDecision() throws Exception {
+        return ((SunroofAlertPolicy) field(controller, "policy")).current();
+    }
+
+    private void startupProbe(String event) throws Exception {
+        startupProbes.put(onMain(() -> {
+            JSONObject probe = new JSONObject();
+            SunroofAlertPolicy.Decision decision = roofDecision();
+            android.media.MediaPlayer player = actualMediaPlayer();
+            probe.put("event", event);
+            probe.put("elapsedRealtimeMs", SystemClock.elapsedRealtime());
+            probe.put("roofPacketsInjected", roofPacketsInjected);
+            probe.put("roofKnown", StateStore.vehicle().sunroofKnown);
+            probe.put("roofOpen", StateStore.vehicle().sunroofOpen);
+            probe.put("kind", decision.kind.name());
+            probe.put("sequence", decision.sequence);
+            probe.put("windowShowing", windowShowing());
+            probe.put("playerPresent", player != null);
+            if (player != null) {
+                probe.put("playerIdentity", System.identityHashCode(player));
+                probe.put("isPlaying", player.isPlaying());
+                probe.put("positionMs", player.getCurrentPosition());
+            }
+            return probe;
+        }));
     }
 
     private void runRestartPhase() throws Exception {
@@ -448,6 +901,10 @@ public final class BackgroundInstrumentation extends Instrumentation {
     }
 
     private void assertAudioCue(String role, JSONObject asset) throws Exception {
+        assertAudioCue(role, asset, true);
+    }
+
+    private void assertAudioCue(String role, JSONObject asset, boolean freshRoof) throws Exception {
         int expectedDurationMs = asset.getInt("expectedDurationMs");
         SystemClock.sleep(100L);
         JSONObject proof = onMain(() -> {
@@ -458,7 +915,14 @@ public final class BackgroundInstrumentation extends Instrumentation {
             check(Math.abs(duration - expectedDurationMs) <= 12,
                     role + " decoded duration " + duration + " ms matches expected " + expectedDurationMs + " ms");
             check(!activityVisible() && AppService.isRunning(), role + " plays with Activity behind Home and real service alive");
-            check("0x76".equals(StateStore.vehicle().sunroofSource), role + " follows actual FrameRouter roof source");
+            if (freshRoof) {
+                check("0x76".equals(StateStore.vehicle().sunroofSource), role + " follows actual FrameRouter roof source");
+            } else {
+                SunroofStateMemory.Snapshot saved = SunroofStateMemory.snapshot(app);
+                check(saved.known && saved.open && "0x76".equals(saved.source)
+                                && !StateStore.vehicle().sunroofKnown,
+                        role + " follows persisted actual FrameRouter OPEN after USB loss");
+            }
             JSONObject value = new JSONObject();
             value.put("role", role);
             value.put("playerClass", player.getClass().getName());
@@ -584,9 +1048,13 @@ public final class BackgroundInstrumentation extends Instrumentation {
     }
 
     private void completeReport(JSONObject report) throws Exception {
-            report.put("boundary", "Real Android app/service/router/state/policy/windows; USB hardware and native ACC input replaced; no QA policy/scenario used");
+            report.put("boundary", "teyes".equals(phase)
+                    ? "Real Android observer registration/poll/callback Binder, controller/window/audio; only system service locator and USB hardware replaced"
+                    : "Real Android app/service/router/state/policy/windows; USB hardware and native ACC input replaced; no QA policy/scenario used");
             report.put("usbHardwareReplaced", true);
             report.put("nativeAccInputReplaced", true);
+            report.put("teyesServiceLocatorReplaced", "teyes".equals(phase));
+            report.put("accListenerInjected", !"teyes".equals(phase) && !"startup".equals(phase));
             report.put("qaPolicyUsed", false);
             report.put("physicalHeadunitTested", false);
             report.put("appVersion", app.getPackageManager().getPackageInfo(app.getPackageName(), 0).versionName);
@@ -602,6 +1070,10 @@ public final class BackgroundInstrumentation extends Instrumentation {
             report.put("audioProofs", audioProofs);
             report.put("audioAssets", audioAssets);
             report.put("warningPlaybackProbes", warningPlaybackProbes);
+            report.put("startupProbes", startupProbes);
+            report.put("roofInputs", roofInputs);
+            report.put("teyesInputs", teyesInputs);
+            report.put("teyesProbes", teyesProbes);
             report.put("results", results);
             report.put("assertions", assertions);
             report.put("failures", failures);
@@ -626,7 +1098,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
                 set(transport, "port", port);
                 set(transport, "readRunning", true);
                 set(transport, "desiredConnection", true);
-                set(transport, "connectionEpoch", EPOCH);
+                set(transport, "connectionEpoch", usbEpoch);
                 set(transport, "connectedAtElapsed", SystemClock.elapsedRealtime());
                 set(transport, "lastRxAtElapsed", SystemClock.elapsedRealtime());
             }
@@ -641,8 +1113,15 @@ public final class BackgroundInstrumentation extends Instrumentation {
         SystemClock.sleep(2L);
         roofPacketsInjected++;
         onMain(() -> {
+            long receivedElapsed = SystemClock.elapsedRealtime();
             router.onFrame(AdapterProtocol.packet(AdapterProtocol.CMD_RAW_CAN, new byte[]{(byte) (open ? 1 : 0)}),
-                    EPOCH, SystemClock.elapsedRealtime());
+                    usbEpoch, receivedElapsed);
+            JSONObject input = new JSONObject();
+            input.put("packet", roofPacketsInjected);
+            input.put("open", open);
+            input.put("connectionEpoch", usbEpoch);
+            input.put("receivedElapsedMs", receivedElapsed);
+            roofInputs.put(input);
             return null;
         });
         // A persistent warning intentionally animates continuously. Waiting for
@@ -653,7 +1132,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
     private void injectTpms(int[] pressure) throws Exception {
         byte[] payload = new byte[8];
         for (int i = 0; i < 4; i++) { payload[i] = (byte) pressure[i]; payload[i + 4] = 91; }
-        onMain(() -> { router.onFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS, payload), EPOCH, SystemClock.elapsedRealtime()); return null; });
+        onMain(() -> { router.onFrame(AdapterProtocol.packet(AdapterProtocol.CMD_TPMS, payload), usbEpoch, SystemClock.elapsedRealtime()); return null; });
         waitForIdleSync();
     }
 
@@ -814,7 +1293,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             check(AppService.isRunning(), "AppService remains alive");
             if (freshRoof) {
                 check(roof.sunroofKnown && roof.sunroofOpen == open, "actual FrameRouter roof position persisted");
-                check("0x76".equals(roof.sunroofSource) && roof.sunroofConnectionEpoch == EPOCH, "actual protocol source and epoch retained");
+                check("0x76".equals(roof.sunroofSource) && roof.sunroofConnectionEpoch == usbEpoch, "actual protocol source and epoch retained");
             } else {
                 check(!roof.sunroofKnown && roof.sunroofReceivedElapsed == 0L, "fresh USB roof state is absent; persisted cache drives warning");
             }

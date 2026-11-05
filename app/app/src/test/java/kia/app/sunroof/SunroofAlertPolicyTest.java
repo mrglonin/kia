@@ -23,8 +23,21 @@ public final class SunroofAlertPolicyTest {
         return policy.update(input(true, true, true, 1, true, open, 1, at, false, false, at));
     }
 
-    @Test public void firstOpenAndFirstClosedAreSilentBaselines() {
-        assertEquals(NONE, sample(true, 100, true).kind);
+    @Test public void firstConfirmedOpenIsShownWithoutWaitingForAnInitialClosedPacket() {
+        policy.update(input(true, true, true, 1, false, false, -1, -1,
+                false, false, 90));
+        SunroofAlertPolicy.Decision opening = sample(true, 100, true);
+        assertEquals(OPENING, opening.kind);
+        assertTrue(opening.roofOpen);
+        assertEquals(opening.sequence, sample(true, 101, true).sequence);
+        assertEquals(NONE, policy.finish(opening.sequence).kind);
+        assertEquals(NONE, sample(true, 102, true).kind);
+        assertEquals(CLOSING, sample(false, 103, true).kind);
+        assertEquals(OPENING, sample(true, 104, true).kind);
+    }
+
+    @Test public void firstConfirmedClosedRemainsQuiet() {
+        assertEquals(NONE, sample(false, 100, true).kind);
         policy.reset();
         assertEquals(NONE, sample(false, 200, true).kind);
     }
@@ -48,10 +61,10 @@ public final class SunroofAlertPolicyTest {
         assertEquals(done.sequence, sample(false, 203, true).sequence);
     }
 
-    @Test public void unknownRoofDoesNotTurnCachedOpenIntoAnOpening() {
+    @Test public void firstConfirmedOpenAfterTemporaryUnknownUsesLastAcceptedClosed() {
         sample(false, 100, true);
         policy.update(input(true, true, true, 1, false, false, -1, -1, true, true, 110));
-        assertEquals(NONE, sample(true, 120, true).kind);
+        assertEquals(OPENING, sample(true, 120, true).kind);
     }
 
     @Test public void knownOpenAndInitialAccOffCanWarnWithoutAnimating() {
@@ -63,7 +76,7 @@ public final class SunroofAlertPolicyTest {
     }
 
     @Test public void accUnknownNeverMeansOffAndLaterFreshOffMayWarn() {
-        assertEquals(NONE, unknownAcc(true, 100).kind);
+        assertEquals(OPENING, unknownAcc(true, 100).kind);
         SunroofAlertPolicy.Decision warning = sample(true, 200, false);
         assertEquals(PARKING_WARNING, warning.kind);
     }
@@ -172,13 +185,37 @@ public final class SunroofAlertPolicyTest {
                 true, true, 3, 301, true, false, 301)).sequence);
     }
 
-    @Test public void reconnectRebaselinesWithoutOpeningOrClosingAnimations() {
+    @Test public void firstOpenAfterReconnectDoesNotNeedAnotherClosedBaseline() {
         sample(false, 100, true);
         policy.update(input(true, true, false, 2, false, false, -1, -1, true, true, 200));
-        assertEquals(NONE, policy.update(input(true, true, true, 3,
+        assertEquals(OPENING, policy.update(input(true, true, true, 3,
                 true, true, 3, 300, true, true, 300)).kind);
         assertEquals(CLOSING, policy.update(input(true, true, true, 3,
                 true, false, 3, 400, true, true, 400)).kind);
+    }
+
+    @Test public void reconnectSameOpenDoesNotReplayTheOpening() {
+        SunroofAlertPolicy.Decision first = sample(true, 100, true);
+        assertEquals(OPENING, first.kind);
+        policy.finish(first.sequence);
+        policy.update(input(true, true, false, 2, false, false, -1, -1,
+                true, true, 200));
+        assertEquals(NONE, policy.update(input(true, true, true, 3,
+                true, true, 3, 300, true, true, 300)).kind);
+        policy.update(input(true, true, true, 3, false, false, -1, -1,
+                true, true, 400));
+        assertEquals(NONE, policy.update(input(true, true, true, 3,
+                true, true, 3, 500, true, true, 500)).kind);
+    }
+
+    @Test public void realReopeningAfterAcknowledgedWarningAndGapRearmsParkingWarning() {
+        assertEquals(PARKING_WARNING, sample(true, 100, false).kind);
+        policy.dismiss();
+        assertEquals(CLOSING, sample(false, 200, false).kind);
+        policy.update(input(true, true, false, 2, false, false, -1, -1,
+                true, false, 300));
+        assertEquals(PARKING_WARNING, policy.update(input(true, true, true, 3,
+                true, true, 3, 400, true, false, 400)).kind);
     }
 
     @Test public void oldEpochCannotSupplyRoofForInitialWarningAfterReconnect() {
@@ -399,12 +436,34 @@ public final class SunroofAlertPolicyTest {
                 policy.update(remembered(false, false, false, true, false, false, 300L)).kind);
     }
 
-    @Test public void savedPositionDoesNotInventAnOpeningAnimationOnReconnect() {
+    @Test public void savedPositionAloneIsQuietButFirstLiveOpenIsShown() {
         assertEquals(NONE,
                 policy.update(remembered(false, false, false, true, false, true, 100L)).kind);
-        assertEquals(NONE,
+        assertEquals(OPENING,
                 policy.update(remembered(true, true, true, true, false, true, 200L)).kind);
         assertEquals(CLOSING,
                 policy.update(remembered(true, true, false, false, false, true, 300L)).kind);
+    }
+
+    @Test public void initialLiveOpenCannotReplayAnAcknowledgedParkingEpisode() {
+        assertEquals(NONE,
+                policy.update(remembered(true, true, true, true, true, false, 100L)).kind);
+        assertEquals(NONE,
+                policy.update(remembered(true, true, true, true, true, false, 101L)).kind);
+        assertEquals(CLOSING,
+                policy.update(remembered(true, true, false, false, false, false, 102L)).kind);
+        assertEquals(PARKING_WARNING,
+                policy.update(remembered(true, true, true, true, false, false, 103L)).kind);
+    }
+
+    @Test public void invalidOrMissingPacketsDoNotConsumeTheFirstOpening() {
+        assertEquals(NONE, policy.update(input(true, true, true, 2,
+                true, true, 1, 100, false, false, 100)).kind);
+        assertEquals(NONE, policy.update(input(true, true, false, 3,
+                true, true, 3, 101, false, false, 101)).kind);
+        assertEquals(NONE, policy.update(input(true, true, true, 4,
+                true, true, 4, 300, false, false, 200)).kind);
+        assertEquals(OPENING, policy.update(input(true, true, true, 4,
+                true, true, 4, 250, false, false, 250)).kind);
     }
 }

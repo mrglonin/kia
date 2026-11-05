@@ -167,7 +167,18 @@ public final class SunroofAlertPolicy {
         // Consecutive accepted CAN packets may share an elapsed millisecond. Caller order is
         // authoritative for ties, matching FrameRouter; only strictly older samples are stale.
         if (validRoof) {
-            boolean changed = roofBaseline && input.roofOpen != roofOpen;
+            // Some adapters send position only when it changes. The first real OPEN must
+            // therefore be visible even if no initial CLOSED packet arrived. Do this only
+            // before any live roof has been accepted: reconnect/unknown snapshots and
+            // duplicate OPEN packets must not repeatedly announce an already open roof.
+            // A persisted acknowledgement still suppresses the same parked episode.
+            boolean firstOpen = lastRoofEpoch < 0L && input.roofOpen && !acknowledged;
+            // Wake/reconnect can also omit a baseline CLOSED. A new confirmed OPEN after
+            // the last accepted CLOSED is still a real change; a repeated OPEN is not.
+            boolean openedAfterGap = !roofBaseline && lastRoofEpoch >= 0L
+                    && !roofOpen && input.roofOpen;
+            boolean changed = firstOpen || openedAfterGap
+                    || (roofBaseline && input.roofOpen != roofOpen);
             if (changed) {
                 transition = input.roofOpen ? Kind.OPENING : Kind.CLOSING;
                 if (input.roofOpen) acknowledged = false;
