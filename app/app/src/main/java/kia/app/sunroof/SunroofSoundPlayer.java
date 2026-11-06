@@ -16,7 +16,7 @@ import kia.app.core.AppLog;
 /** Finite roof speech and ADAS cues. Main thread only; playback never restarts itself. */
 public final class SunroofSoundPlayer {
     static final long WARNING_WINDOW_MS = 9_500L;
-    static final long TRANSITION_WINDOW_MS = 2_500L;
+    static final long TRANSITION_WINDOW_MS = 4_500L;
 
     interface Scheduler {
         long now();
@@ -158,11 +158,14 @@ public final class SunroofSoundPlayer {
             MediaPlayer media = null;
             try {
                 AudioAttributes attributes = new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                        // TEYES also reads the explicit legacy stream field; usage alone
+                        // leaves its vendor focus callback at stream=-1.
+                        .setLegacyStreamType(AudioManager.STREAM_NOTIFICATION)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build();
-                // Each resource contains speech. The warning combines its ADAS signal and
-                // phrase into one clip so cancellation cannot leave a delayed phrase behind.
+                // Each clip begins with 1200 ms of silent PCM so TEYES can wake its
+                // I2S route/amplifier before the original recording starts. One stream
+                // keeps that warm-up and speech under the same cancellation boundary.
                 media = MediaPlayer.create(app, resource, attributes, 0);
                 if (media == null) {
                     log("create_error resource=" + resourceName(resource) + " player=null");

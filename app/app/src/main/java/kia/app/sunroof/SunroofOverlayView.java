@@ -21,7 +21,7 @@ import kia.app.R;
 /** The approved miniature, drawn in screen pixels without density-dependent scaling. */
 public final class SunroofOverlayView extends View {
     static final float SCREEN_WIDTH_FRACTION = SunroofOverlayGeometry.SCREEN_WIDTH_FRACTION;
-    static final long TRANSIENT_HOLD_MS = 3_000L;
+    static final long TRANSIENT_HOLD_MS = 4_000L;
     static final long FADE_MS = 400L;
     static final long TRANSIENT_DURATION_MS = TRANSIENT_HOLD_MS + FADE_MS;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);

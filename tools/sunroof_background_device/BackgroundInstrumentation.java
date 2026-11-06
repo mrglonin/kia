@@ -160,6 +160,11 @@ public final class BackgroundInstrumentation extends Instrumentation {
                 completeReport(report);
                 return;
             }
+            if ("voice_preroll".equals(phase)) {
+                runVoicePrerollPhase();
+                completeReport(report);
+                return;
+            }
             if ("audio".equals(phase)) {
                 runAudioPhase();
                 completeReport(report);
@@ -834,6 +839,115 @@ public final class BackgroundInstrumentation extends Instrumentation {
         });
     }
 
+    /** Real addView attachment race and full speech after the amplifier warm-up PCM. */
+    private void runVoicePrerollPhase() throws Exception {
+        JSONObject opening = readPcmWav("sunroof_open_voice", 24000, 1);
+        JSONObject closing = readPcmWav("sunroof_close_voice", 24000, 1);
+        JSONObject warning = readPcmWav("sunroof_warning_adas", 44100, 2);
+        audioAssets.put("opening_voice", opening);
+        audioAssets.put("closing_voice", closing);
+        audioAssets.put("mandatory_rear_adas_warning", warning);
+        scenario("all_roof_cues_preserve_original_pcm_after_exact_1200ms_silence", () -> {
+            for (JSONObject asset : new JSONObject[]{opening, closing, warning}) {
+                check(asset.getInt("warmupPrefixMs") == 1200 && asset.getBoolean("warmupPrefixAllZero"),
+                        asset.getString("resourceName") + " has exactly 1200 ms of PCM zeros before the original cue");
+                check(asset.getBoolean("originalPcmPreserved"),
+                        asset.getString("resourceName") + " preserves every original PCM byte");
+            }
+        });
+        installUsbBoundary();
+        injectTpms(new int[]{128, 128, 128, 128});
+        injectRoof(false);
+        nativeAcc(true);
+        onMain(() -> { AppSettings.setSunroofTransitionSoundEnabled(app, true); controller.apply(); return null; });
+        shell("input keyevent KEYCODE_HOME");
+        waitUntil(() -> !activityVisible(), 2500L, "voice pre-roll test moves Activity behind Home");
+        scenario("real_open_pending_attach_keeps_one_player_through_preroll_and_natural_completion",
+                () -> assertFullTransitionWithPendingAttachment(true, opening));
+        scenario("real_close_pending_attach_keeps_one_player_through_preroll_and_natural_completion",
+                () -> assertFullTransitionWithPendingAttachment(false, closing));
+    }
+
+    private void assertFullTransitionWithPendingAttachment(boolean open, JSONObject asset) throws Exception {
+        dismissRoof();
+        final Object[] episode = onMain(() -> {
+            long received = SystemClock.elapsedRealtime();
+            roofPacketsInjected++;
+            router.onFrame(AdapterProtocol.packet(AdapterProtocol.CMD_RAW_CAN, new byte[]{(byte) (open ? 1 : 0)}), usbEpoch, received);
+            JSONObject input = new JSONObject();
+            input.put("packet", roofPacketsInjected); input.put("open", open);
+            input.put("connectionEpoch", usbEpoch); input.put("receivedElapsedMs", received); roofInputs.put(input);
+            controller.apply();
+            View view = (View) field(controller, "overlay");
+            android.media.MediaPlayer player = actualMediaPlayer();
+            Object clip = field(field(controller, "sound"), "player");
+            long token = ((Number) field(field(controller, "sound"), "clipToken")).longValue();
+            check(view != null && !view.isAttachedToWindow(), "actual addView returned before first attachment");
+            check(player != null && player.isPlaying(), "real roof transition starts its production player before attachment");
+            check(player.getCurrentPosition() < asset.getInt("warmupPrefixMs"), "first sample is inside the silent pre-roll");
+            for (int index = 0; index < 3; index++) controller.apply();
+            check(field(controller, "overlay") == view && actualMediaPlayer() == player,
+                    "same-sequence apply before attachment preserves the identical view and MediaPlayer");
+            check(((Number) field(field(controller, "sound"), "clipToken")).longValue() == token,
+                    "pending attachment never restarts the audio clip");
+            return new Object[]{view, player, clip, token};
+        });
+        View originalView = (View) episode[0];
+        android.media.MediaPlayer originalPlayer = (android.media.MediaPlayer) episode[1];
+        Object originalClip = episode[2];
+        long originalToken = (Long) episode[3];
+        long started = onMain(() -> ((Number) field(originalClip, "startedAt")).longValue());
+        assertAudioCue(open ? "opening_preroll_full" : "closing_preroll_full", asset);
+        waitUntil(() -> onMain(() -> actualMediaPlayer() == originalPlayer
+                && originalPlayer.isPlaying()
+                && originalPlayer.getCurrentPosition() >= asset.getInt("warmupPrefixMs") + 100),
+                2200L, "same real player reaches the preserved speech after its silent prefix");
+        onMain(() -> {
+            controller.apply();
+            check(field(controller, "overlay") == originalView && actualMediaPlayer() == originalPlayer,
+                    "attached transition preserves the same view and player after speech begins");
+            android.media.AudioFocusRequest focus = (android.media.AudioFocusRequest) field(originalClip, "focus");
+            check(focus.getAudioAttributes().getVolumeControlStream() == android.media.AudioManager.STREAM_NOTIFICATION,
+                    "production audio attributes select the notification volume stream");
+            android.media.AudioManager manager = (android.media.AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+            boolean activeNotification = false;
+            JSONArray attributes = new JSONArray();
+            for (android.media.AudioPlaybackConfiguration configuration : manager.getActivePlaybackConfigurations()) {
+                android.media.AudioAttributes value = configuration.getAudioAttributes();
+                attributes.put(value.toString());
+                if (value.equals(focus.getAudioAttributes())
+                        && value.getVolumeControlStream() == android.media.AudioManager.STREAM_NOTIFICATION) activeNotification = true;
+            }
+            check(activeNotification, "Android active playback contains the production notification audio attributes");
+            JSONObject streamProof = new JSONObject();
+            streamProof.put("role", open ? "opening_runtime_stream" : "closing_runtime_stream");
+            streamProof.put("audioSessionId", originalPlayer.getAudioSessionId());
+            streamProof.put("volumeControlStream", focus.getAudioAttributes().getVolumeControlStream());
+            streamProof.put("activePlaybackAttributes", attributes); audioProofs.put(streamProof);
+            return null;
+        });
+        waitUntil(() -> onMain(() -> actualMediaPlayer() == null), asset.getInt("expectedDurationMs") + 1200L,
+                "normal transition releases the real player after full speech");
+        onMain(() -> {
+            check("completion".equals(field(originalClip, "endReason")), "normal OPEN/CLOSE ends by MediaPlayer completion, never overlay cancellation");
+            check(Boolean.TRUE.equals(field(originalClip, "closed")), "completed clip releases its audio resources");
+            check(SystemClock.elapsedRealtime() - started >= asset.getInt("expectedDurationMs") - 100L,
+                    "complete transition includes the entire prefix and original speech duration");
+            check(((Number) field(field(controller, "sound"), "clipToken")).longValue() == originalToken,
+                    "one real roof transition creates exactly one clip through completion");
+            controller.apply();
+            check(actualMediaPlayer() == null, "refresh does not replay naturally completed transition speech");
+            JSONObject completed = new JSONObject();
+            completed.put("role", open ? "opening_natural_completion" : "closing_natural_completion");
+            completed.put("endReason", field(originalClip, "endReason"));
+            completed.put("elapsedMs", SystemClock.elapsedRealtime() - started);
+            completed.put("expectedDurationMs", asset.getInt("expectedDurationMs"));
+            completed.put("samePlayerAcrossPrefix", true); completed.put("sameViewBeforeAttachment", true);
+            audioProofs.put(completed);
+            return null;
+        });
+    }
+
     private void runAudioPhase() throws Exception {
         // Read the installed target's resources, independently of the production
         // cue selection. A stale fixture must not expect an earlier voice take.
@@ -897,7 +1011,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             assertAudioCue("mandatory_rear_adas_warning", warning);
             assertRoofWindow(true, true);
             capture("mandatory_rear_adas_warning_before_tap");
-            waitForSpokenPart(started, "tap_during_spoken_warning");
+            waitForSpokenPart(started, "tap_during_spoken_warning", warning);
             shell("input tap 640 400");
             waitUntil(() -> !windowShowing(), 1800L, "mandatory warning accepts actual input tap");
             check(onMain(() -> actualMediaPlayer() == null), "actual tap releases warning MediaPlayer");
@@ -909,13 +1023,24 @@ public final class BackgroundInstrumentation extends Instrumentation {
             long started = SystemClock.elapsedRealtime();
             nativeAcc(false);
             assertAudioCue("mandatory_warning_natural_completion", warning);
+            boolean refreshedAtThree = false, refreshedAtSix = false;
+            if (warning.getInt("expectedDurationMs") > 3100) {
+                android.media.MediaPlayer originalWarning = onMain(this::actualMediaPlayer);
+                long untilThree = 3000L - (SystemClock.elapsedRealtime() - started);
+                if (untilThree > 0L) SystemClock.sleep(untilThree);
+                injectRoof(true);
+                onMain(() -> { controller.apply(); return null; });
+                check(onMain(() -> actualMediaPlayer() == originalWarning && originalWarning.isPlaying()),
+                        "real duplicate packet at 3 s preserves the same longer warning during speech");
+                refreshedAtThree = true;
+            }
             waitUntil(() -> onMain(() -> actualMediaPlayer() == null), warning.getInt("expectedDurationMs") + 900L,
                     "combined ADAS and voice complete and release the real MediaPlayer naturally");
             check(windowShowing(), "warning overlay persists after natural audio completion");
-            boolean refreshedAtThree = false, refreshedAtSix = false;
             int samples = 0;
             long nextProbeAt = SystemClock.elapsedRealtime();
-            while (SystemClock.elapsedRealtime() - started < 9800L) {
+            long replayWatchEndMs = Math.max(9800L, warning.getInt("expectedDurationMs") + 7500L);
+            while (SystemClock.elapsedRealtime() - started < replayWatchEndMs) {
                 long elapsed = SystemClock.elapsedRealtime() - started;
                 if ((!refreshedAtThree && elapsed >= 3000L) || (!refreshedAtSix && elapsed >= 6000L)) {
                     injectRoof(true); // Actual duplicate 0x76 packet; no synthetic policy call.
@@ -938,7 +1063,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             warningPlaybackProbes.put(finalProbe);
             check(refreshedAtThree && refreshedAtSix, "real duplicate packets and service apply exercised the 3 s and 6 s points");
             check(samples >= 60, "MediaPlayer inspected every ~100 ms through at least 9.8 s without replay");
-            check(finalProbe.getLong("elapsedMs") >= 9800L && !finalProbe.getBoolean("playerPresent")
+            check(finalProbe.getLong("elapsedMs") >= replayWatchEndMs && !finalProbe.getBoolean("playerPresent")
                             && finalProbe.getBoolean("windowShowing"),
                     "persistent warning remains silent past 9.8 s and the 9.5 s audio hard guard");
             check(!activityVisible() && AppService.isRunning(), "once-only warning remained over Home with real service alive");
@@ -951,7 +1076,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             long started = SystemClock.elapsedRealtime();
             nativeAcc(false);
             assertAudioCue("mandatory_warning_roof_close_cancellation", warning);
-            waitForSpokenPart(started, "real_roof_close_during_spoken_warning");
+            waitForSpokenPart(started, "real_roof_close_during_spoken_warning", warning);
             injectRoof(false);
             waitUntil(() -> onMain(() -> controller.statusSummary().contains("kind=CLOSING")), 1800L,
                     "real roof closed packet replaces parking warning with the ordinary closing animation");
@@ -965,13 +1090,15 @@ public final class BackgroundInstrumentation extends Instrumentation {
         });
     }
 
-    private void waitForSpokenPart(long started, String event) throws Exception {
-        long remaining = 1100L - (SystemClock.elapsedRealtime() - started);
+    private void waitForSpokenPart(long started, String event, JSONObject warning) throws Exception {
+        long voiceStartMs = warning.getLong("voiceStartFrame") * 1000L / warning.getInt("sampleRateHz");
+        long remaining = voiceStartMs + 425L - (SystemClock.elapsedRealtime() - started);
         if (remaining > 0) SystemClock.sleep(remaining);
         JSONObject probe = warningPlaybackProbe(event, started);
         warningPlaybackProbes.put(probe);
         check(probe.getBoolean("playerPresent") && probe.optBoolean("isPlaying")
-                        && probe.optInt("positionMs") >= 674 && probe.optInt("positionMs") < 2394,
+                        && probe.optInt("positionMs") >= voiceStartMs
+                        && probe.optInt("positionMs") < warning.getInt("expectedDurationMs"),
                 event + " occurs during the spoken portion of the actual combined MediaPlayer cue");
     }
 
@@ -1087,16 +1214,44 @@ public final class BackgroundInstrumentation extends Instrumentation {
         value.put("frames", frames);
         value.put("durationExactMs", durationMs);
         value.put("expectedDurationMs", Math.round(durationMs));
+        long originalFrames;
+        String expectedOriginalPcm;
+        if ("sunroof_open_voice".equals(name)) {
+            originalFrames = 27840L;
+            expectedOriginalPcm = "f1b8fb2c01736dbe9ede56652a789207a4492e7c3919955a32d05ecd5ad38790";
+        } else if ("sunroof_close_voice".equals(name)) {
+            originalFrames = 33600L;
+            expectedOriginalPcm = "261afac6a5690de64a1d2f828c85048b27dc5107cfa2fc07ae8e3fd63a736ce3";
+        } else {
+            originalFrames = 105578L;
+            expectedOriginalPcm = "f0b0f3a32d1276867f746c95cea9a73c140e36eb1600b637cf8c545acb78fd9a";
+        }
+        long warmupFrames = frames - originalFrames;
+        if (warmupFrames != 0 && warmupFrames != rate * 1200L / 1000L)
+            throw new AssertionError(name + " must contain its exact original PCM with zero or 1200 ms pre-roll");
+        int originalOffset = dataOffset + (int) warmupFrames * blockAlign;
+        for (int index = dataOffset; index < originalOffset; index++)
+            if (wav[index] != 0) throw new AssertionError(name + " pre-roll is not PCM silence");
+        java.security.MessageDigest originalPcm = java.security.MessageDigest.getInstance("SHA-256");
+        originalPcm.update(wav, originalOffset, (int) originalFrames * blockAlign);
+        StringBuilder originalHash = new StringBuilder();
+        for (byte item : originalPcm.digest()) originalHash.append(String.format(java.util.Locale.ROOT, "%02x", item & 255));
+        if (!expectedOriginalPcm.equals(originalHash.toString()))
+            throw new AssertionError(name + " changed original voice or ADAS PCM after pre-roll");
+        value.put("warmupPrefixFrames", warmupFrames);
+        value.put("warmupPrefixMs", warmupFrames * 1000L / rate);
+        value.put("warmupPrefixAllZero", true);
+        value.put("originalPcmFrames", originalFrames);
+        value.put("originalPcmSha256", originalHash.toString());
+        value.put("originalPcmPreserved", true);
         if ("sunroof_warning_adas".equals(name)) {
-            if (frames != 105578L || !"493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70".equals(hash.toString()))
-                throw new AssertionError("combined warning differs from the selected 105578-frame master");
             java.security.MessageDigest prefix = java.security.MessageDigest.getInstance("SHA-256");
-            prefix.update(wav, dataOffset, 23552 * blockAlign);
+            prefix.update(wav, originalOffset, 23552 * blockAlign);
             StringBuilder prefixHash = new StringBuilder();
             for (byte item : prefix.digest()) prefixHash.append(String.format(java.util.Locale.ROOT, "%02x", item & 255));
             if (!"ae91888830362a7b262b3f431fa14adf9ca090eaaf8297c60a997a45adc7b141".equals(prefixHash.toString()))
                 throw new AssertionError("combined warning changed the original rear ADAS PCM prefix");
-            for (int index = dataOffset + 23552 * blockAlign; index < dataOffset + 29726 * blockAlign; index++)
+            for (int index = originalOffset + 23552 * blockAlign; index < originalOffset + 29726 * blockAlign; index++)
                 if (wav[index] != 0) throw new AssertionError("combined warning gap must contain 6174 silent frames");
             for (int index = dataOffset; index < dataOffset + dataBytes; index += blockAlign)
                 if (wav[index] != wav[index + 2] || wav[index + 1] != wav[index + 3])
@@ -1105,7 +1260,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             value.put("originalBeepPcmSha256", prefixHash.toString());
             value.put("silentGapFrames", 6174);
             value.put("silentGapAllZero", true);
-            value.put("voiceStartFrame", 29726);
+            value.put("voiceStartFrame", warmupFrames + 29726);
             value.put("voiceFrames", 75852);
             value.put("channelsIdentical", true);
         }

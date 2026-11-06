@@ -244,9 +244,9 @@ public final class SunroofSoundPlayerTest {
 
     @Test public void normalTransitionHasItsOwnHardReleaseDeadline() {
         sound.play(false);
-        clock.advanceTo(2_499);
+        clock.advanceTo(4_499);
         assertEquals(1, factory.live);
-        clock.advanceTo(2_500);
+        clock.advanceTo(4_500);
         assertEquals(0, factory.live);
         assertEquals(0, clock.pending.size());
     }

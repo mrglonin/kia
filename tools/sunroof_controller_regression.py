@@ -99,24 +99,31 @@ FIXTURES = {'android/annotation/SuppressLint.java': 'package android.annotation;
                               'TOP=48,START=3,CENTER=17;}',
  'android/view/KeyEvent.java': 'package android.view;public class KeyEvent {public static final int '
                                'ACTION_DOWN=0;}',
- 'android/view/View.java': 'package android.view;public class View {public static final int '
-                           'SYSTEM_UI_FLAG_LAYOUT_STABLE=1,SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN=2,SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION=4;public '
-                           'boolean attached;public void setSystemUiVisibility(int flags){}public '
-                           'boolean isAttachedToWindow(){return attached;}}',
+ 'android/view/View.java': r'''package android.view;public class View {
+ public static final int SYSTEM_UI_FLAG_LAYOUT_STABLE=1,SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN=2,SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION=4;
+ public boolean attached;
+ public interface OnAttachStateChangeListener {void onViewAttachedToWindow(View v);void onViewDetachedFromWindow(View v);}
+ final java.util.List<OnAttachStateChangeListener> listeners=new java.util.ArrayList<>();
+ public void addOnAttachStateChangeListener(OnAttachStateChangeListener listener){listeners.add(listener);}
+ public void setSystemUiVisibility(int flags){}
+ public boolean isAttachedToWindow(){return attached;}
+ public void attach(){if(attached)return;attached=true;for(var l:new java.util.ArrayList<>(listeners))l.onViewAttachedToWindow(this);}
+ public void detach(){if(!attached)return;attached=false;for(var l:new java.util.ArrayList<>(listeners))l.onViewDetachedFromWindow(this);}
+}''',
  'android/view/ViewGroup.java': 'package android.view;public class ViewGroup {public static class '
                                 'LayoutParams {public static final int MATCH_PARENT=-1;}}',
  'android/view/WindowManager.java': 'package android.view;public class WindowManager {\n'
                                     ' public static final WindowManager INSTANCE=new '
                                     'WindowManager();public static int screenWidth=1280;\n'
-                                    ' public int adds,removes;public View current;public LayoutParams '
+                                    ' public boolean attachImmediately=true;public int adds,removes;public View current;public LayoutParams '
                                     'last;\n'
                                     ' public Display getDefaultDisplay(){return new Display();}public '
                                     'WindowMetrics getCurrentWindowMetrics(){return new '
                                     'WindowMetrics();}\n'
                                     ' public void addView(View v,LayoutParams '
-                                    'p){adds++;current=v;last=p;v.attached=true;}\n'
+                                    'p){adds++;current=v;last=p;if(attachImmediately)v.attach();}\n'
                                     ' public void removeViewImmediate(View '
-                                    'v){removes++;v.attached=false;if(current==v)current=null;}\n'
+                                    'v){removes++;v.detach();if(current==v)current=null;}\n'
                                     ' public static class LayoutParams {\n'
                                     ' public static final int '
                                     'FLAG_LAYOUT_IN_SCREEN=1,FLAG_LAYOUT_NO_LIMITS=2,FLAG_NOT_TOUCHABLE=4,FLAG_NOT_FOCUSABLE=8,FLAG_NOT_TOUCH_MODAL=16,TYPE_APPLICATION_OVERLAY=2038,TYPE_PHONE=2002,LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES=1;\n'
@@ -147,11 +154,11 @@ FIXTURES = {'android/annotation/SuppressLint.java': 'package android.annotation;
  'kia/app/core/model/TpmsState.java': 'package kia.app.core.model;public class TpmsState {}',
  'kia/app/core/settings/AppSettings.java': r'''package kia.app.core.settings;
 public class AppSettings {
- public static boolean masterEnabled=true,parkingEnabled=true;
+ public static boolean masterEnabled=true,parkingEnabled=true,transitionEnabled;
  public static boolean sunroofOverlayEnabled(android.content.Context c){return masterEnabled;}
  public static boolean sunroofParkingWarningEnabled(android.content.Context c){return parkingEnabled;}
  public static boolean sunroofSoundEnabled(android.content.Context c){return false;}
- public static boolean sunroofTransitionSoundEnabled(android.content.Context c){return false;}
+ public static boolean sunroofTransitionSoundEnabled(android.content.Context c){return transitionEnabled;}
  public static boolean rctaOverlayEnabled(android.content.Context c){return true;}
 }''',
  'kia/app/protocol/adapter/AdapterGateway.java': 'package kia.app.protocol.adapter;public class '
@@ -175,7 +182,7 @@ public class AppSettings {
  'kia/app/sunroof/SunroofOverlayView.java': 'package kia.app.sunroof;public class SunroofOverlayView '
                                             'extends android.view.View {\n'
                                             ' public static final long '
-                                            'TRANSIENT_DURATION_MS=3400;public float '
+                                            'TRANSIENT_DURATION_MS=4400;public float '
                                             'compactWidth;public Runnable dismiss;\n'
                                             ' public SunroofAlertPolicy.Kind kind;public '
                                             'SunroofOverlayView(android.content.Context c){}\n'
@@ -228,8 +235,8 @@ public class ControllerBackgroundProof {
   worker.start();worker.join();Handler.drain();
  }
  static void reset()throws Exception{
-  roof.stop();android.content.Context.clearPreferences();android.os.PowerManager.interactive=true;kia.app.protocol.adapter.AdapterGateway.connected=true;kia.app.protocol.adapter.AdapterGateway.epoch=1;SunroofSoundPlayer.warningPlays=0;SunroofSoundPlayer.transitionPlays=0;SunroofSoundPlayer.actualStops=0;SunroofSoundPlayer.playing=false;kia.app.core.settings.AppSettings.masterEnabled=true;kia.app.core.settings.AppSettings.parkingEnabled=true;StateStore.setVehicle(context,VehicleState.empty());Handler.drain();
-  TpmsAlertController.severity=0;TpmsWarningOverlayController.visible=false;wm.adds=0;wm.removes=0;
+  roof.stop();android.content.Context.clearPreferences();android.os.PowerManager.interactive=true;kia.app.protocol.adapter.AdapterGateway.connected=true;kia.app.protocol.adapter.AdapterGateway.epoch=1;SunroofSoundPlayer.warningPlays=0;SunroofSoundPlayer.transitionPlays=0;SunroofSoundPlayer.actualStops=0;SunroofSoundPlayer.playing=false;kia.app.core.settings.AppSettings.masterEnabled=true;kia.app.core.settings.AppSettings.parkingEnabled=true;kia.app.core.settings.AppSettings.transitionEnabled=false;StateStore.setVehicle(context,VehicleState.empty());Handler.drain();
+  TpmsAlertController.severity=0;TpmsWarningOverlayController.visible=false;wm.attachImmediately=true;wm.adds=0;wm.removes=0;
   SystemClock.now=100;rootClock();router=new FrameRouter(context);roof.start();frame(false,100);
  }
  static void rootClock(){android.content.res.Resources.metrics.density=1;android.content.res.Resources.metrics.densityDpi=160;}
@@ -257,6 +264,39 @@ public class ControllerBackgroundProof {
  static void checkHiddenStop(String cause){
   check(view()==null&&!SunroofSoundPlayer.playing,"hidden warning was not cancelled by "+cause);
   check(SunroofSoundPlayer.actualStops==1,"hidden warning did not stop exactly once for "+cause);
+ }
+ static void pendingAttachmentRegressions()throws Exception{
+  // addView may return before Android attaches the first OPEN window. State broadcasts
+  // during that interval must not destroy/recreate it or restart its active phrase.
+  reset();roof.stop();android.content.Context.clearPreferences();StateStore.setVehicle(context,VehicleState.empty());Handler.drain();roof.start();router=new FrameRouter(context);
+  check(!StateStore.vehicle().sunroofKnown&&!SunroofStateMemory.snapshot(context).known&&view()==null,"first OPEN fixture did not begin with unknown roof state");
+  kia.app.core.settings.AppSettings.transitionEnabled=true;wm.attachImmediately=false;
+  frame(true,200);SunroofOverlayView pending=view();
+  check(pending!=null&&!pending.isAttachedToWindow(),"fixture did not leave first OPEN pending attachment");
+  check(SunroofSoundPlayer.transitionPlays==1&&SunroofSoundPlayer.playing,"pending OPEN did not start one active phrase");
+  roof.apply();roof.apply();frame(true,201);acc(true,202);Handler.advance(1_100);
+  check(view()==pending&&wm.adds==1&&wm.removes==0,"duplicate source/refresh replaced a pending OPEN window");
+  check(SunroofSoundPlayer.transitionPlays==1&&SunroofSoundPlayer.actualStops==0&&SunroofSoundPlayer.playing,"pending attachment interrupted or restarted the OPEN phrase");
+  pending.attach();roof.apply();frame(true,1_101);
+  check(view()==pending&&pending.isAttachedToWindow()&&wm.adds==1,"duplicate after attachment replaced the OPEN window");
+  check(SunroofSoundPlayer.transitionPlays==1&&SunroofSoundPlayer.actualStops==0,"attachment replayed or cancelled the OPEN phrase");
+
+  // A real subsequent detach still needs recovery. A callback from the replaced view
+  // must not mark its new, still-pending successor as already attached.
+  pending.detach();roof.apply();SunroofOverlayView recovered=view();
+  check(recovered!=null&&recovered!=pending&&!recovered.isAttachedToWindow()&&wm.adds==2&&wm.removes==1,"genuine detach did not create exactly one replacement window");
+  check(SunroofSoundPlayer.transitionPlays==2&&SunroofSoundPlayer.actualStops==1,"genuine detach recovery did not replace the old transition audio exactly once");
+  pending.attach();roof.apply();roof.apply();
+  check(view()==recovered&&wm.adds==2&&wm.removes==1,"stale old-view attach callback invalidated the pending replacement");
+  check(SunroofSoundPlayer.transitionPlays==2&&SunroofSoundPlayer.actualStops==1,"pending replacement restarted audio after stale callback");
+  recovered.attach();roof.apply();
+  check(view()==recovered&&recovered.isAttachedToWindow()&&wm.adds==2,"replacement attachment did not settle without recreation");
+
+  // The synchronous addView path must also record that the view really attached,
+  // even when its attach callback runs before the controller stores its identity.
+  reset();kia.app.core.settings.AppSettings.transitionEnabled=true;frame(true,200);
+  SunroofOverlayView immediate=view();immediate.detach();roof.apply();
+  check(view()!=null&&view()!=immediate&&view().isAttachedToWindow()&&wm.adds==2&&wm.removes==1,"synchronous attachment was not tracked for later genuine detach recovery");
  }
  static void sleepAudioRegressions()throws Exception{
   // Reproduce the physical ordering: ACC off, then native sleep 51 ms into the cue.
@@ -413,6 +453,7 @@ public class ControllerBackgroundProof {
    TeyesSunroofObserver.listener.onAcc(true,false,901_007,"nativefixture");
    check(view()!=null,"next ACC cycle failed after "+reason+" acknowledgement");
   }
+  pendingAttachmentRegressions();
   sleepAudioRegressions();
   roof.stop();System.out.println("Sunroof controller production regression passed: "+checks+" assertions");
  }

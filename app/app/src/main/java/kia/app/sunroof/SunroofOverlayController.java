@@ -65,6 +65,7 @@ public final class SunroofOverlayController {
     private long lastRealEpoch;
     private SunroofAlertPolicy.Decision demo;
     private SunroofOverlayView overlay;
+    private boolean overlayWasAttached;
     private long shownSequence = Long.MIN_VALUE;
     private SunroofAlertPolicy.Kind shownKind = SunroofAlertPolicy.Kind.NONE;
     private boolean shownDemo;
@@ -442,7 +443,9 @@ public final class SunroofOverlayController {
         sound.setEnabled(allowAudio);
         boolean preserveWarningAudio = warning && !demonstration
                 && realWarningAudioSequence == decision.sequence;
-        if (overlay != null && !overlay.isAttachedToWindow()) {
+        // addView can return before the first attachment callback. A second state
+        // broadcast in that gap must keep the pending window and its one-shot audio.
+        if (overlay != null && overlayWasAttached && !overlay.isAttachedToWindow()) {
             if (preserveWarningAudio) hideWindow();
             else hide();
         }
@@ -456,6 +459,14 @@ public final class SunroofOverlayController {
         else hide();
         if (windowManager == null) return;
         SunroofOverlayView next = new SunroofOverlayView(windowContext);
+        next.addOnAttachStateChangeListener(new android.view.View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(android.view.View view) {
+                if (overlay == view) overlayWasAttached = true;
+            }
+            @Override public void onViewDetachedFromWindow(android.view.View view) {
+                // The next apply distinguishes a detached old window from a pending new one.
+            }
+        });
         float carWidthPx = SunroofOverlayGeometry.carWidthPx(displayWidthPx());
         next.setCompactCarWidthPx(warning ? 0f : carWidthPx);
         next.setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
@@ -464,6 +475,7 @@ public final class SunroofOverlayController {
         try {
             windowManager.addView(next, layoutParams(warning, carWidthPx));
             overlay = next;
+            overlayWasAttached = next.isAttachedToWindow();
             shownSequence = decision.sequence;
             shownKind = decision.kind;
             shownDemo = demonstration;
@@ -520,6 +532,7 @@ public final class SunroofOverlayController {
         audioEnabled = false;
         SunroofOverlayView previous = overlay;
         overlay = null;
+        overlayWasAttached = false;
         shownSequence = Long.MIN_VALUE;
         shownKind = SunroofAlertPolicy.Kind.NONE;
         if (previous != null) {

@@ -1,0 +1,85 @@
+{
+  "created_utc": "2026-11-06T13:36:44.097963+00:00",
+  "status": "VERIFIED_FOR_STANDARD_UPDATE_PHYSICAL_ACCEPTANCE_PENDING",
+  "artifact": {
+    "version_name": "23.24-sunroof",
+    "version_code": 378,
+    "asset_name": "kia_378_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.24-378/kia_378_sunroof.apk",
+    "sha256": "86eff78c6e619320ff06da1f6efc6d64cfb5f5d37a95ed89e0911e08ee81c16b",
+    "size": 7748550
+  },
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "source_base": "831d022d98fa804f061eb0b8c13a302d46ec893c",
+  "build": {
+    "method": "All current Java/resources compiled with official Android SDK tools; complete baseline external DEX and runtime metadata preserved",
+    "gradle_and_lint_completed": false,
+    "stable_resource_ids_preserved": 32,
+    "external_class_count": 1026,
+    "kotlin_builtins_preserved": 7,
+    "signature_and_zipalign_verified": true
+  },
+  "audio_pcm": {
+    "sunroof_open_voice.wav": {
+      "pre_roll_ms": 1200,
+      "original_pcm_sha256": "f1b8fb2c01736dbe9ede56652a789207a4492e7c3919955a32d05ecd5ad38790",
+      "preserved_original_pcm_byte_for_byte": true,
+      "new_duration_ms": 2360.0,
+      "sha256": "323b06eb0811d81265602bebbb880e68093ac3230c3badd41e7ab6656d3717fe"
+    },
+    "sunroof_close_voice.wav": {
+      "pre_roll_ms": 1200,
+      "original_pcm_sha256": "261afac6a5690de64a1d2f828c85048b27dc5107cfa2fc07ae8e3fd63a736ce3",
+      "preserved_original_pcm_byte_for_byte": true,
+      "new_duration_ms": 2600.0,
+      "sha256": "a2afe7b3f2e0e798c773d20d1a93694cb8b54af4ed5fdaa49a3584a7c1ae9163"
+    },
+    "sunroof_warning_adas.wav": {
+      "pre_roll_ms": 1200,
+      "original_pcm_sha256": "f0b0f3a32d1276867f746c95cea9a73c140e36eb1600b637cf8c545acb78fd9a",
+      "preserved_original_pcm_byte_for_byte": true,
+      "new_duration_ms": 3594.0589569160998,
+      "sha256": "4e2a30a2e5c72bc54c5248d6d7c13bc34007324e011bf6144d5179111874936d"
+    }
+  },
+  "validation": {
+    "focused_sunroof_junit": {
+      "tests": 75,
+      "failures": 0
+    },
+    "controller": {
+      "assertions": 157,
+      "failures": 0,
+      "negative_377": "Fails duplicate source/refresh replaced a pending OPEN window"
+    },
+    "installed_android": [
+      {
+        "phase": "voice_preroll",
+        "assertions": 48,
+        "failures": 0,
+        "installed_apk_sha256": "86eff78c6e619320ff06da1f6efc6d64cfb5f5d37a95ed89e0911e08ee81c16b"
+      },
+      {
+        "phase": "sleep_audio",
+        "assertions": 190,
+        "failures": 0,
+        "installed_apk_sha256": "86eff78c6e619320ff06da1f6efc6d64cfb5f5d37a95ed89e0911e08ee81c16b"
+      }
+    ],
+    "initial_sleep_timing_failure": "First probe delayed beyond full clip; natural completion at position3594ms in log. Failed evidence retained; unchanged repeat passed.",
+    "physical_audio_and_overlay": false
+  },
+  "behavior": {
+    "legacy_notification_stream": 5,
+    "pre_roll_ms": 1200,
+    "normal_audio_limit_ms": 4500,
+    "normal_overlay_ms": 4400,
+    "same_pending_window_preserved_on_duplicate": true,
+    "system_volume_unchanged": true,
+    "original_voice_pcm_preserved": true
+  },
+  "limits": [
+    "Physical amplifier readiness and first overlay still require vehicle confirmation.",
+    "No early MCU delay-start callback is claimed."
+  ]
+}
