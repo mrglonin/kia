@@ -6,8 +6,8 @@
     "version_code": 377,
     "asset_name": "kia_377_sunroof.apk",
     "download_url": "https://github.com/mrglonin/kia/releases/download/v23.23-377/kia_377_sunroof.apk",
-    "sha256": "6b8278d2968757285b63f808c856f991b60e84a6134053458ce6276655602015",
-    "size": 7412079
+    "sha256": "779ea0b8c02ac6b5b64e21d89cfa3344a211740d15749b21767c3a23ceed5e13",
+    "size": 7420870
   },
   "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
   "upgrade_signature_matches_376": true,
@@ -41,7 +41,11 @@
     "zipalign": true,
     "signature_verified": true,
     "gradle_and_lint_completed": false,
-    "gradle_limit": "Gradle wrapper/dependency download unavailable within this live session; standard Gradle assemble/lint not completed."
+    "gradle_limit": "Gradle wrapper/dependency download unavailable within this live session; standard Gradle assemble/lint not completed.",
+    "kotlin_builtins_files_preserved": 7,
+    "all_runtime_zip_entries_preserved": true,
+    "gradle_provenance_not_copied": true,
+    "dex_identical_to_previous_tested_complete_dependencies_apk": true
   },
   "validation": {
     "sunroof_junit": {
@@ -57,7 +61,7 @@
       "phase": "sleep_audio",
       "assertions": 144,
       "failures": 0,
-      "installed_apk_sha256": "6b8278d2968757285b63f808c856f991b60e84a6134053458ce6276655602015",
+      "installed_apk_sha256": "779ea0b8c02ac6b5b64e21d89cfa3344a211740d15749b21767c3a23ceed5e13",
       "scenarios": [
         "ACC OFF followed by vendor sleep after 51ms",
         "vendor sleep followed by ACC OFF",

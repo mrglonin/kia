@@ -16,7 +16,7 @@
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.23-sunroof` / `377` | `updates/kia_377_sunroof.apk`, 7 412 079 байт | `6b8278d2968757285b63f808c856f991b60e84a6134053458ce6276655602015` |
+| KIA app | `23.23-sunroof` / `377` | `updates/kia_377_sunroof.apk`, 7 420 870 байт | `779ea0b8c02ac6b5b64e21d89cfa3344a211740d15749b21767c3a23ceed5e13` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
 
 В `377` устранён обрыв предупреждения при сне: короткий звук отделён от скрываемого окна и не повторяется при пробуждении. Проверены 75 модульных тестов подсистемы люка и 144 проверки контроллера. [Отчёт 377](updates/verification_377.json).
