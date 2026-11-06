@@ -1,0 +1,98 @@
+{
+  "created_utc": "2026-11-06T13:06:30.941683+00:00",
+  "status": "VERIFIED_FOR_STANDARD_UPDATE_PHYSICAL_AUDIO_PENDING",
+  "artifact": {
+    "version_name": "23.23-sunroof",
+    "version_code": 377,
+    "asset_name": "kia_377_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.23-377/kia_377_sunroof.apk",
+    "sha256": "6b8278d2968757285b63f808c856f991b60e84a6134053458ce6276655602015",
+    "size": 7412079
+  },
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "upgrade_signature_matches_376": true,
+  "source": {
+    "base_commit": "01607266aad3928ccb85de2f5c9faa85155c98b5",
+    "production_sha256": {
+      "app/app/build.gradle": "adb6f9a7b6e0ff34501af00c99ab6f192e5b07531443967f9101fe156edb0177",
+      "app/app/src/main/java/kia/app/sunroof/SunroofOverlayController.java": "8046a02278fa9dd90cab80ab8a0f9e60b20734764d1971a4b8b77179773b44df",
+      "app/app/src/main/java/kia/app/sunroof/SunroofSoundPlayer.java": "8379e97ef91dfb275ef169259130823f38e3260ac50aeec0a22370697cbff709"
+    }
+  },
+  "build": {
+    "method": "All current Java and resources compiled using Android SDK aapt2, javac17, D8, zipalign and apksigner; original 376 external DEX preserved.",
+    "package": "kia.app",
+    "min_sdk": 29,
+    "target_sdk": 36,
+    "app_java_sources": 148,
+    "external_class_count_baseline": 1026,
+    "external_class_count_377": 1026,
+    "external_classes_added_or_removed": 0,
+    "external_dex_sha256": "36b2e2fdb79bf3f63180ffe3aeb49dbf047b498cc9abb5417d4d413c6a7a3746",
+    "stable_resource_ids_match": true,
+    "original_wav_match": {
+      "sunroof_close_voice.wav": "da57b0919d9e790aadb009b90c577ad4181cab9d4ddbde4720926c70c998d83f",
+      "sunroof_open_voice.wav": "7d1eb7b2b2929b604a4871119a9b1f3f49a2cce365bb17fc08f8465f40579898",
+      "sunroof_warning_adas.wav": "493b13c3c1ef22ad08695e80892047a80e366ea2da115757fd1bded684e46a70",
+      "teyes_rear_left_warning.wav": "fceb3a2214c8f62fcaf4d22bc83b43ef606732ee5a332e84fe8e3f98ab09390b",
+      "teyes_rear_right_warning.wav": "446f92eb3e5ea5adf991b9876b8f203391e442cba0588724c2df9750fd65e1f5",
+      "tpms6_error.wav": "7caa565f9940341f31338f2fa6d1f1e37ffae77b6494f56935f2bfc2af5820c9"
+    },
+    "zipalign": true,
+    "signature_verified": true,
+    "gradle_and_lint_completed": false,
+    "gradle_limit": "Gradle wrapper/dependency download unavailable within this live session; standard Gradle assemble/lint not completed."
+  },
+  "validation": {
+    "sunroof_junit": {
+      "tests": 75,
+      "failures": 0
+    },
+    "controller_regression": {
+      "assertions": 144,
+      "failures": 0,
+      "boundary": "Production router/model/policy/controller with Android/USB/native ACC stubs"
+    },
+    "android_final_apk": {
+      "phase": "sleep_audio",
+      "assertions": 144,
+      "failures": 0,
+      "installed_apk_sha256": "6b8278d2968757285b63f808c856f991b60e84a6134053458ce6276655602015",
+      "scenarios": [
+        "ACC OFF followed by vendor sleep after 51ms",
+        "vendor sleep followed by ACC OFF",
+        "complete finite MediaPlayer playback without window",
+        "wake and duplicate events do not replay"
+      ],
+      "boundary": "Android emulator with Binder service endpoint and physical USB boundary replaced"
+    },
+    "negative_control_376": {
+      "expected_sleep_audio_failures": 2,
+      "actual_sleep_audio_failures": 2
+    },
+    "prior_audio_regression": {
+      "assertions": 79,
+      "failures": 0,
+      "apk_sha256": "69324d38f55f9a99d7f43acb9a2f60e2ab2ec0533c3a57eb717badcdfdbe5c45",
+      "boundary": "Earlier candidate with same production Java/resources; not the final complete-dependencies artifact"
+    },
+    "full_raw_sdk_junit": {
+      "tests": 469,
+      "environment_failures": 28,
+      "boundary": "Raw Android SDK stubs/native SystemClock prevented full suite execution outside Gradle; not claimed as a passed full suite"
+    },
+    "physical_head_unit": false,
+    "physical_amplifier_audibility": false
+  },
+  "preserved": {
+    "navigator_manifest": true,
+    "firmware_manifest": true,
+    "system_volume": true,
+    "power_delay_setting": true
+  },
+  "limits": [
+    "No confirmed accessible Android event for start of MCU 30-second power delay.",
+    "Fix begins at received ACC OFF; actual amplifier output must be verified in the vehicle.",
+    "Sleep still hides overlay; display backlight is not forced on."
+  ]
+}

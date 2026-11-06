@@ -104,7 +104,7 @@ public final class BackgroundInstrumentation extends Instrumentation {
             output = new File(app.getExternalFilesDir(null), "sunroof-background-regression");
             output.mkdirs();
             oldSettings = app.getSharedPreferences("Kia", Context.MODE_PRIVATE).getAll();
-            if ("startup".equals(phase) || "teyes".equals(phase)) {
+            if ("startup".equals(phase) || "teyes".equals(phase) || "sleep_audio".equals(phase)) {
                 // This phase runs in a force-stopped emulator process. Do not manufacture a
                 // CLOSED roof packet: the first accepted source observation must be OPEN.
                 check(app.getSharedPreferences("kia_sunroof_state", Context.MODE_PRIVATE)
@@ -135,6 +135,11 @@ public final class BackgroundInstrumentation extends Instrumentation {
             waitForIdleSync();
             waitUntil(() -> AppService.isRunning(), 4000L, "foreground service started");
             controller = onMain(() -> SunroofOverlayController.get(app));
+            if ("sleep_audio".equals(phase)) {
+                runSleepAudioPhase();
+                completeReport(report);
+                return;
+            }
             if ("teyes".equals(phase)) {
                 runTeyesPhase();
                 completeReport(report);
@@ -244,7 +249,8 @@ public final class BackgroundInstrumentation extends Instrumentation {
                 waitUntil(() -> !windowShowing(), 1800L, "roof window hides while screen sleeps");
                 SystemClock.sleep(1100L);
                 check(!windowShowing(), "one-second refresh cannot replay the sleeping window");
-                check(onMain(() -> field(field(controller, "sound"), "player") == null), "screen sleep releases the actual warning audio player");
+                waitUntil(() -> onMain(() -> actualMediaPlayer() == null), 3300L,
+                        "finite warning finishes while the Android screen remains asleep");
                 check(!app.getSharedPreferences("kia_sunroof_state", Context.MODE_PRIVATE)
                         .getBoolean("warning_acknowledged", false), "screen sleep does not acknowledge the real roof warning");
                 shell("input keyevent KEYCODE_WAKEUP");
@@ -501,14 +507,16 @@ public final class BackgroundInstrumentation extends Instrumentation {
             IBinder callback = requireTeyesCallback();
             teyesCallback(callback, 13, 8, 6, 0);
             waitUntil(() -> !windowShowing(), 1500L, "actual cmd8 sleep hides the warning");
-            check(onMain(() -> actualMediaPlayer() == null), "cmd8 sleep releases the actual audio player");
+            check(onMain(() -> actualMediaPlayer() == null), "already completed warning stays silent during cmd8 sleep");
             check(!SunroofStateMemory.snapshot(app).acknowledged, "cmd8 sleep does not acknowledge roof warning");
             teyesProbe("cmd8_sleep");
             teyesCallback(callback, 13, 8, 0, 0);
             assertRoofWindow(true, true, false);
             check(!SunroofStateMemory.snapshot(app).acknowledged, "cmd8 wake restores without acknowledgement");
-            // Current controller behavior may replay audio when a hidden warning is shown again.
-            // Preserve that behavior here; duplicate OFF replay is tested separately above.
+            check(onMain(() -> actualMediaPlayer() == null), "cmd8 wake does not replay a completed warning");
+            SystemClock.sleep(1100L);
+            onMain(() -> { controller.apply(); return null; });
+            check(onMain(() -> actualMediaPlayer() == null), "one-second refresh after wake does not replay warning");
             teyesProbe("cmd8_wake_restored");
         });
         scenario("teyes_cmd14_acknowledges_and_stopped_callback_is_fenced", () -> {
@@ -559,6 +567,90 @@ public final class BackgroundInstrumentation extends Instrumentation {
             waitUntil(() -> teyesService.unregisters == 2, 1500L,
                     "aggregate scenario releases its actual observer registration");
         });
+    }
+
+    /** Reproduces the physical ACC/sleep ordering without replacing the player or listener. */
+    private void runSleepAudioPhase() throws Exception {
+        JSONObject warning = readPcmWav("sunroof_warning_adas", 44100, 2);
+        audioAssets.put("mandatory_rear_adas_warning", warning);
+        installTeyesServiceBoundary();
+        shell("input keyevent KEYCODE_HOME");
+        waitUntil(() -> !activityVisible(), 2500L, "sleep-audio Activity moved behind Home");
+        installUsbBoundary();
+        injectTpms(new int[]{128, 128, 128, 128});
+        injectRoof(true);
+        dismissRoof();
+        disconnectUsbBoundary();
+        IBinder callback = requireTeyesCallback();
+
+        scenario("acc_off_then_vendor_sleep_51ms_preserves_finite_warning", () -> {
+            teyesCallback(callback, 13, 8, 0, 0);
+            teyesCallback(callback, 13, 5, 0, 0);
+            teyesCallback(callback, 13, 5, 1, 0);
+            long started = SystemClock.elapsedRealtime();
+            android.media.MediaPlayer playing = onMain(this::actualMediaPlayer);
+            check(playing != null && onMain(playing::isPlaying),
+                    "actual cmd5 OFF starts the production MediaPlayer before sleep");
+            long untilSleep = started + 51L - SystemClock.elapsedRealtime();
+            if (untilSleep > 0L) SystemClock.sleep(untilSleep);
+            teyesCallback(callback, 13, 8, 6, 0);
+            JSONObject probe = warningPlaybackProbe("vendor_sleep_requested_after_51ms", started);
+            probe.put("requestedDelayMs", 51L);
+            warningPlaybackProbes.put(probe);
+            check(onMain(() -> actualMediaPlayer() == playing && playing.isPlaying()),
+                    "vendor sleep after 51 ms does not replace or stop the actual warning player");
+            check(!windowShowing(), "vendor sleep hides the window while finite warning audio continues");
+            assertAudioCue("warning_survives_vendor_sleep_51ms", warning, false);
+            observeSleepingWarningUntilCompletion(playing, started, warning.getInt("expectedDurationMs"));
+            assertWakeAndRefreshStaySilent(callback);
+        });
+        scenario("vendor_sleep_before_acc_off_starts_audio_without_window", () -> {
+            teyesCallback(callback, 13, 5, 0, 0);
+            teyesCallback(callback, 13, 8, 6, 0);
+            check(!windowShowing() && onMain(() -> actualMediaPlayer() == null),
+                    "sleep with ACC ON does not invent a warning");
+            teyesCallback(callback, 13, 5, 1, 0);
+            long started = SystemClock.elapsedRealtime();
+            android.media.MediaPlayer playing = onMain(this::actualMediaPlayer);
+            check(playing != null && onMain(playing::isPlaying),
+                    "ACC OFF received while already asleep starts the actual finite warning");
+            check(!windowShowing(), "sleep-before-ACC warning starts without adding a window");
+            assertAudioCue("warning_starts_after_prior_vendor_sleep", warning, false);
+            observeSleepingWarningUntilCompletion(playing, started, warning.getInt("expectedDurationMs"));
+            assertWakeAndRefreshStaySilent(callback);
+        });
+    }
+
+    private void observeSleepingWarningUntilCompletion(android.media.MediaPlayer playing,
+                                                       long started, int durationMs) throws Exception {
+        while (SystemClock.elapsedRealtime() - started < durationMs - 180L) {
+            check(onMain(() -> actualMediaPlayer() == playing && playing.isPlaying()),
+                    "sleeping warning keeps its original player through the finite cue");
+            check(!windowShowing(), "sleeping warning never recreates its overlay");
+            warningPlaybackProbes.put(warningPlaybackProbe("sleeping_finite_warning", started));
+            onMain(() -> { controller.apply(); return null; });
+            SystemClock.sleep(100L);
+        }
+        waitUntil(() -> onMain(() -> actualMediaPlayer() == null), 1100L,
+                "sleeping warning completes and releases the real MediaPlayer near its PCM duration");
+        check(SystemClock.elapsedRealtime() - started >= durationMs - 180L,
+                "warning was not truncated before its spoken phrase completed");
+        check(!SunroofStateMemory.snapshot(app).acknowledged,
+                "audio completion while asleep does not acknowledge the open roof");
+        warningPlaybackProbes.put(warningPlaybackProbe("sleeping_warning_completed", started));
+    }
+
+    private void assertWakeAndRefreshStaySilent(IBinder callback) throws Exception {
+        teyesCallback(callback, 13, 8, 0, 0);
+        assertRoofWindow(true, true, false);
+        check(onMain(() -> actualMediaPlayer() == null), "wake restores only the warning window without audio replay");
+        teyesCallback(callback, 13, 5, 1, 0);
+        SystemClock.sleep(1100L);
+        onMain(() -> { controller.apply(); return null; });
+        check(onMain(() -> actualMediaPlayer() == null),
+                "duplicate ACC OFF and one-second refresh do not replay the completed warning");
+        check(!SunroofStateMemory.snapshot(app).acknowledged, "wake keeps roof warning unacknowledged");
+        teyesProbe("wake_and_refresh_without_audio_replay");
     }
 
     private void installTeyesServiceBoundary() throws Exception {
@@ -1048,13 +1140,14 @@ public final class BackgroundInstrumentation extends Instrumentation {
     }
 
     private void completeReport(JSONObject report) throws Exception {
-            report.put("boundary", "teyes".equals(phase)
+            report.put("boundary", ("teyes".equals(phase) || "sleep_audio".equals(phase))
                     ? "Real Android observer registration/poll/callback Binder, controller/window/audio; only system service locator and USB hardware replaced"
                     : "Real Android app/service/router/state/policy/windows; USB hardware and native ACC input replaced; no QA policy/scenario used");
             report.put("usbHardwareReplaced", true);
             report.put("nativeAccInputReplaced", true);
-            report.put("teyesServiceLocatorReplaced", "teyes".equals(phase));
-            report.put("accListenerInjected", !"teyes".equals(phase) && !"startup".equals(phase));
+            report.put("teyesServiceLocatorReplaced", "teyes".equals(phase) || "sleep_audio".equals(phase));
+            report.put("accListenerInjected", !"teyes".equals(phase)
+                    && !"sleep_audio".equals(phase) && !"startup".equals(phase));
             report.put("qaPolicyUsed", false);
             report.put("physicalHeadunitTested", false);
             report.put("appVersion", app.getPackageManager().getPackageInfo(app.getPackageName(), 0).versionName);

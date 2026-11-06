@@ -145,18 +145,15 @@ FIXTURES = {'android/annotation/SuppressLint.java': 'package android.annotation;
                                  'void setAdapter(android.content.Context c,AdapterState '
                                  'v){adapter=v;}}',
  'kia/app/core/model/TpmsState.java': 'package kia.app.core.model;public class TpmsState {}',
- 'kia/app/core/settings/AppSettings.java': 'package kia.app.core.settings;public class AppSettings '
-                                           '{public static boolean '
-                                           'sunroofOverlayEnabled(android.content.Context c){return '
-                                           'true;}public static boolean '
-                                           'sunroofParkingWarningEnabled(android.content.Context '
-                                           'c){return true;}public static boolean '
-                                           'sunroofSoundEnabled(android.content.Context c){return '
-                                           'false;}public static boolean '
-                                           'sunroofTransitionSoundEnabled(android.content.Context '
-                                           'c){return false;}public static boolean '
-                                           'rctaOverlayEnabled(android.content.Context c){return '
-                                           'true;}}',
+ 'kia/app/core/settings/AppSettings.java': r'''package kia.app.core.settings;
+public class AppSettings {
+ public static boolean masterEnabled=true,parkingEnabled=true;
+ public static boolean sunroofOverlayEnabled(android.content.Context c){return masterEnabled;}
+ public static boolean sunroofParkingWarningEnabled(android.content.Context c){return parkingEnabled;}
+ public static boolean sunroofSoundEnabled(android.content.Context c){return false;}
+ public static boolean sunroofTransitionSoundEnabled(android.content.Context c){return false;}
+ public static boolean rctaOverlayEnabled(android.content.Context c){return true;}
+}''',
  'kia/app/protocol/adapter/AdapterGateway.java': 'package kia.app.protocol.adapter;public class '
                                                  'AdapterGateway {static AdapterGateway instance=new '
                                                  'AdapterGateway();public static boolean '
@@ -188,13 +185,24 @@ FIXTURES = {'android/annotation/SuppressLint.java': 'package android.annotation;
                                             'r){kind=k;dismiss=r;}\n'
                                             ' public void stopAnimations(){}\n'
                                             '}',
- 'kia/app/sunroof/SunroofSoundPlayer.java': 'package kia.app.sunroof;public class SunroofSoundPlayer '
-                                            '{public static int warningPlays,transitionPlays;boolean '
-                                            'enabled;public SunroofSoundPlayer(android.content.Context '
-                                            'c){}public void stop(){}public void setEnabled(boolean '
-                                            'b){enabled=b;}public void play(SunroofAlertPolicy.Kind '
-                                            'kind){if(!enabled)return;if(kind==SunroofAlertPolicy.Kind.PARKING_WARNING)warningPlays++;else '
-                                            'transitionPlays++;}}',
+ 'kia/app/sunroof/SunroofSoundPlayer.java': r'''package kia.app.sunroof;
+/** Audio boundary only: records active playback, including real interruptions. */
+public class SunroofSoundPlayer {
+ public static int warningPlays,transitionPlays,actualStops;
+ public static boolean playing;
+ boolean enabled;
+ public SunroofSoundPlayer(android.content.Context c){}
+ public void stop(){if(playing){actualStops++;playing=false;}}
+ public void setEnabled(boolean b){enabled=b;if(!b)stop();}
+ public void play(SunroofAlertPolicy.Kind kind){
+  stop();
+  if(!enabled||kind==null||kind==SunroofAlertPolicy.Kind.NONE)return;
+  if(kind==SunroofAlertPolicy.Kind.PARKING_WARNING)warningPlays++;else transitionPlays++;
+  playing=true;
+ }
+ /** The media completion callback releases audio without changing controller state. */
+ public static void complete(){playing=false;}
+}''',
  'kia/app/sunroof/TeyesSunroofObserver.java': 'package kia.app.sunroof;public class '
                                               'TeyesSunroofObserver {\n'
                                               ' public interface Listener {void onAcc(boolean '
@@ -207,314 +215,209 @@ FIXTURES = {'android/annotation/SuppressLint.java': 'package android.annotation;
                                               ' public void start(){}public void stop(){}public String '
                                               'statusSummary(){return "fixture native ACC boundary";}\n'
                                               '}',
- 'kia/app/sunroof/ControllerBackgroundProof.java': 'package kia.app.sunroof;\n'
-                                                   'import kia.app.protocol.adapter.FrameRouter;import '
-                                                   'kia.app.core.*;import kia.app.core.model.*;\n'
-                                                   'import android.os.*;import '
-                                                   'android.view.WindowManager;import kia.app.tpms.*;\n'
-                                                   'public class ControllerBackgroundProof {\n'
-                                                   ' static int checks;static android.content.Context '
-                                                   'context=new android.content.Context();\n'
-                                                   ' static SunroofOverlayController '
-                                                   'roof=SunroofOverlayController.get(context);\n'
-                                                   ' static WindowManager '
-                                                   'wm=WindowManager.INSTANCE;static FrameRouter '
-                                                   'router;\n'
-                                                   ' static void check(boolean b,String '
-                                                   'message){checks++;if(!b)throw new '
-                                                   'AssertionError(message);}\n'
-                                                   ' static void frame(boolean open,long at)throws '
-                                                   'Exception{\n'
-                                                   '  SystemClock.now=at;Thread worker=new '
-                                                   'Thread(()->router.onFrame(new '
-                                                   'byte[]{0,0,0,7,0x76,(byte)(open?1:0),0},1,at),"fixture-usb-reader");\n'
-                                                   '  worker.start();worker.join();Handler.drain();\n'
-                                                   ' }\n'
-                                                   ' static void reset()throws Exception{\n'
-                                                   '  '
-                                                   'roof.stop();android.content.Context.clearPreferences();android.os.PowerManager.interactive=true;kia.app.protocol.adapter.AdapterGateway.connected=true;kia.app.protocol.adapter.AdapterGateway.epoch=1;SunroofSoundPlayer.warningPlays=0;SunroofSoundPlayer.transitionPlays=0;StateStore.setVehicle(context,VehicleState.empty());Handler.drain();\n'
-                                                   '  '
-                                                   'TpmsAlertController.severity=0;TpmsWarningOverlayController.visible=false;wm.adds=0;wm.removes=0;\n'
-                                                   '  SystemClock.now=100;rootClock();router=new '
-                                                   'FrameRouter(context);roof.start();frame(false,100);\n'
-                                                   ' }\n'
-                                                   ' static void '
-                                                   'rootClock(){android.content.res.Resources.metrics.density=1;android.content.res.Resources.metrics.densityDpi=160;}\n'
-                                                   ' static SunroofOverlayView view(){return '
-                                                   '(SunroofOverlayView)wm.current;}\n'
-                                                   ' public static void main(String[] args)throws '
-                                                   'Exception{\n'
-                                                   '  reset();frame(true,200);\n'
-                                                   '  check(wm.current!=null,"background production '
-                                                   'transition did not add window");\n'
-                                                   '  '
-                                                   'check(view().kind==SunroofAlertPolicy.Kind.OPENING,"wrong '
-                                                   'background transition");\n'
-                                                   '  '
-                                                   'check("0x76".equals(StateStore.vehicle().sunroofSource),"test '
-                                                   'bypassed production roof router");\n'
-                                                   '  '
-                                                   'check(StateStore.vehicle().sunroofConnectionEpoch==1,"router '
-                                                   'did not retain USB session");\n'
-                                                   '  int '
-                                                   'logs=AppLog.lines.size();roof.apply();roof.apply();frame(true,201);\n'
-                                                   '  check(AppLog.lines.size()==logs,"duplicate '
-                                                   'frame/tick flooded decision log");\n'
-                                                   '  '
-                                                   'check(roof.statusSummary().contains("running=true")&&roof.statusSummary().contains("master=true")\n'
-                                                   '   '
-                                                   '&&roof.statusSummary().contains("permission=true")&&roof.statusSummary().contains("window=true")\n'
-                                                   '   '
-                                                   '&&roof.statusSummary().contains("usbEpoch=1")&&roof.statusSummary().contains("roofEpoch=1"),"missing '
-                                                   'production diagnostics");\n'
-                                                   '  check(wm.last.alpha==1f,"transient car is '
-                                                   'translucent");\n'
-                                                   '  '
-                                                   'check(wm.last.gravity==android.view.Gravity.CENTER,"compact '
-                                                   'car is not centered");\n'
-                                                   '  '
-                                                   'check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)!=0,"transient '
-                                                   'steals focus");\n'
-                                                   '  '
-                                                   'check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)!=0,"outside-window '
-                                                   'touches cannot pass");\n'
-                                                   '  '
-                                                   'check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)==0,"transient '
-                                                   'cannot acknowledge car tap");\n'
-                                                   '  '
-                                                   'check(wm.last.width==248&&wm.last.height==371,"compact '
-                                                   'window does not bound 19.32 percent car");\n'
-                                                   '  '
-                                                   'check(Math.abs(view().compactWidth-247.296f)<.001f,"car '
-                                                   'pixel width lost exact relative 20 percent '
-                                                   'growth");\n'
-                                                   '  view().dismiss.run();check(wm.current==null,"car '
-                                                   'tap did not dismiss compact window");\n'
-                                                   '  '
-                                                   'reset();TpmsAlertController.severity=1;TpmsWarningOverlayController.visible=true;frame(true,200);\n'
-                                                   '  check(wm.current!=null,"minor TPMS warning '
-                                                   'blocked roof transition");\n'
-                                                   '  '
-                                                   'reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=false;frame(true,200);\n'
-                                                   '  check(wm.current!=null,"acknowledged critical '
-                                                   'TPMS warning blocked roof transition");\n'
-                                                   '  '
-                                                   'reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;frame(true,200);\n'
-                                                   '  check(wm.current==null,"visible critical warning '
-                                                   'did not take priority");\n'
-                                                   '  '
-                                                   'check(roof.statusSummary().contains("critical_defer"),"critical '
-                                                   'defer is not diagnosable");\n'
-                                                   '  '
-                                                   'SystemClock.now=500;TpmsWarningOverlayController.visible=false;roof.apply();\n'
-                                                   '  '
-                                                   'check(wm.current!=null&&view().kind==SunroofAlertPolicy.Kind.OPENING,"deferred '
-                                                   'transition was permanently lost");\n'
-                                                   '  '
-                                                   'reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;frame(true,200);\n'
-                                                   '  '
-                                                   'SystemClock.now=10199;TpmsWarningOverlayController.visible=false;roof.apply();\n'
-                                                   '  check(wm.current!=null,"transition did not '
-                                                   'recover just before TTL");\n'
-                                                   '  '
-                                                   'Handler.advance(10200);check(wm.current!=null,"TTL '
-                                                   'cut short an already recovered animation");\n'
-                                                   '  '
-                                                   'reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;frame(true,200);\n'
-                                                   '  '
-                                                   'Handler.advance(10200);TpmsWarningOverlayController.visible=false;roof.apply();\n'
-                                                   '  check(wm.current==null,"expired deferred '
-                                                   'transition replayed after TTL");\n'
-                                                   '  '
-                                                   'reset();frame(true,200);SystemClock.now=300;TeyesSunroofObserver.listener.onAcc(true,false,300,"nativefixture");\n'
-                                                   '  '
-                                                   'check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,"real '
-                                                   'policy did not receive native ACC off");\n'
-                                                   '  '
-                                                   'check(wm.last.alpha==1f&&wm.last.width==-1&&wm.last.height==-1,"warning '
-                                                   'must remain opaque fullscreen");\n'
-                                                   '  '
-                                                   'check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)==0,"warning '
-                                                   'cannot receive hardware keys");\n'
-                                                   '  check(view().compactWidth==0f,"fullscreen warning '
-                                                   'uses compact canvas coordinates");\n'
-                                                   '  '
-                                                   'Handler.advance(20000);check(view()!=null,"parking '
-                                                   'warning incorrectly expired with transition TTL");\n'
-                                                   '  '
-                                                   'view().dismiss.run();check(wm.current==null,"warning '
-                                                   'acknowledgement did not hide window");\n'
-                                                   '  '
-                                                   'check(Math.abs(SunroofOverlayGeometry.carWidthPx(1000)-193.2f)<.001f,"native '
-                                                   '1000 pixel width incorrect");\n'
-                                                   '  '
-                                                   'check(Math.abs(SunroofOverlayGeometry.SCREEN_WIDTH_FRACTION-(.161f*1.20f))<.000001f,"size '
-                                                   'is not exactly 20 percent larger");\n'
-                                                   '  for(int dpi:new int[]{120,160,213,240,320,480}){\n'
-                                                   '   '
-                                                   'reset();android.content.res.Resources.metrics.densityDpi=dpi;android.content.res.Resources.metrics.density=dpi/160f;\n'
-                                                   '   '
-                                                   'frame(true,200);check(wm.last.width==248&&wm.last.height==371,"DPI '
-                                                   'changed pixel geometry: "+dpi);\n'
-                                                   '  }\n'
-                                                   '  '
-                                                   'android.os.Build.VERSION.SDK_INT=29;reset();frame(true,200);\n'
-                                                   '  '
-                                                   'check(wm.last.width==248&&wm.last.height==371,"API29 '
-                                                   'pixel display fallback changed geometry");\n'
-                                                   '  '
-                                                   'reset();roof.preview(true);check(SunroofStateMemory.snapshot(context).known&&!SunroofStateMemory.snapshot(context).open,"opening '
-                                                   'preview persisted a fake roof position");\n'
-                                                   '  '
-                                                   'roof.previewParkingWarning();check(SunroofStateMemory.snapshot(context).known&&!SunroofStateMemory.snapshot(context).open,"warning '
-                                                   'preview persisted a fake roof position");\n'
-                                                   '  '
-                                                   'roof.dismissCurrent();check(!SunroofStateMemory.snapshot(context).open,"preview '
-                                                   'acknowledgement changed real position");\n'
-                                                   '  '
-                                                   'SunroofStateMemory.record(context,true,"qa");check(!SunroofStateMemory.snapshot(context).open,"QA '
-                                                   'source was persisted as real roof state");\n'
-                                                   '  '
-                                                   'reset();frame(true,200);check(SunroofStateMemory.snapshot(context).known&&SunroofStateMemory.snapshot(context).open,"real '
-                                                   'roof packet was not remembered");\n'
-                                                   '  '
-                                                   'check(SunroofSoundPlayer.transitionPlays==0,"transition '
-                                                   'mute ignored");\n'
-                                                   '  '
-                                                   'TeyesSunroofObserver.listener.onAcc(true,true,201,"nativefixture");\n'
-                                                   '  '
-                                                   'kia.app.protocol.adapter.AdapterGateway.connected=false;StateStore.setVehicle(context,StateStore.vehicle().withoutSunroof());Handler.drain();\n'
-                                                   '  '
-                                                   'SystemClock.now=900_000;TeyesSunroofObserver.listener.onAcc(true,false,900_000,"nativefixture");\n'
-                                                   '  '
-                                                   'check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,"sparse '
-                                                   'remembered open did not warn after long '
-                                                   'disconnect");\n'
-                                                   '  check(!StateStore.vehicle().sunroofKnown,"cached '
-                                                   'position was restored into fresh CAN state");\n'
-                                                   '  check(roof.statusSummary().contains("последнее '
-                                                   'сохранённое"),"cached source not identified in '
-                                                   'status");\n'
-                                                   '  check(SunroofSoundPlayer.warningPlays>0,"warning '
-                                                   'obeyed removed legacy mute flag");\n'
-                                                   '  SunroofStateMemory.Snapshot '
-                                                   'saved=SunroofStateMemory.snapshot(context);long '
-                                                   'savedAt=saved.recordedAt;\n'
-                                                   '  '
-                                                   'check(savedAt>0&&"0x76".equals(saved.source),"real '
-                                                   'cache provenance missing");\n'
-                                                   '  context.sendBroadcast(new '
-                                                   'android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS).putExtra("reason","dream"));\n'
-                                                   '  '
-                                                   'check(view()!=null&&!SunroofStateMemory.snapshot(context).acknowledged,"automatic '
-                                                   'dream dialog falsely acknowledged roof warning");\n'
-                                                   '  '
-                                                   'android.os.PowerManager.interactive=false;context.sendBroadcast(new '
-                                                   'android.content.Intent(android.content.Intent.ACTION_SCREEN_OFF));\n'
-                                                   '  int '
-                                                   'beforeOffSound=SunroofSoundPlayer.warningPlays;Handler.advance(901_000);\n'
-                                                   '  '
-                                                   'check(view()==null&&SunroofSoundPlayer.warningPlays==beforeOffSound,"off-screen '
-                                                   'refresh recreated warning or replayed audio");\n'
-                                                   '  '
-                                                   'check(!SunroofStateMemory.snapshot(context).acknowledged,"automatic '
-                                                   'screen off persisted an acknowledgement");\n'
-                                                   '  '
-                                                   'android.os.PowerManager.interactive=true;context.sendBroadcast(new '
-                                                   'android.content.Intent(android.content.Intent.ACTION_SCREEN_ON));\n'
-                                                   '  check(view()!=null,"screen wake with actual ACC '
-                                                   'off did not restore unacknowledged warning");\n'
-                                                   '  '
-                                                   'TeyesSunroofObserver.listener.onSleep(true);check(view()==null,"native '
-                                                   'sleep did not hide warning");\n'
-                                                   '  '
-                                                   'check(!SunroofStateMemory.snapshot(context).acknowledged,"automatic '
-                                                   'native sleep persisted an acknowledgement");\n'
-                                                   '  '
-                                                   'TeyesSunroofObserver.listener.onSleep(false);check(view()!=null,"native '
-                                                   'wake lost remembered roof warning");\n'
-                                                   '  '
-                                                   'roof.stop();StateStore.setVehicle(context,VehicleState.empty());Handler.drain();\n'
-                                                   '  java.lang.reflect.Field '
-                                                   'singleton=SunroofOverlayController.class.getDeclaredField("instance");singleton.setAccessible(true);singleton.set(null,null);\n'
-                                                   '  context=new '
-                                                   'android.content.Context();roof=SunroofOverlayController.get(context);roof.start();\n'
-                                                   '  '
-                                                   'check(SunroofStateMemory.snapshot(context).recordedAt==savedAt,"controller/context '
-                                                   'recreation lost saved roof state");\n'
-                                                   '  '
-                                                   'TeyesSunroofObserver.listener.onAcc(true,false,901_001,"nativefixture");\n'
-                                                   '  '
-                                                   'check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,"restart '
-                                                   'without USB or roof packet did not warn from saved '
-                                                   'open");\n'
-                                                   '  '
-                                                   'view().dismiss.run();check(view()==null&&SunroofStateMemory.snapshot(context).acknowledged,"real '
-                                                   'user acknowledgement was not persisted");\n'
-                                                   '  '
-                                                   'check(SunroofStateMemory.snapshot(context).open,"acknowledgement '
-                                                   'changed actual roof position");\n'
-                                                   '  '
-                                                   'roof.stop();StateStore.setVehicle(context,VehicleState.empty());Handler.drain();singleton.set(null,null);\n'
-                                                   '  context=new '
-                                                   'android.content.Context();roof=SunroofOverlayController.get(context);roof.start();TeyesSunroofObserver.listener.onAcc(true,false,901_002,"nativefixture");\n'
-                                                   '  check(view()==null,"restart rearmed the same '
-                                                   'acknowledged ACC-off episode");\n'
-                                                   '  '
-                                                   'TeyesSunroofObserver.listener.onAcc(true,true,901_003,"nativefixture");\n'
-                                                   '  '
-                                                   'check(!SunroofStateMemory.snapshot(context).acknowledged,"known '
-                                                   'ACC on failed to rearm memory");\n'
-                                                   '  '
-                                                   'TeyesSunroofObserver.listener.onAcc(true,false,901_004,"nativefixture");check(view()!=null,"next '
-                                                   'actual ACC cycle failed to warn");\n'
-                                                   '  '
-                                                   'SunroofStateMemory.record(context,false,"0x76");roof.apply();check(view()==null,"saved '
-                                                   'real close failed to clear warning while USB '
-                                                   'absent");\n'
-                                                   '  '
-                                                   'check(!SunroofStateMemory.snapshot(context).open,"saved '
-                                                   'close was not retained");\n'
-                                                   '  '
-                                                   'roof.stop();StateStore.setVehicle(context,VehicleState.empty());Handler.drain();singleton.set(null,null);\n'
-                                                   '  context=new '
-                                                   'android.content.Context();roof=SunroofOverlayController.get(context);roof.start();TeyesSunroofObserver.listener.onAcc(true,false,901_005,"nativefixture");\n'
-                                                   '  check(view()==null,"closed roof replayed an old '
-                                                   'open warning after wake/recreation");\n'
-                                                   '  '
-                                                   'SunroofStateMemory.record(context,true,"0x76");roof.apply();check(view()!=null,"real '
-                                                   'close to open failed to rearm within ACC-off '
-                                                   'cycle");\n'
-                                                   '  '
-                                                   'check(!SunroofStateMemory.snapshot(context).acknowledged,"new '
-                                                   'real opening retained old acknowledgement");\n'
-                                                   '  context.sendBroadcast(new '
-                                                   'android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS));\n'
-                                                   '  '
-                                                   'check(view()!=null&&!SunroofStateMemory.snapshot(context).acknowledged,"missing '
-                                                   'dialog reason falsely acknowledged roof warning");\n'
-                                                   '  for(String reason:new '
-                                                   'String[]{"homekey","recentapps"}){\n'
-                                                   '   context.sendBroadcast(new '
-                                                   'android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS).putExtra("reason",reason));\n'
-                                                   '   '
-                                                   'check(view()==null&&SunroofStateMemory.snapshot(context).acknowledged,"explicit '
-                                                   '"+reason+" failed to persist acknowledgement");\n'
-                                                   '   '
-                                                   'check(SunroofStateMemory.snapshot(context).open,"explicit '
-                                                   '"+reason+" changed actual roof position");\n'
-                                                   '   '
-                                                   'TeyesSunroofObserver.listener.onAcc(true,true,901_006,"nativefixture");\n'
-                                                   '   '
-                                                   'TeyesSunroofObserver.listener.onAcc(true,false,901_007,"nativefixture");\n'
-                                                   '   check(view()!=null,"next ACC cycle failed after '
-                                                   '"+reason+" acknowledgement");\n'
-                                                   '  }\n'
-                                                   '  roof.stop();System.out.println("Sunroof '
-                                                   'controller production regression passed: "+checks+" '
-                                                   'assertions");\n'
-                                                   ' }\n'
-                                                   '}\n',
+ 'kia/app/sunroof/ControllerBackgroundProof.java': r'''package kia.app.sunroof;
+import kia.app.protocol.adapter.FrameRouter;import kia.app.core.*;import kia.app.core.model.*;
+import android.os.*;import android.view.WindowManager;import kia.app.tpms.*;
+public class ControllerBackgroundProof {
+ static int checks;static android.content.Context context=new android.content.Context();
+ static SunroofOverlayController roof=SunroofOverlayController.get(context);
+ static WindowManager wm=WindowManager.INSTANCE;static FrameRouter router;
+ static void check(boolean b,String message){checks++;if(!b)throw new AssertionError(message);}
+ static void frame(boolean open,long at)throws Exception{
+  SystemClock.now=at;Thread worker=new Thread(()->router.onFrame(new byte[]{0,0,0,7,0x76,(byte)(open?1:0),0},1,at),"fixture-usb-reader");
+  worker.start();worker.join();Handler.drain();
+ }
+ static void reset()throws Exception{
+  roof.stop();android.content.Context.clearPreferences();android.os.PowerManager.interactive=true;kia.app.protocol.adapter.AdapterGateway.connected=true;kia.app.protocol.adapter.AdapterGateway.epoch=1;SunroofSoundPlayer.warningPlays=0;SunroofSoundPlayer.transitionPlays=0;SunroofSoundPlayer.actualStops=0;SunroofSoundPlayer.playing=false;kia.app.core.settings.AppSettings.masterEnabled=true;kia.app.core.settings.AppSettings.parkingEnabled=true;StateStore.setVehicle(context,VehicleState.empty());Handler.drain();
+  TpmsAlertController.severity=0;TpmsWarningOverlayController.visible=false;wm.adds=0;wm.removes=0;
+  SystemClock.now=100;rootClock();router=new FrameRouter(context);roof.start();frame(false,100);
+ }
+ static void rootClock(){android.content.res.Resources.metrics.density=1;android.content.res.Resources.metrics.densityDpi=160;}
+ static SunroofOverlayView view(){return (SunroofOverlayView)wm.current;}
+ static void acc(boolean on,long at){
+  SystemClock.now=at;TeyesSunroofObserver.listener.onAcc(true,on,at,"nativefixture");Handler.drain();
+ }
+ static void screen(boolean interactive){
+  android.os.PowerManager.interactive=interactive;
+  context.sendBroadcast(new android.content.Intent(interactive
+   ?android.content.Intent.ACTION_SCREEN_ON:android.content.Intent.ACTION_SCREEN_OFF));
+  Handler.drain();
+ }
+ static void startWarning()throws Exception{
+  reset();acc(true,150);frame(true,200);acc(false,300);
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,"warning setup did not use real policy");
+  check(SunroofSoundPlayer.warningPlays==1&&SunroofSoundPlayer.playing,"real ACC off did not start exactly one active cue");
+  check(SunroofSoundPlayer.actualStops==0,"new warning was interrupted during setup");
+ }
+ static void hiddenWarning()throws Exception{
+  startWarning();SystemClock.now=351;TeyesSunroofObserver.listener.onSleep(true);
+  check(view()==null,"sleep must hide warning window");
+  check(SunroofSoundPlayer.playing&&SunroofSoundPlayer.actualStops==0,"sleep 51 ms after ACC off interrupted active warning audio");
+ }
+ static void checkHiddenStop(String cause){
+  check(view()==null&&!SunroofSoundPlayer.playing,"hidden warning was not cancelled by "+cause);
+  check(SunroofSoundPlayer.actualStops==1,"hidden warning did not stop exactly once for "+cause);
+ }
+ static void sleepAudioRegressions()throws Exception{
+  // Reproduce the physical ordering: ACC off, then native sleep 51 ms into the cue.
+  hiddenWarning();screen(false);
+  check(SunroofSoundPlayer.playing&&SunroofSoundPlayer.actualStops==0,"screen-off broadcast cut the cue after native sleep");
+  roof.apply();frame(true,352);acc(false,353);Handler.advance(1_300);
+  check(view()==null&&SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==1,"hidden refresh or duplicate source restarted/cancelled audio");
+  screen(true);TeyesSunroofObserver.listener.onSleep(false);
+  check(view()!=null&&SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==1&&SunroofSoundPlayer.actualStops==0,"wake reattachment interrupted or replayed active cue");
+  SunroofSoundPlayer.complete();roof.apply();frame(true,1_301);Handler.advance(2_400);
+  check(!SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==1,"natural completion followed by visible refresh replayed cue");
+
+  // Sleep and screen-off may arrive before the true ACC sample; they never imply ACC off.
+  reset();acc(true,150);frame(true,200);SystemClock.now=300;TeyesSunroofObserver.listener.onSleep(true);screen(false);
+  check(view()==null&&SunroofSoundPlayer.warningPlays==0,"sleep alone fabricated a parking warning");
+  acc(false,351);
+  check(view()==null&&SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==1,"sleep-before-ACC-off lost mandatory cue or opened a window");
+  SunroofSoundPlayer.complete();frame(true,352);acc(false,353);Handler.advance(1_400);screen(true);TeyesSunroofObserver.listener.onSleep(false);roof.apply();
+  check(view()!=null&&!SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==1,"completed hidden cue replayed on wake or duplicate ACC");
+
+  hiddenWarning();frame(false,400);checkHiddenStop("real roof close");
+  check(!SunroofStateMemory.snapshot(context).open,"real close failed to update persisted roof position");
+  roof.apply();check(SunroofSoundPlayer.warningPlays==1,"closed hidden roof replayed warning");
+
+  hiddenWarning();TeyesSunroofObserver.listener.onHardwareAction(66,android.view.KeyEvent.ACTION_DOWN);checkHiddenStop("hardware acknowledgement");
+  check(SunroofStateMemory.snapshot(context).acknowledged,"hidden acknowledgement was not persisted");
+  acc(false,400);roof.apply();check(SunroofSoundPlayer.warningPlays==1,"acknowledged hidden episode replayed cue");
+
+  hiddenWarning();kia.app.core.settings.AppSettings.masterEnabled=false;roof.apply();checkHiddenStop("master disable");
+  hiddenWarning();kia.app.core.settings.AppSettings.parkingEnabled=false;roof.apply();checkHiddenStop("parking-warning disable");
+
+  hiddenWarning();acc(true,400);checkHiddenStop("ACC on");
+  acc(false,500);
+  check(view()==null&&SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==2,"new actual ACC cycle failed to rearm hidden warning");
+
+  hiddenWarning();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;roof.apply();checkHiddenStop("critical TPMS");
+  TpmsWarningOverlayController.visible=false;roof.apply();
+  check(!SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==1,"critical hazard recovery replayed consumed cue");
+
+  // A hazard before the first attempt defers the cue, unlike interrupting a consumed cue.
+  reset();acc(true,150);frame(true,200);TeyesSunroofObserver.listener.onSleep(true);
+  TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;acc(false,300);
+  check(view()==null&&SunroofSoundPlayer.warningPlays==0&&!SunroofSoundPlayer.playing,"preexisting critical hazard did not defer hidden cue");
+  TpmsWarningOverlayController.visible=false;roof.apply();
+  check(view()==null&&SunroofSoundPlayer.warningPlays==1&&SunroofSoundPlayer.playing,"deferred first warning was lost while asleep");
+
+  hiddenWarning();roof.stop();checkHiddenStop("service stop");
+  Handler.advance(10_000);roof.apply();check(SunroofSoundPlayer.warningPlays==1&&!SunroofSoundPlayer.playing,"stopped service replayed hidden warning");
+ }
+ public static void main(String[] args)throws Exception{
+  reset();frame(true,200);
+  check(wm.current!=null,"background production transition did not add window");
+  check(view().kind==SunroofAlertPolicy.Kind.OPENING,"wrong background transition");
+  check("0x76".equals(StateStore.vehicle().sunroofSource),"test bypassed production roof router");
+  check(StateStore.vehicle().sunroofConnectionEpoch==1,"router did not retain USB session");
+  int logs=AppLog.lines.size();roof.apply();roof.apply();frame(true,201);
+  check(AppLog.lines.size()==logs,"duplicate frame/tick flooded decision log");
+  check(roof.statusSummary().contains("running=true")&&roof.statusSummary().contains("master=true")
+   &&roof.statusSummary().contains("permission=true")&&roof.statusSummary().contains("window=true")
+   &&roof.statusSummary().contains("usbEpoch=1")&&roof.statusSummary().contains("roofEpoch=1"),"missing production diagnostics");
+  check(wm.last.alpha==1f,"transient car is translucent");
+  check(wm.last.gravity==android.view.Gravity.CENTER,"compact car is not centered");
+  check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)!=0,"transient steals focus");
+  check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)!=0,"outside-window touches cannot pass");
+  check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)==0,"transient cannot acknowledge car tap");
+  check(wm.last.width==248&&wm.last.height==371,"compact window does not bound 19.32 percent car");
+  check(Math.abs(view().compactWidth-247.296f)<.001f,"car pixel width lost exact relative 20 percent growth");
+  view().dismiss.run();check(wm.current==null,"car tap did not dismiss compact window");
+  reset();TpmsAlertController.severity=1;TpmsWarningOverlayController.visible=true;frame(true,200);
+  check(wm.current!=null,"minor TPMS warning blocked roof transition");
+  reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=false;frame(true,200);
+  check(wm.current!=null,"acknowledged critical TPMS warning blocked roof transition");
+  reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;frame(true,200);
+  check(wm.current==null,"visible critical warning did not take priority");
+  check(roof.statusSummary().contains("critical_defer"),"critical defer is not diagnosable");
+  SystemClock.now=500;TpmsWarningOverlayController.visible=false;roof.apply();
+  check(wm.current!=null&&view().kind==SunroofAlertPolicy.Kind.OPENING,"deferred transition was permanently lost");
+  reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;frame(true,200);
+  SystemClock.now=10199;TpmsWarningOverlayController.visible=false;roof.apply();
+  check(wm.current!=null,"transition did not recover just before TTL");
+  Handler.advance(10200);check(wm.current!=null,"TTL cut short an already recovered animation");
+  reset();TpmsAlertController.severity=2;TpmsWarningOverlayController.visible=true;frame(true,200);
+  Handler.advance(10200);TpmsWarningOverlayController.visible=false;roof.apply();
+  check(wm.current==null,"expired deferred transition replayed after TTL");
+  reset();frame(true,200);SystemClock.now=300;TeyesSunroofObserver.listener.onAcc(true,false,300,"nativefixture");
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,"real policy did not receive native ACC off");
+  check(wm.last.alpha==1f&&wm.last.width==-1&&wm.last.height==-1,"warning must remain opaque fullscreen");
+  check((wm.last.flags&WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)==0,"warning cannot receive hardware keys");
+  check(view().compactWidth==0f,"fullscreen warning uses compact canvas coordinates");
+  Handler.advance(20000);check(view()!=null,"parking warning incorrectly expired with transition TTL");
+  view().dismiss.run();check(wm.current==null,"warning acknowledgement did not hide window");
+  check(Math.abs(SunroofOverlayGeometry.carWidthPx(1000)-193.2f)<.001f,"native 1000 pixel width incorrect");
+  check(Math.abs(SunroofOverlayGeometry.SCREEN_WIDTH_FRACTION-(.161f*1.20f))<.000001f,"size is not exactly 20 percent larger");
+  for(int dpi:new int[]{120,160,213,240,320,480}){
+   reset();android.content.res.Resources.metrics.densityDpi=dpi;android.content.res.Resources.metrics.density=dpi/160f;
+   frame(true,200);check(wm.last.width==248&&wm.last.height==371,"DPI changed pixel geometry: "+dpi);
+  }
+  android.os.Build.VERSION.SDK_INT=29;reset();frame(true,200);
+  check(wm.last.width==248&&wm.last.height==371,"API29 pixel display fallback changed geometry");
+  reset();roof.preview(true);check(SunroofStateMemory.snapshot(context).known&&!SunroofStateMemory.snapshot(context).open,"opening preview persisted a fake roof position");
+  roof.previewParkingWarning();check(SunroofStateMemory.snapshot(context).known&&!SunroofStateMemory.snapshot(context).open,"warning preview persisted a fake roof position");
+  roof.dismissCurrent();check(!SunroofStateMemory.snapshot(context).open,"preview acknowledgement changed real position");
+  SunroofStateMemory.record(context,true,"qa");check(!SunroofStateMemory.snapshot(context).open,"QA source was persisted as real roof state");
+  reset();frame(true,200);check(SunroofStateMemory.snapshot(context).known&&SunroofStateMemory.snapshot(context).open,"real roof packet was not remembered");
+  check(SunroofSoundPlayer.transitionPlays==0,"transition mute ignored");
+  TeyesSunroofObserver.listener.onAcc(true,true,201,"nativefixture");
+  kia.app.protocol.adapter.AdapterGateway.connected=false;StateStore.setVehicle(context,StateStore.vehicle().withoutSunroof());Handler.drain();
+  SystemClock.now=900_000;TeyesSunroofObserver.listener.onAcc(true,false,900_000,"nativefixture");
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,"sparse remembered open did not warn after long disconnect");
+  check(!StateStore.vehicle().sunroofKnown,"cached position was restored into fresh CAN state");
+  check(roof.statusSummary().contains("последнее сохранённое"),"cached source not identified in status");
+  check(SunroofSoundPlayer.warningPlays>0,"warning obeyed removed legacy mute flag");
+  SunroofStateMemory.Snapshot saved=SunroofStateMemory.snapshot(context);long savedAt=saved.recordedAt;
+  check(savedAt>0&&"0x76".equals(saved.source),"real cache provenance missing");
+  context.sendBroadcast(new android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS).putExtra("reason","dream"));
+  check(view()!=null&&!SunroofStateMemory.snapshot(context).acknowledged,"automatic dream dialog falsely acknowledged roof warning");
+  android.os.PowerManager.interactive=false;context.sendBroadcast(new android.content.Intent(android.content.Intent.ACTION_SCREEN_OFF));
+  int beforeOffSound=SunroofSoundPlayer.warningPlays;Handler.advance(901_000);
+  check(view()==null&&SunroofSoundPlayer.warningPlays==beforeOffSound,"off-screen refresh recreated warning or replayed audio");
+  check(!SunroofStateMemory.snapshot(context).acknowledged,"automatic screen off persisted an acknowledgement");
+  android.os.PowerManager.interactive=true;context.sendBroadcast(new android.content.Intent(android.content.Intent.ACTION_SCREEN_ON));
+  check(view()!=null,"screen wake with actual ACC off did not restore unacknowledged warning");
+  TeyesSunroofObserver.listener.onSleep(true);check(view()==null,"native sleep did not hide warning");
+  check(!SunroofStateMemory.snapshot(context).acknowledged,"automatic native sleep persisted an acknowledgement");
+  TeyesSunroofObserver.listener.onSleep(false);check(view()!=null,"native wake lost remembered roof warning");
+  roof.stop();StateStore.setVehicle(context,VehicleState.empty());Handler.drain();
+  java.lang.reflect.Field singleton=SunroofOverlayController.class.getDeclaredField("instance");singleton.setAccessible(true);singleton.set(null,null);
+  context=new android.content.Context();roof=SunroofOverlayController.get(context);roof.start();
+  check(SunroofStateMemory.snapshot(context).recordedAt==savedAt,"controller/context recreation lost saved roof state");
+  TeyesSunroofObserver.listener.onAcc(true,false,901_001,"nativefixture");
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,"restart without USB or roof packet did not warn from saved open");
+  view().dismiss.run();check(view()==null&&SunroofStateMemory.snapshot(context).acknowledged,"real user acknowledgement was not persisted");
+  check(SunroofStateMemory.snapshot(context).open,"acknowledgement changed actual roof position");
+  roof.stop();StateStore.setVehicle(context,VehicleState.empty());Handler.drain();singleton.set(null,null);
+  context=new android.content.Context();roof=SunroofOverlayController.get(context);roof.start();TeyesSunroofObserver.listener.onAcc(true,false,901_002,"nativefixture");
+  check(view()==null,"restart rearmed the same acknowledged ACC-off episode");
+  TeyesSunroofObserver.listener.onAcc(true,true,901_003,"nativefixture");
+  check(!SunroofStateMemory.snapshot(context).acknowledged,"known ACC on failed to rearm memory");
+  TeyesSunroofObserver.listener.onAcc(true,false,901_004,"nativefixture");check(view()!=null,"next actual ACC cycle failed to warn");
+  SunroofStateMemory.record(context,false,"0x76");roof.apply();check(view()==null,"saved real close failed to clear warning while USB absent");
+  check(!SunroofStateMemory.snapshot(context).open,"saved close was not retained");
+  roof.stop();StateStore.setVehicle(context,VehicleState.empty());Handler.drain();singleton.set(null,null);
+  context=new android.content.Context();roof=SunroofOverlayController.get(context);roof.start();TeyesSunroofObserver.listener.onAcc(true,false,901_005,"nativefixture");
+  check(view()==null,"closed roof replayed an old open warning after wake/recreation");
+  SunroofStateMemory.record(context,true,"0x76");roof.apply();check(view()!=null,"real close to open failed to rearm within ACC-off cycle");
+  check(!SunroofStateMemory.snapshot(context).acknowledged,"new real opening retained old acknowledgement");
+  context.sendBroadcast(new android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS));
+  check(view()!=null&&!SunroofStateMemory.snapshot(context).acknowledged,"missing dialog reason falsely acknowledged roof warning");
+  for(String reason:new String[]{"homekey","recentapps"}){
+   context.sendBroadcast(new android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS).putExtra("reason",reason));
+   check(view()==null&&SunroofStateMemory.snapshot(context).acknowledged,"explicit "+reason+" failed to persist acknowledgement");
+   check(SunroofStateMemory.snapshot(context).open,"explicit "+reason+" changed actual roof position");
+   TeyesSunroofObserver.listener.onAcc(true,true,901_006,"nativefixture");
+   TeyesSunroofObserver.listener.onAcc(true,false,901_007,"nativefixture");
+   check(view()!=null,"next ACC cycle failed after "+reason+" acknowledgement");
+  }
+  sleepAudioRegressions();
+  roof.stop();System.out.println("Sunroof controller production regression passed: "+checks+" assertions");
+ }
+}
+''',
  'kia/app/amp/AmpController.java': 'package kia.app.amp;public class AmpController {static '
                                    'AmpController i=new AmpController();public static AmpController '
                                    'get(android.content.Context c){return i;}public void '

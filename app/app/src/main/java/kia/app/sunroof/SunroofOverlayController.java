@@ -69,6 +69,8 @@ public final class SunroofOverlayController {
     private SunroofAlertPolicy.Kind shownKind = SunroofAlertPolicy.Kind.NONE;
     private boolean shownDemo;
     private boolean audioEnabled;
+    // Audio belongs to a real warning episode, independently of its window attachment.
+    private long realWarningAudioSequence = Long.MIN_VALUE;
     private long realSequence = Long.MIN_VALUE;
     private long realSequenceStartedAt;
     private boolean realSequenceDeferred;
@@ -111,7 +113,6 @@ public final class SunroofOverlayController {
                     asleep = sleeping;
                     if (sleeping) {
                         cancelDemo();
-                        hide();
                     }
                     applyOnMain();
                 });
@@ -154,6 +155,7 @@ public final class SunroofOverlayController {
             screenOff = false;
             realSnapshotTaken = false;
             realSequence = Long.MIN_VALUE;
+            realWarningAudioSequence = Long.MIN_VALUE;
             realSequenceDeferred = false;
             status = "Люк: наблюдение выключено";
             reportDecision("stopped", null, AppSettings.sunroofOverlayEnabled(app), false,
@@ -280,7 +282,16 @@ public final class SunroofOverlayController {
         if (asleep || screenOff) {
             if (real.kind == SunroofAlertPolicy.Kind.OPENING
                     || real.kind == SunroofAlertPolicy.Kind.CLOSING) policy.finish(real.sequence);
-            hide();
+            if (real.kind == SunroofAlertPolicy.Kind.PARKING_WARNING
+                    && !hazard && canDrawOverlays(app)) {
+                // CC4PRO delivers ACC OFF and cmd8 sleep almost together. Hide the window
+                // without truncating the finite warning, including sleep-before-ACC order.
+                hideWindow();
+                sound.setEnabled(true);
+                playDecisionAudio(real, false);
+            } else {
+                hide();
+            }
             status = screenOff ? "Люк: экран выключен" : "Люк: магнитола засыпает";
             reportDecision(screenOff ? "screen_off" : "sleep", real, enabled, connected, epoch, vehicle);
             return;
@@ -429,14 +440,20 @@ public final class SunroofOverlayController {
         boolean warning = decision.kind == SunroofAlertPolicy.Kind.PARKING_WARNING;
         boolean allowAudio = warning || AppSettings.sunroofTransitionSoundEnabled(app);
         sound.setEnabled(allowAudio);
-        if (overlay != null && !overlay.isAttachedToWindow()) hide();
+        boolean preserveWarningAudio = warning && !demonstration
+                && realWarningAudioSequence == decision.sequence;
+        if (overlay != null && !overlay.isAttachedToWindow()) {
+            if (preserveWarningAudio) hideWindow();
+            else hide();
+        }
         if (overlay != null && shownSequence == decision.sequence
                 && shownKind == decision.kind && shownDemo == demonstration) {
-            if (allowAudio && !audioEnabled) sound.play(decision.kind);
+            if (allowAudio && !audioEnabled) playDecisionAudio(decision, demonstration);
             audioEnabled = allowAudio;
             return;
         }
-        hide();
+        if (preserveWarningAudio) hideWindow();
+        else hide();
         if (windowManager == null) return;
         SunroofOverlayView next = new SunroofOverlayView(windowContext);
         float carWidthPx = SunroofOverlayGeometry.carWidthPx(displayWidthPx());
@@ -454,7 +471,7 @@ public final class SunroofOverlayController {
         } catch (RuntimeException error) {
             next.stopAnimations();
             try { windowManager.removeViewImmediate(next); } catch (RuntimeException ignored) { }
-            sound.stop();
+            if (!preserveWarningAudio) sound.stop();
             finishUnavailableTransient(decision, demonstration);
             status = "Люк: окно недоступно";
             if (!windowFailureLogged) {
@@ -466,7 +483,7 @@ public final class SunroofOverlayController {
         windowFailureLogged = false;
         sound.setEnabled(allowAudio);
         audioEnabled = allowAudio;
-        if (allowAudio) sound.play(decision.kind);
+        if (allowAudio) playDecisionAudio(decision, demonstration);
         if (!warning) {
             long sequence = decision.sequence;
             long current = generation;
@@ -483,9 +500,23 @@ public final class SunroofOverlayController {
     }
 
     private void hide() {
+        sound.stop();
+        hideWindow();
+    }
+
+    private void playDecisionAudio(SunroofAlertPolicy.Decision decision, boolean demonstration) {
+        if (!demonstration && decision.kind == SunroofAlertPolicy.Kind.PARKING_WARNING) {
+            if (realWarningAudioSequence == decision.sequence) return;
+            // Consume before attempting playback: failure, focus loss and later wake must
+            // not retry the same warning. Closing/ACK/ACC ON still cancel through hide().
+            realWarningAudioSequence = decision.sequence;
+        }
+        sound.play(decision.kind);
+    }
+
+    private void hideWindow() {
         if (finishTransient != null) main.removeCallbacks(finishTransient);
         finishTransient = null;
-        sound.stop();
         audioEnabled = false;
         SunroofOverlayView previous = overlay;
         overlay = null;
@@ -555,7 +586,7 @@ public final class SunroofOverlayController {
                 if (Intent.ACTION_SCREEN_OFF.equals(action)) {
                     screenOff = true;
                     cancelDemo();
-                    hide();
+                    applyOnMain();
                 } else if (Intent.ACTION_SCREEN_ON.equals(action)) {
                     screenOff = false;
                     asleep = false;

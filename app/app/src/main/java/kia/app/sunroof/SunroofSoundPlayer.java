@@ -2,15 +2,18 @@ package kia.app.sunroof;
 
 import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.SystemClock;
 
 import kia.app.R;
 import kia.app.core.AppLog;
 
-/** Finite roof speech and ADAS cues. Main thread only; callers sound only a shown overlay. */
+/** Finite roof speech and ADAS cues. Main thread only; playback never restarts itself. */
 public final class SunroofSoundPlayer {
     static final long WARNING_WINDOW_MS = 9_500L;
     static final long TRANSITION_WINDOW_MS = 2_500L;
@@ -161,34 +164,19 @@ public final class SunroofSoundPlayer {
                 // Each resource contains speech. The warning combines its ADAS signal and
                 // phrase into one clip so cancellation cannot leave a delayed phrase behind.
                 media = MediaPlayer.create(app, resource, attributes, 0);
-                if (media == null) return null;
+                if (media == null) {
+                    log("create_error resource=" + resourceName(resource) + " player=null");
+                    return null;
+                }
                 MediaPlayer created = media;
                 created.setLooping(false);
-                created.setOnCompletionListener(ignored -> complete.run());
+                AndroidClip clip = new AndroidClip(created, attributes, resource, error);
+                created.setOnCompletionListener(ignored -> clip.finish("completion", complete));
                 created.setOnErrorListener((ignored, what, extra) -> {
-                    error.run();
+                    clip.finish("error what=" + what + " extra=" + extra, error);
                     return true;
                 });
-                return new Clip() {
-                    private boolean closed;
-
-                    @Override public void start() { created.start(); }
-
-                    @Override public void close() {
-                        if (closed) return;
-                        closed = true;
-                        try {
-                            created.setOnCompletionListener(null);
-                            created.setOnErrorListener(null);
-                        } catch (RuntimeException ignored) {
-                        }
-                        try {
-                            created.stop();
-                        } catch (RuntimeException ignored) {
-                        }
-                        created.release();
-                    }
-                };
+                return clip;
             } catch (RuntimeException failure) {
                 if (media != null) {
                     try {
@@ -196,9 +184,128 @@ public final class SunroofSoundPlayer {
                     } catch (RuntimeException ignored) {
                     }
                 }
-                AppLog.line(app, "Sunroof sound failed " + failure.getClass().getSimpleName());
+                log("create_error resource=" + resourceName(resource)
+                        + " exception=" + failure.getClass().getSimpleName());
                 return null;
             }
+        }
+
+        private final class AndroidClip implements Clip {
+            private final MediaPlayer media;
+            private final AudioManager audio;
+            private final AudioFocusRequest focus;
+            private final Runnable error;
+            private final int resource;
+            private final int durationMs;
+            private PowerManager.WakeLock wakeLock;
+            private boolean focusRequested;
+            private boolean closed;
+            private long startedAt = -1L;
+            private String endReason = "cancel";
+
+            AndroidClip(MediaPlayer media, AudioAttributes attributes, int resource, Runnable error) {
+                this.media = media;
+                this.resource = resource;
+                this.error = error;
+                durationMs = media.getDuration();
+                audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+                focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(attributes)
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener(change -> {
+                            if (closed) return;
+                            log("focus_change resource=" + resourceName(resource) + " change=" + change);
+                            if (change < 0) finish("focus_loss change=" + change, this.error);
+                            // A later gain never resumes or creates another player.
+                        }, new Handler(Looper.getMainLooper()))
+                        .build();
+            }
+
+            @Override public void start() {
+                if (closed) return;
+                try {
+                    focusRequested = audio != null;
+                    int result = audio == null ? AudioManager.AUDIOFOCUS_REQUEST_FAILED
+                            : audio.requestAudioFocus(focus);
+                    log("focus resource=" + resourceName(resource) + " result=" + result);
+                    if (closed) return;
+                    if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+                        finish("focus_denied result=" + result, error);
+                        return;
+                    }
+                    PowerManager power = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
+                    if (power != null) {
+                        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Kia:SunroofAudio");
+                        wakeLock.setReferenceCounted(false);
+                        wakeLock.acquire(resource == R.raw.sunroof_warning_adas
+                                ? WARNING_WINDOW_MS : TRANSITION_WINDOW_MS);
+                    }
+                    startedAt = SystemClock.elapsedRealtime();
+                    media.start();
+                    log("start resource=" + resourceName(resource) + " durationMs=" + durationMs
+                            + " wake=" + (wakeLock != null && wakeLock.isHeld()));
+                } catch (RuntimeException failure) {
+                    finish("start_error exception=" + failure.getClass().getSimpleName(), error);
+                }
+            }
+
+            void finish(String reason, Runnable callback) {
+                if (closed) return;
+                endReason = reason;
+                try {
+                    callback.run();
+                } finally {
+                    // Even a stale outer-generation callback must release its own resources.
+                    close();
+                }
+            }
+
+            @Override public void close() {
+                if (closed) return;
+                closed = true;
+                int positionMs = -1;
+                try { positionMs = media.getCurrentPosition(); } catch (RuntimeException ignored) { }
+                log(endReason + " resource=" + resourceName(resource) + " durationMs=" + durationMs
+                        + " playedMs=" + (startedAt < 0L ? 0L : SystemClock.elapsedRealtime() - startedAt)
+                        + " positionMs=" + positionMs);
+                try {
+                    media.setOnCompletionListener(null);
+                    media.setOnErrorListener(null);
+                } catch (RuntimeException ignored) { }
+                try { media.stop(); } catch (RuntimeException ignored) { }
+                try { media.release(); } catch (RuntimeException ignored) { }
+                if (focusRequested && audio != null) {
+                    focusRequested = false;
+                    try {
+                        log("focus_release resource=" + resourceName(resource)
+                                + " result=" + audio.abandonAudioFocusRequest(focus));
+                    } catch (RuntimeException failure) {
+                        log("focus_release_error resource=" + resourceName(resource)
+                                + " exception=" + failure.getClass().getSimpleName());
+                    }
+                }
+                if (wakeLock != null) {
+                    PowerManager.WakeLock held = wakeLock;
+                    wakeLock = null;
+                    try {
+                        if (held.isHeld()) held.release();
+                        log("wake_release resource=" + resourceName(resource));
+                    } catch (RuntimeException failure) {
+                        log("wake_release_error resource=" + resourceName(resource)
+                                + " exception=" + failure.getClass().getSimpleName());
+                    }
+                }
+            }
+        }
+
+        private static String resourceName(int resource) {
+            return resource == R.raw.sunroof_warning_adas ? "sunroof_warning_adas"
+                    : resource == R.raw.sunroof_open_voice ? "sunroof_open_voice"
+                    : resource == R.raw.sunroof_close_voice ? "sunroof_close_voice" : String.valueOf(resource);
+        }
+
+        private void log(String text) {
+            try { AppLog.line(app, "Sunroof audio " + text); } catch (RuntimeException ignored) { }
         }
     }
 }

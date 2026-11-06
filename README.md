@@ -2,22 +2,24 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-Релиз `23.22-sunroof / 376`: исправлены первое открытие люка после запуска и восстановление после USB, получение ACC от TEYES переведено на штатный Binder-протокол. Предупреждение сохраняет сигнал ADAS и женский голос «Внимание, люк открыт». Включение: **Настройки → Общее → Люк**. [Исправления и проверка](docs/sunroof-startup-376.md).
+Релиз `23.23-sunroof / 377`: предупреждение об открытом люке доигрывает при переходе TEYES в сон. Сохранены сигнал ADAS и женский голос, добавлены аудиофокус и ограниченное удержание процессора. Повторное появление окна после пробуждения не повторяет звук. Включение: **Настройки → Общее → Люк**. [Исправление и проверка](docs/sunroof-sleep-audio-377.md).
 
-[![Скачать KIA 376 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20376%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.22-376/kia_376_sunroof.apk)
+[![Скачать KIA 377 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20377%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.23-377/kia_377_sunroof.apk)
 
-- APK KIA: [kia_376_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.22-376/kia_376_sunroof.apk)
+- APK KIA: [kia_377_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.23-377/kia_377_sunroof.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-teyes-compat.apk](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.22-376`](https://github.com/mrglonin/kia/releases/tag/v23.22-376)
-- Текущий публичный релиз: `23.22-sunroof` / `376`
+- GitHub Release: [`v23.23-377`](https://github.com/mrglonin/kia/releases/tag/v23.23-377)
+- Текущий публичный релиз: `23.23-sunroof` / `377`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.22-sunroof` / `376` | `updates/kia_376_sunroof.apk`, 7 431 964 байт | `4630912582f731d6c24ccb190a58526b68cb284eb5efff4e3433f5351528f1bd` |
+| KIA app | `23.23-sunroof` / `377` | `updates/kia_377_sunroof.apk`, 7 412 079 байт | `6b8278d2968757285b63f808c856f991b60e84a6134053458ce6276655602015` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
+
+В `377` устранён обрыв предупреждения при сне: короткий звук отделён от скрываемого окна и не повторяется при пробуждении. Проверены 75 модульных тестов подсистемы люка и 144 проверки контроллера. [Отчёт 377](updates/verification_377.json).
 
 В `376` первый подтверждённый OPEN больше не требует начального CLOSED. После переподключения новый OPEN после последнего CLOSED показывается сразу; дубликаты не перезапускают оповещение. ACC не зависит от закрытых методов SpdManager, а временно пустой ответ службы не снимает подписку. Проверены 469 unit-тестов и 421 проверка установленного APK на Android-эмуляторе. [Отчёт 376](updates/verification_376.json). Фактический доступ к службе и слышимость на магнитоле требуют проверки в машине.
 
@@ -94,7 +96,7 @@ Yandex Navigator mod остаётся версии `7.10-kia.20260805-teyes-comp
 ADB:
 
 ```bash
-adb install -r updates/kia_376_sunroof.apk
+adb install -r updates/kia_377_sunroof.apk
 curl -L -o /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk \
   https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
 adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
@@ -102,7 +104,7 @@ adb install -r /tmp/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk
 
 На магнитоле:
 
-1. Установить `kia_376_sunroof.apk`.
+1. Установить `kia_377_sunroof.apk`.
 2. Выдать runtime permissions: уведомления, геолокация и Bluetooth — только для используемых функций.
 3. Включить специальные права: поверх окон, доступ к уведомлениям и игнор оптимизации батареи.
 4. Подключить USB CAN-адаптер, переделанный и прошитый по инструкции автора: [Drive2 76508](https://www.drive2.ru/users/76508/), [переделка адаптера](https://www.drive2.ru/l/717368666034802531/).
@@ -138,7 +140,7 @@ python3 tools/compass_regression.py --output /tmp/kia-compass-check
 
 ```bash
 ADB=/Users/legion/Library/Android/sdk/platform-tools/adb
-$ADB -s emulator-5554 install -r updates/kia_376_sunroof.apk
+$ADB -s emulator-5554 install -r updates/kia_377_sunroof.apk
 $ADB -s emulator-5554 shell am start -n kia.app/.entry.MainActivity
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 $ADB -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_high_pressure_warning
