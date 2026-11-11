@@ -1,10 +1,10 @@
 {
   "app": {
-    "version_name": "23.25-sunroof",
-    "version_code": 379,
-    "asset_name": "kia_379_sunroof.apk",
-    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.25-379/kia_379_sunroof.apk",
-    "sha256": "f35e5aefed258c3ea218176fa082aae120c3718dbef961f28e4cf47dd78d790a",
+    "version_name": "23.26-sunroof",
+    "version_code": 380,
+    "asset_name": "kia_380_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.26-380/kia_380_sunroof.apk",
+    "sha256": "695d6d452821cbae13a4993728858bf2a852bf876d4b4ccbdc2ed943dc1fdb92",
     "size": 7752646
   },
   "navigator": {

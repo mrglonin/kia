@@ -137,6 +137,13 @@ public final class NavigationFeature {
     // Local presentation cache only; successful serial delivery is tracked separately below.
     private int lastSentSpeedLimit = -1;
     private final RoadSpeedLimitTxPolicy roadSpeedLimitTx = new RoadSpeedLimitTxPolicy();
+    private int pendingRoadSpeedLimitSource;
+    private int pendingRoadSpeedLimitSourceMode;
+    private final Runnable roadSpeedLimitRetry = () -> {
+        synchronized (NavigationFeature.this) {
+            attemptPendingRoadSpeedLimit(true);
+        }
+    };
     private final ManeuverProgressTracker maneuverProgressTracker =
             new ManeuverProgressTracker();
     private final ManeuverProgressRolloverMarker maneuverProgressRolloverMarker =
@@ -319,6 +326,7 @@ public final class NavigationFeature {
         navigationEnabledSynced = true;
         lastNavigationEnabled = enabled;
         if (!enabled) {
+            cancelPendingRoadSpeedLimit();
             if (changed || state.active || state.finishReached
                     || state.speedExceeded || !TextUtils.isEmpty(state.speedLimit)
                     || lastSentSpeedLimit > 0) {
@@ -366,6 +374,7 @@ public final class NavigationFeature {
                 && stateSource != source;
         if (event == NavigationSourcePolicy.EVENT_ROUTE_ACTIVE
                 && (result.switchedOwner || stateOwnedByOther)) {
+            cancelPendingRoadSpeedLimit();
             AppLog.navigation(app, "NAV_SOURCE_HANDOFF "
                     + NavigationSourcePolicy.sourceName(
                     stateSource != NavigationSourcePolicy.SOURCE_NONE
@@ -976,7 +985,10 @@ public final class NavigationFeature {
     }
 
     private void applyDgisRoadSpeedLimit(String value, boolean exceeded, boolean routeActive) {
-        if (TextUtils.isEmpty(value)) return;
+        if (speedNumber(value) <= 0) {
+            cancelPendingRoadSpeedLimit();
+            if (TextUtils.isEmpty(value)) return;
+        }
         if (exceeded) startOverspeedTextWindow();
         else clearOverspeedTextWindow();
         state = new NavigationState(state.active, state.finishReached, exceeded,
@@ -3483,6 +3495,11 @@ public final class NavigationFeature {
         boolean positiveRoadLimit = yandexSource && roadLimitPresent && speedNumber(limit) > 0;
         boolean roadLimitClearSignal = yandexSource && roadLimitPresent
                 && (bool(intent, "speed_limit_clear", false) || speedNumber(limit) <= 0);
+        // A fresh missing/zero sample revokes an unsent sign immediately, before UI debounce.
+        // Cached transport heartbeats have roadLimitSampleFresh=false and do not renew the lease.
+        if (roadLimitSampleFresh && (roadLimitClearSignal || speedNumber(limit) <= 0)) {
+            cancelPendingRoadSpeedLimit();
+        }
         boolean confirmedRoadLimitClear = false;
         if (!TextUtils.isEmpty(current) && yandexSource && currentSampleFresh) {
             lastYandexCurrentSpeedAt = nowElapsed;
@@ -3613,6 +3630,13 @@ public final class NavigationFeature {
     public synchronized void observeYandexTransportHeartbeat() {
         expireStaleYandexCurrentSpeed("empty_heartbeat");
         expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "empty_heartbeat");
+    }
+
+    /** A new source sample explicitly lacking a road limit revokes only pending delivery. */
+    public synchronized void observeYandexRoadSpeedLimitMissing() {
+        if (pendingRoadSpeedLimitSource == NavigationSourcePolicy.SOURCE_YANDEX) {
+            cancelPendingRoadSpeedLimit();
+        }
     }
 
     public synchronized NavigationMotionPolicy.State freshMotionState(int movingThresholdKmh) {
@@ -3793,6 +3817,7 @@ public final class NavigationFeature {
     }
 
     private void forgetRoadSpeedLimit(String reason) {
+        cancelPendingRoadSpeedLimit();
         speedLimitTextUntil = 0L;
         clearOverspeedTextWindow();
         if (lastSentSpeedLimit != 0) {
@@ -4082,6 +4107,10 @@ public final class NavigationFeature {
 
     private void publishNavigationState() {
         roadSpeedLimitTx.setAllowed(roadSpeedLimitOutputAllowed());
+        if (!roadSpeedLimitOutputAllowed() || speedNumber(state.speedLimit) <= 0
+                || pendingRoadSpeedLimitSource != navigationSourceFamily(state.source)) {
+            cancelPendingRoadSpeedLimit();
+        }
         long now = System.currentTimeMillis();
         if (!NavigationModeSettings.isFinishDirection(app)) {
             boolean droppedFinishDirectionVisual = false;
@@ -6092,14 +6121,50 @@ public final class NavigationFeature {
         }
     }
 
-    /** The sign is an event: only a fresh positive sample may reach this boundary. */
+    /** Only a fresh positive sample starts delivery; failed writes get a short bounded retry. */
     private AdapterTxOutcome sendSpeedLimitFrame(int kmh) {
         int value = Math.max(0, Math.min(255, kmh));
         boolean allowed = roadSpeedLimitOutputAllowed();
-        if (!roadSpeedLimitTx.shouldSend(value, allowed)) return AdapterTxOutcome.BLOCKED;
+        handler.removeCallbacks(roadSpeedLimitRetry);
+        if (!roadSpeedLimitTx.acceptFreshSample(value, allowed, SystemClock.elapsedRealtime())) {
+            return AdapterTxOutcome.BLOCKED;
+        }
+        pendingRoadSpeedLimitSource = navigationSourceFamily(state.source);
+        pendingRoadSpeedLimitSourceMode = AppSettings.navSourceMode(app);
+        return attemptPendingRoadSpeedLimit(false);
+    }
+
+    private AdapterTxOutcome attemptPendingRoadSpeedLimit(boolean retry) {
+        handler.removeCallbacks(roadSpeedLimitRetry);
+        int value = roadSpeedLimitTx.pendingValue(SystemClock.elapsedRealtime(),
+                roadSpeedLimitOutputAllowed());
+        if (value <= 0 || speedNumber(state.speedLimit) != value
+                || pendingRoadSpeedLimitSource != navigationSourceFamily(state.source)
+                || pendingRoadSpeedLimitSourceMode != AppSettings.navSourceMode(app)
+                || (pendingRoadSpeedLimitSource != NavigationSourcePolicy.SOURCE_NONE
+                && !NavigationSourcePolicy.ingressAllowed(AppSettings.navigationEnabled(app),
+                AppSettings.navSourceMode(app), pendingRoadSpeedLimitSource))) {
+            cancelPendingRoadSpeedLimit();
+            return AdapterTxOutcome.BLOCKED;
+        }
+        AdapterGateway gateway = AdapterGateway.get(app);
+        long epochBefore = gateway.connectionEpoch();
         AdapterTxOutcome outcome = sender.sendSpeedLimit(value);
-        if (outcome == AdapterTxOutcome.WRITTEN) roadSpeedLimitTx.written(value);
+        AppLog.navigation(app, "NAV_SPEED_LIMIT_DELIVERY value=" + value
+                + " retry=" + retry + " outcome=" + outcome
+                + " epoch=" + epochBefore + "->" + gateway.connectionEpoch());
+        if (outcome == AdapterTxOutcome.WRITTEN) {
+            roadSpeedLimitTx.written(value);
+        } else if (roadSpeedLimitTx.pendingValue(SystemClock.elapsedRealtime(),
+                roadSpeedLimitOutputAllowed()) > 0) {
+            handler.postDelayed(roadSpeedLimitRetry, 250L);
+        }
         return outcome;
+    }
+
+    private void cancelPendingRoadSpeedLimit() {
+        handler.removeCallbacks(roadSpeedLimitRetry);
+        roadSpeedLimitTx.cancelPending();
     }
 
     private boolean roadSpeedLimitOutputAllowed() {
@@ -6110,6 +6175,7 @@ public final class NavigationFeature {
 
     /** Applying a mode never replays a stored sign; the next fresh sample uses it. */
     public synchronized void onSpeedLimitSettingsChanged() {
+        cancelPendingRoadSpeedLimit();
         roadSpeedLimitTx.setAllowed(roadSpeedLimitOutputAllowed());
     }
 

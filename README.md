@@ -2,22 +2,24 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-Релиз `23.25-sunroof / 379`: семибайтовая передача дорожного ограничения, отправка только изменившегося положительного значения и выбор работы с маршрутом или без него. [Проверка 379](updates/verification_379.json).
+Релиз `23.26-sunroof / 380`: новый лимит повторно отправляется после временного отказа USB без ожидания следующего сообщения навигатора; повторы ограничены тремя секундами и прекращаются после успешной записи. [Проверка 380](updates/verification_380.json).
 
-[![Скачать KIA 379 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20379%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.25-379/kia_379_sunroof.apk)
+[![Скачать KIA 380 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20380%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.26-380/kia_380_sunroof.apk)
 
-- APK KIA: [kia_379_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.25-379/kia_379_sunroof.apk)
+- APK KIA: [kia_380_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.26-380/kia_380_sunroof.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-teyes-compat.apk](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.25-379`](https://github.com/mrglonin/kia/releases/tag/v23.25-379)
-- Текущий публичный релиз: `23.25-sunroof` / `379`
+- GitHub Release: [`v23.26-380`](https://github.com/mrglonin/kia/releases/tag/v23.26-380)
+- Текущий публичный релиз: `23.26-sunroof` / `380`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.25-sunroof` / `379` | `updates/kia_379_sunroof.apk`, 7 752 646 байт | `f35e5aefed258c3ea218176fa082aae120c3718dbef961f28e4cf47dd78d790a` |
+| KIA app | `23.26-sunroof` / `380` | `updates/kia_380_sunroof.apk`, 7 752 646 байт | `695d6d452821cbae13a4993728858bf2a852bf876d4b4ccbdc2ed943dc1fdb92` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
+
+В `380` неуспешная отправка свежего дорожного лимита повторяется через 250 мс в течение максимум 3 секунд от получения. Новый лимит заменяет ожидающий, свежий ноль/отсутствие лимита или закрытие разрешающего режима отменяют ожидание. После `WRITTEN` повторов нет; старые знаки из USB-очереди не восстанавливаются. [Отчёт 380](updates/verification_380.json).
 
 В `379` нулевые/пустые значения и сохранённые знаки из фоновых повторов не отправляются. Поддерживаются все значения `1–255`, включая `5` и `10`; режим выбирается в настройках навигации. [Отчёт 379](updates/verification_379.json).
 

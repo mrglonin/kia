@@ -82,4 +82,55 @@ public final class RoadSpeedLimitTxPolicyTest {
         }
         assertTrue(policy.shouldSend(255, true));
     }
+
+    @Test
+    public void failedChangeRetriesWithoutAnotherSampleAndStopsAfterWrite() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        policy.written(40);
+        assertTrue(policy.acceptFreshSample(60, true, 1000L));
+        assertEquals(60, policy.pendingValue(1250L, true));
+        assertEquals(60, policy.pendingValue(2000L, true));
+        policy.written(60);
+        assertEquals(0, policy.pendingValue(2250L, true));
+        assertFalse(policy.acceptFreshSample(60, true, 2500L));
+    }
+
+    @Test
+    public void newestSampleReplacesPendingAndReturnToWrittenValueCancelsIt() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertTrue(policy.acceptFreshSample(40, true, 1000L));
+        policy.written(40);
+        assertTrue(policy.acceptFreshSample(60, true, 1100L));
+        assertTrue(policy.acceptFreshSample(80, true, 1200L));
+        assertEquals(80, policy.pendingValue(1300L, true));
+        assertFalse(policy.acceptFreshSample(40, true, 1400L));
+        assertEquals(0, policy.pendingValue(1500L, true));
+    }
+
+    @Test
+    public void retryLeaseExpiresAndCannotBeExtendedByPolling() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertTrue(policy.acceptFreshSample(60, true, 1000L));
+        assertEquals(60, policy.pendingValue(3999L, true));
+        assertEquals(0, policy.pendingValue(4000L, true));
+        assertEquals(0, policy.pendingValue(4100L, true));
+        assertTrue(policy.acceptFreshSample(60, true, 5000L));
+        assertEquals(60, policy.pendingValue(5250L, true));
+    }
+
+    @Test
+    public void missingDisabledAndClockRollbackCancelWithoutReplay() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertTrue(policy.acceptFreshSample(60, true, 1000L));
+        assertFalse(policy.acceptFreshSample(0, true, 1200L));
+        assertEquals(0, policy.pendingValue(1250L, true));
+        assertTrue(policy.acceptFreshSample(60, true, 2000L));
+        assertEquals(0, policy.pendingValue(2250L, false));
+        assertEquals(0, policy.pendingValue(2500L, true));
+        assertTrue(policy.acceptFreshSample(60, true, 3000L));
+        assertEquals(0, policy.pendingValue(2999L, true));
+        assertTrue(policy.acceptFreshSample(60, true, 4000L));
+        policy.cancelPending();
+        assertEquals(0, policy.pendingValue(4250L, true));
+    }
 }

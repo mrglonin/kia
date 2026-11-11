@@ -1,0 +1,62 @@
+{
+  "created_utc": "2026-11-11T13:17:48.217862+00:00",
+  "status": "VERIFIED_SOFTWARE_PHYSICAL_CLUSTER_ACCEPTANCE_PENDING",
+  "artifact": {
+    "version_name": "23.26-sunroof",
+    "version_code": 380,
+    "asset_name": "kia_380_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.26-380/kia_380_sunroof.apk",
+    "sha256": "695d6d452821cbae13a4993728858bf2a852bf876d4b4ccbdc2ed943dc1fdb92",
+    "size": 7752646
+  },
+  "source_base": "aacdf61c6f79a78e6875acf968af203257dbaf06",
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "build": {
+    "method": "All current Java/resources compiled using Android SDK tools; complete existing external DEX and Kotlin metadata preserved",
+    "gradle_and_lint_completed": false,
+    "signature_and_zipalign_verified": true,
+    "dependency_classes_preserved": 1025,
+    "kotlin_builtins_preserved": 7
+  },
+  "behavior": {
+    "wire_format": "BB 41 A1 07 44 SPEED SUM",
+    "retry_interval_ms": 250,
+    "retry_window_ms": 3000,
+    "retry_only_unsuccessful_write": true,
+    "retry_does_not_extend_deadline": true,
+    "newest_value_replaces_pending": true,
+    "fresh_missing_or_zero_cancels_pending": true,
+    "successful_value_repeated": false,
+    "zero_or_missing_tx": false,
+    "cached_background_or_usb_replay": false,
+    "offline_queue_replay": false,
+    "epoch_before_after_logged": true
+  },
+  "validation": {
+    "focused_unit_tests": 59,
+    "failures": 0,
+    "independent_code_review": "No blockers found",
+    "physical_head_unit_tested": false,
+    "installed_runtime_checks": 13,
+    "emulator_in_place_upgrade": "379 to 380; install-r successful",
+    "installed_apk_sha256": "695d6d452821cbae13a4993728858bf2a852bf876d4b4ccbdc2ed943dc1fdb92",
+    "nondefault_route_only_persisted": true,
+    "always_restored_via_ui": true,
+    "blocked_40_to_60_without_new_source_callback": true,
+    "unblock_to_write_ms": 154,
+    "initial_block_to_write_ms": 755,
+    "runtime_sequence_written": [
+      40,
+      60,
+      40,
+      80,
+      60
+    ],
+    "runtime_external_substitution": "Only USB serial port replaced by an in-memory sink; actual installed bridge, feature, Handler timer, sender, gateway and transport used",
+    "runtime_fixture_removed": true
+  },
+  "limits": [
+    "WRITTEN means the USB serial write completed, not an acknowledgement from the instrument cluster.",
+    "Physical head-unit/adapter display acceptance remains to be tested in the vehicle."
+  ]
+}

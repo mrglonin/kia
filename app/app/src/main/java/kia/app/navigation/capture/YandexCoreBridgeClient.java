@@ -693,6 +693,9 @@ public final class YandexCoreBridgeClient {
                 now, System.currentTimeMillis(), SOURCE_SAMPLE_MAX_AGE_MS);
         logSourceSampleDecision(callback, relativeTimestamp, absoluteTimestamp,
                 sourceDecision, now);
+        if (sourceDecision.roadLimitFresh && !sourceHasRoadLimit) {
+            NavigationFeature.get(app).observeYandexRoadSpeedLimitMissing();
+        }
 
         boolean currentSpeedFresh = sourceDecision.currentSpeedFresh && speed >= 0L;
         boolean roadLimitFresh = sourceDecision.roadLimitFresh && sourceHasRoadLimit;
