@@ -42,11 +42,4 @@ public final class YandexRoadContextPolicyTest {
                 "60", true, 10_000L, 40_000L, 12_000L, true, true));
     }
 
-    @Test
-    public void positiveLimitIsReassertedExactlyOncePerUsbConnectionEpoch() {
-        assertTrue(YandexRoadContextPolicy.shouldReassertTx(60, true, 2L, 1L));
-        assertFalse(YandexRoadContextPolicy.shouldReassertTx(60, true, 2L, 2L));
-        assertFalse(YandexRoadContextPolicy.shouldReassertTx(60, false, 2L, 1L));
-        assertFalse(YandexRoadContextPolicy.shouldReassertTx(0, true, 2L, 1L));
-    }
 }

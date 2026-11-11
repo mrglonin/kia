@@ -3915,7 +3915,7 @@ public final class MainActivity extends Activity {
     private LinearLayout navigationOptionsPanel() {
         LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
         addSettingsPanelHeader(panel, "Опции панели",
-                "что именно отправлять на приборку во время маршрута", COLOR_ACCENT_BLUE);
+                "навигационные подсказки и ограничение скорости", COLOR_ACCENT_BLUE);
         addSettingsSubHeader(panel, "Режим маршрута", "активен только один режим");
         boolean normalMode = navNormalSettingsEnabled();
         addActionGridColumns(panel, 3,
@@ -3925,6 +3925,17 @@ public final class MainActivity extends Activity {
         finishCompassAutoToggle = addSettingsPanelSwitchHeader(panel, "Компас к финишу",
                 "300 м всегда, до 1 км после последнего манёвра",
                 AppSettings.navFinishCompassAuto(this), this::toggleFinishCompassAuto);
+        panel.addView(settingsDivider());
+        addSettingsSubHeader(panel, "Ограничение скорости в приборке",
+                "Передаётся только известный лимит, один раз при изменении. Пустые значения не отправляются.");
+        boolean speedLimitRouteOnly = AppSettings.navSpeedLimitRouteOnly(this);
+        addActionGridColumns(panel, 1,
+                action("Только при активном маршруте", "во время ведения по маршруту",
+                        choiceColor(speedLimitRouteOnly), speedLimitRouteOnly,
+                        () -> setNavSpeedLimitRouteOnly(true)),
+                action("Всегда, когда известен лимит", "в том числе без активного маршрута",
+                        choiceColor(!speedLimitRouteOnly), !speedLimitRouteOnly,
+                        () -> setNavSpeedLimitRouteOnly(false)));
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "1. Настройки основной навигации",
                 normalMode ? "манёвр маршрута, серая дорога и текстовые строки"
@@ -5387,6 +5398,14 @@ public final class MainActivity extends Activity {
         AppService.start(this);
         NavigationFeature.get(this).setOutputMode(mode);
         updateNavRouteModeButtons();
+        renderTab();
+        refresh();
+    }
+
+    private void setNavSpeedLimitRouteOnly(boolean routeOnly) {
+        if (AppSettings.navSpeedLimitRouteOnly(this) == routeOnly) return;
+        AppSettings.setNavSpeedLimitRouteOnly(this, routeOnly);
+        NavigationFeature.get(this).onSpeedLimitSettingsChanged();
         renderTab();
         refresh();
     }

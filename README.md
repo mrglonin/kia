@@ -2,22 +2,24 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-Релиз `23.24-sunroof / 378`: исправлены удаление первого окна люка до прикрепления к экрану и подготовка аудиотракта перед голосом. Исходная речь сохранена, громкость связана с общими сигналами. [Исправление и проверка](docs/sunroof-voice-overlay-378.md).
+Релиз `23.25-sunroof / 379`: семибайтовая передача дорожного ограничения, отправка только изменившегося положительного значения и выбор работы с маршрутом или без него. [Проверка 379](updates/verification_379.json).
 
-[![Скачать KIA 378 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20378%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.24-378/kia_378_sunroof.apk)
+[![Скачать KIA 379 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20379%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.25-379/kia_379_sunroof.apk)
 
-- APK KIA: [kia_378_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.24-378/kia_378_sunroof.apk)
+- APK KIA: [kia_379_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.25-379/kia_379_sunroof.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-teyes-compat.apk](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.24-378`](https://github.com/mrglonin/kia/releases/tag/v23.24-378)
-- Текущий публичный релиз: `23.24-sunroof` / `378`
+- GitHub Release: [`v23.25-379`](https://github.com/mrglonin/kia/releases/tag/v23.25-379)
+- Текущий публичный релиз: `23.25-sunroof` / `379`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.24-sunroof` / `378` | `updates/kia_378_sunroof.apk`, 7 748 550 байт | `86eff78c6e619320ff06da1f6efc6d64cfb5f5d37a95ed89e0911e08ee81c16b` |
+| KIA app | `23.25-sunroof` / `379` | `updates/kia_379_sunroof.apk`, 7 752 646 байт | `ee8876221981d427fc80618316cf36155312f860eeffd8e742ba616455843461` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
+
+В `379` нулевые/пустые значения и сохранённые знаки из фоновых повторов не отправляются. Поддерживаются все значения `1–255`, включая `5` и `10`; режим выбирается в настройках навигации. [Отчёт 379](updates/verification_379.json).
 
 В `378` первое ожидающее прикрепления окно не удаляется повторным событием; перед исходной речью добавлено 1200 мс PCM-тишины для подготовки аудиотракта. [Отчёт 378](updates/verification_378.json).
 

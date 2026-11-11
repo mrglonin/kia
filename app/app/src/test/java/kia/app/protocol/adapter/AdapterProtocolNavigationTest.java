@@ -1,11 +1,39 @@
 package kia.app.protocol.adapter;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
 public final class AdapterProtocolNavigationTest {
+    @Test
+    public void speedLimitUsesSevenByteFramesWithExactSpeedAndChecksum() {
+        assertSpeedLimitFrame(0, new byte[]{
+                (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x00, (byte) 0xE8});
+        assertSpeedLimitFrame(1, new byte[]{
+                (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x01, (byte) 0xE9});
+        assertSpeedLimitFrame(5, new byte[]{
+                (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x05, (byte) 0xED});
+        assertSpeedLimitFrame(10, new byte[]{
+                (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x0A, (byte) 0xF2});
+        assertSpeedLimitFrame(60, new byte[]{
+                (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x3C, 0x24});
+        assertSpeedLimitFrame(90, new byte[]{
+                (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x5A, 0x42});
+        assertSpeedLimitFrame(120, new byte[]{
+                (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x78, 0x60});
+    }
+
+    private static void assertSpeedLimitFrame(int speedKmh, byte[] expected) {
+        byte[] frame = AdapterProtocol.speedLimit(speedKmh);
+
+        assertArrayEquals("Speed limit " + speedKmh, expected, frame);
+        assertEquals(7, frame.length);
+        assertEquals(frame.length, frame[3] & 0xff);
+        assertTrue(AdapterProtocol.validChecksum(frame));
+    }
+
     @Test
     public void numberedRoundaboutsKeepYellowExitSelectorInNormalMode() {
         assertNumberedRoundaboutSelectors(false);

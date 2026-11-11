@@ -1,0 +1,51 @@
+{
+  "created_utc": "2026-11-11T12:41:27.997417+00:00",
+  "status": "VERIFIED_SOFTWARE_PHYSICAL_CLUSTER_ACCEPTANCE_PENDING",
+  "artifact": {
+    "version_name": "23.25-sunroof",
+    "version_code": 379,
+    "asset_name": "kia_379_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.25-379/kia_379_sunroof.apk",
+    "sha256": "ee8876221981d427fc80618316cf36155312f860eeffd8e742ba616455843461",
+    "size": 7752646
+  },
+  "source_base": "0b6d704ca65b84d0d0e5c54bc0c46dda9795f281",
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "build": {
+    "method": "All current Java/resources compiled using Android SDK tools; complete existing external DEX and Kotlin metadata preserved",
+    "gradle_and_lint_completed": false,
+    "signature_and_zipalign_verified": true,
+    "dependency_classes_preserved": 1025,
+    "kotlin_builtins_preserved": 7
+  },
+  "behavior": {
+    "wire_format": "BB 41 A1 07 44 SPEED SUM",
+    "positive_speed_values_tested": "1..255 including 5 and 10",
+    "zero_or_missing_tx": false,
+    "repeated_successful_value_tx": false,
+    "cached_background_or_usb_replay": false,
+    "offline_queue_replay": false,
+    "route_only_setting": true,
+    "default_route_only": false,
+    "timeout_setting": false
+  },
+  "validation": {
+    "focused_unit_tests": 51,
+    "failures": 0,
+    "settings_persistence_migration_assertions": 9,
+    "actual_navigation_feature_reflection_scenarios": 11,
+    "emulator_in_place_upgrade": "378 to 379; install-r successful",
+    "physical_head_unit_tested": false,
+    "emulator_installed_apk_sha256": "ee8876221981d427fc80618316cf36155312f860eeffd8e742ba616455843461",
+    "emulator_first_install_time_preserved": true,
+    "emulator_route_only_persisted_after_restart": true,
+    "emulator_default_always_restored": true,
+    "emulator_speed_packet": "BB 41 A1 07 44 50 38",
+    "emulator_usb_outcome": "BLOCKED (no physical adapter)",
+    "emulator_zero_packet_attempts_after_no_limit": 0
+  },
+  "limits": [
+    "Receiver interpretation and autonomous sign expiry require confirmation in the vehicle.",
+    "Reflection runtime scenarios use the actual NavigationFeature class with substituted external sender/settings/log services."
+  ]
+}

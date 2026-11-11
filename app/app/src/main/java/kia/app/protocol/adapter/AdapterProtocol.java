@@ -203,8 +203,7 @@ public final class AdapterProtocol {
     }
 
     public static byte[] speedLimit(int kmh) {
-        byte[] frame = new byte[]{(byte) 0xBB, 0x41, (byte) 0xA1, 0x08, CMD_SPEED_LIMIT, 1, (byte) clamp(kmh, 0, 255), 0};
-        return checksum(frame);
+        return frame(CMD_SPEED_LIMIT, clamp(kmh, 0, 255));
     }
 
     public static byte[] etaDistance(float distance, boolean km) {

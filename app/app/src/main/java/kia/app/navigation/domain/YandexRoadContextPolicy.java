@@ -21,8 +21,4 @@ public final class YandexRoadContextPolicy {
         return stationary || now - lastFreshLimitAt <= Math.max(0L, holdMs);
     }
 
-    public static boolean shouldReassertTx(int speedLimitKmh, boolean usbReady,
-                                           long connectionEpoch, long lastWrittenEpoch) {
-        return speedLimitKmh > 0 && usbReady && connectionEpoch != lastWrittenEpoch;
-    }
 }

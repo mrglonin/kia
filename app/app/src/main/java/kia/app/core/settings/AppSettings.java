@@ -39,6 +39,7 @@ public final class AppSettings {
     private static final String KEY_NAV_SOURCE_MODE = "nav_source_mode";
     private static final String KEY_NAV_ETA_TIME_MODE = "nav_eta_time_mode";
     private static final String KEY_NAV_OVERSPEED_TEXT = "nav_overspeed_text";
+    private static final String KEY_NAV_SPEED_LIMIT_ROUTE_ONLY = "nav_speed_limit_route_only";
     private static final String KEY_NAV_OVERLAY = "nav_overlay";
     private static final String KEY_NAV_MICRO_MANEUVERS = "nav_micro_maneuvers";
     private static final String KEY_NAV_MICRO_HOLD_SECONDS = "nav_micro_hold_seconds";
@@ -129,7 +130,7 @@ public final class AppSettings {
     public static final int RCTA_ARROW_COUNT_MIN = 3;
     public static final int RCTA_ARROW_COUNT_MAX = 6;
     public static final int RCTA_ARROW_COUNT_DEFAULT = RCTA_ARROW_COUNT_MIN;
-    private static final int SCHEMA = 52;
+    private static final int SCHEMA = 53;
     public static final int MEDIA_SOURCE_DELAY_MIN_MS = 0;
     public static final int MEDIA_SOURCE_DELAY_MAX_MS = 3000;
     public static final int MEDIA_ANDROID_SOURCE_DELAY_DEFAULT_MS = 300;
@@ -411,6 +412,9 @@ public final class AppSettings {
         if (!prefs.contains(KEY_SUNROOF_PARKING_WARNING)) edit.putBoolean(KEY_SUNROOF_PARKING_WARNING, true);
         if (!prefs.contains(KEY_SUNROOF_SOUND)) edit.putBoolean(KEY_SUNROOF_SOUND, true);
         if (!prefs.contains(KEY_SUNROOF_TRANSITION_SOUND)) edit.putBoolean(KEY_SUNROOF_TRANSITION_SOUND, false);
+        if (!prefs.contains(KEY_NAV_SPEED_LIMIT_ROUTE_ONLY)) {
+            edit.putBoolean(KEY_NAV_SPEED_LIMIT_ROUTE_ONLY, false);
+        }
         edit.putInt(KEY_SCHEMA, SCHEMA).apply();
     }
 
@@ -585,6 +589,14 @@ public final class AppSettings {
 
     public static void setNavManeuverTextSeconds(Context context, int value) {
         prefs(context).edit().putInt(KEY_NAV_MANEUVER_TEXT_SECONDS, clamp(value, 0, 15)).apply();
+    }
+
+    public static boolean navSpeedLimitRouteOnly(Context context) {
+        return prefs(context).getBoolean(KEY_NAV_SPEED_LIMIT_ROUTE_ONLY, false);
+    }
+
+    public static void setNavSpeedLimitRouteOnly(Context context, boolean value) {
+        prefs(context).edit().putBoolean(KEY_NAV_SPEED_LIMIT_ROUTE_ONLY, value).apply();
     }
 
     public static boolean navOverspeedTextEnabled(Context context) {

@@ -13,7 +13,20 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 
 public final class SettingsTransferTest {
-    private static final int CURRENT_SCHEMA = 52;
+    private static final int CURRENT_SCHEMA = 53;
+
+    @Test
+    public void speedLimitModeTransfersBothChoicesAndRequiresBoolean() {
+        for (boolean routeOnly : new boolean[]{false, true}) {
+            Map<String, Object> app = new LinkedHashMap<>();
+            app.put("nav_speed_limit_route_only", routeOnly);
+            SettingsTransfer.ValidatedImport result = SettingsTransfer.validatePreferenceMaps(
+                    files(app, null), CURRENT_SCHEMA);
+            assertEquals(app, result.files.get("Kia"));
+        }
+        assertInvalidAppValue("nav_speed_limit_route_only", "true");
+        assertInvalidAppValue("nav_speed_limit_route_only", 1);
+    }
 
     @Test
     public void sunroofPreferencesRoundTripWithIndependentSoundFlags() {

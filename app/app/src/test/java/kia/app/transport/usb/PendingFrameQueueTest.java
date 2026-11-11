@@ -1,6 +1,8 @@
 package kia.app.transport.usb;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 
 import java.util.List;
 
@@ -85,48 +87,46 @@ public final class PendingFrameQueueTest {
     }
 
     @Test
-    public void navigationOffKeepsTerminalSpeedLimitClearForReconnect() {
+    public void offlineSpeedLimitChangesAreNeverReplayed() {
         PendingFrameQueue queue = new PendingFrameQueue(80);
 
-        queue.offer(speedLimitFrame(60));
-        queue.offer(speedLimitFrame(0));
-        queue.offer(frame(AdapterProtocol.CMD_NAV_ON, 0));
+        assertFalse(queue.offer(AdapterProtocol.speedLimit(20)));
+        assertFalse(queue.offer(AdapterProtocol.speedLimit(40)));
+        assertFalse(queue.offer(AdapterProtocol.speedLimit(0)));
 
-        assertEquals(2, queue.size());
-        assertEquals(AdapterProtocol.CMD_NAV_ON, command(queue.poll()));
-        byte[] clear = queue.poll();
-        assertEquals(AdapterProtocol.CMD_SPEED_LIMIT, command(clear));
-        assertEquals(0, clear[6] & 0xff);
+        assertEquals(0, queue.size());
+        assertNull(queue.poll());
     }
 
     @Test
-    public void navigationOffKeepsPositiveSpeedLimitForReconnect() {
+    public void routeEndingWhileOfflineCannotReplayAnOldSpeedLimit() {
         PendingFrameQueue queue = new PendingFrameQueue(80);
 
-        queue.offer(speedLimitFrame(60));
+        queue.offer(frame(0x30, 9));
+        queue.offer(frame(AdapterProtocol.CMD_NAV_ON, 1));
         queue.offer(frame(AdapterProtocol.CMD_MANEUVER, 4));
+        assertFalse(queue.offer(AdapterProtocol.speedLimit(60)));
         queue.offer(frame(AdapterProtocol.CMD_NAV_ON, 0));
 
         assertEquals(2, queue.size());
-        assertEquals(AdapterProtocol.CMD_NAV_ON, command(queue.poll()));
-        byte[] limit = queue.poll();
-        assertEquals(AdapterProtocol.CMD_SPEED_LIMIT, command(limit));
-        assertEquals(60, limit[6] & 0xff);
+        byte[] off = queue.poll();
+        assertEquals(AdapterProtocol.CMD_NAV_ON, command(off));
+        assertEquals(0, off[5] & 0xff);
+        assertEquals(0x30, command(queue.poll()));
+        assertNull(queue.poll());
     }
 
     @Test
-    public void speedLimitRemainsLatestOnlyAcrossRouteInvalidation() {
+    public void speedLimitCannotReenterQueueAfterRouteInvalidation() {
         PendingFrameQueue queue = new PendingFrameQueue(80);
 
-        queue.offer(speedLimitFrame(60));
-        queue.offer(speedLimitFrame(80));
+        assertFalse(queue.offer(AdapterProtocol.speedLimit(60)));
         queue.offer(frame(AdapterProtocol.CMD_MANEUVER, 4));
         queue.invalidateNavigation();
+        assertFalse(queue.offer(AdapterProtocol.speedLimit(80)));
 
-        assertEquals(1, queue.size());
-        byte[] limit = queue.poll();
-        assertEquals(AdapterProtocol.CMD_SPEED_LIMIT, command(limit));
-        assertEquals(80, limit[6] & 0xff);
+        assertEquals(0, queue.size());
+        assertNull(queue.poll());
     }
 
     @Test
@@ -144,11 +144,6 @@ public final class PendingFrameQueueTest {
     private static byte[] frame(int command, int value) {
         return new byte[]{(byte) 0xBB, 0x41, (byte) 0xA1, 7,
                 (byte) command, (byte) value, 0};
-    }
-
-    private static byte[] speedLimitFrame(int value) {
-        return new byte[]{(byte) 0xBB, 0x41, (byte) 0xA1, 8,
-                (byte) AdapterProtocol.CMD_SPEED_LIMIT, 1, (byte) value, 0};
     }
 
     private static int command(byte[] frame) {

@@ -134,8 +134,9 @@ public final class NavigationFeature {
     private int currentSpeedExpiryGeneration;
     private int speedLimitExpiryGeneration;
     private int restoredRouteConfirmationGeneration;
+    // Local presentation cache only; successful serial delivery is tracked separately below.
     private int lastSentSpeedLimit = -1;
-    private long lastSpeedLimitWrittenUsbEpoch = -1L;
+    private final RoadSpeedLimitTxPolicy roadSpeedLimitTx = new RoadSpeedLimitTxPolicy();
     private final ManeuverProgressTracker maneuverProgressTracker =
             new ManeuverProgressTracker();
     private final ManeuverProgressRolloverMarker maneuverProgressRolloverMarker =
@@ -735,7 +736,6 @@ public final class NavigationFeature {
         lastBackgroundResendAt = now;
         expireStaleYandexRoadSpeedLimit(now, "background_resend");
         if (!state.active || state.finishReached) {
-            reassertKnownRoadSpeedLimit("background_" + clean(reason));
             return;
         }
         resetNavigationSendCache();
@@ -758,7 +758,6 @@ public final class NavigationFeature {
         syncRouteStateFromStore();
         if (!state.active || state.finishReached) {
             expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "transport_recovery");
-            reassertKnownRoadSpeedLimit("transport_" + clean(reason));
             AppLog.navigation(app, "NAV_TRANSPORT_RESYNC skipped reason=" + clean(reason)
                     + " active=" + state.active + " finished=" + state.finishReached);
             return;
@@ -911,22 +910,11 @@ public final class NavigationFeature {
             return;
         }
         rememberFinishPoint(destinationLat, destinationLon, "2gis_dashboard");
-        if (!TextUtils.isEmpty(speedLimit)) {
-            if (exceeded) startOverspeedTextWindow();
-            else clearOverspeedTextWindow();
-            state = new NavigationState(state.active, state.finishReached, exceeded,
-                    state.maneuver, state.maneuverText, state.maneuverDistance,
-                    state.routeDistance, state.routeTime, state.arrivalTime,
-                    state.currentStreet, state.nextStreet, state.finishStreet,
-                    speedLimit, state.currentSpeed, "2gis_dashboard",
-                    System.currentTimeMillis());
-            publishNavigationState();
-            sendSpeed(speedLimit);
-        }
         if (!routeMode && !routeData) {
             if (state.source.toLowerCase(Locale.US).contains("2gis") && state.active) {
                 forceInactive("2gis_dashboard_idle");
             }
+            applyDgisRoadSpeedLimit(speedLimit, exceeded, (routeMode || routeData) && !finish);
             return;
         }
         setActive(true, "2gis_dashboard");
@@ -945,6 +933,7 @@ public final class NavigationFeature {
             sendConfiguredText();
             AppLog.line(app, "Navigation 2GIS dashboard route: " + state.summary()
                     + " raw=" + shortRaw("2gis_dashboard", rawJson));
+            applyDgisRoadSpeedLimit(speedLimit, exceeded, (routeMode || routeData) && !finish);
             return;
         }
         String nextStreet = streetCandidate(maneuverDescription, state.nextStreet,
@@ -954,12 +943,14 @@ public final class NavigationFeature {
             sendConfiguredText();
             AppLog.line(app, "Navigation 2GIS dashboard ignored micro in TBT: "
                     + shortRaw("2gis_dashboard", rawJson));
+            applyDgisRoadSpeedLimit(speedLimit, exceeded, (routeMode || routeData) && !finish);
             return;
         }
         if (!micro && laneGuidanceUntil > now && !finish) {
             sendConfiguredText();
             AppLog.line(app, "Navigation 2GIS dashboard held main maneuver during micro: "
                     + state.summary() + " raw=" + shortRaw("2gis_dashboard", rawJson));
+            applyDgisRoadSpeedLimit(speedLimit, exceeded, (routeMode || routeData) && !finish);
             return;
         }
         if (micro) laneGuidanceUntil = now + (AppSettings.navMicroHoldSeconds(app) * 1000L);
@@ -978,9 +969,23 @@ public final class NavigationFeature {
         }
         if (finish) startFinishHold();
         else sendConfiguredText();
+        applyDgisRoadSpeedLimit(speedLimit, exceeded, !finish);
         AppLog.line(app, (micro ? "Navigation 2GIS dashboard micro maneuver: "
                 : "Navigation 2GIS dashboard maneuver: ") + state.summary()
                 + " raw=" + shortRaw("2gis_dashboard", rawJson));
+    }
+
+    private void applyDgisRoadSpeedLimit(String value, boolean exceeded, boolean routeActive) {
+        if (TextUtils.isEmpty(value)) return;
+        if (exceeded) startOverspeedTextWindow();
+        else clearOverspeedTextWindow();
+        state = new NavigationState(state.active, state.finishReached, exceeded,
+                state.maneuver, state.maneuverText, state.maneuverDistance,
+                state.routeDistance, state.routeTime, state.arrivalTime,
+                state.currentStreet, state.nextStreet, state.finishStreet,
+                value, state.currentSpeed, "2gis_dashboard", System.currentTimeMillis());
+        publishNavigationState();
+        if (!AppSettings.navSpeedLimitRouteOnly(app) || routeActive) sendSpeed(value);
     }
 
     public synchronized void handleDgisTrip(String currentRoad, String maneuverRoad,
@@ -1168,13 +1173,11 @@ public final class NavigationFeature {
         publishNavigationState();
         sender.sendActive(active);
         if (!active && reassertRoadSpeedLimit) {
-            reassertKnownRoadSpeedLimit("route_off_" + inactiveReason);
             AppLog.navigation(app, "NAV_SPEED_LIMIT_PRESERVED reason=route_off_"
                     + clean(inactiveReason) + " value=" + clean(state.speedLimit));
         } else if (!active && clearRoadSpeedLimit) {
             lastSentSpeedLimit = 0;
-            sendSpeedLimitFrame(0);
-            AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=route_off_"
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_UNAVAILABLE reason=route_off_"
                     + clean(inactiveReason));
         }
         if (active && !wasActive) {
@@ -1707,13 +1710,11 @@ public final class NavigationFeature {
         publishNavigationState();
         sender.sendActive(false);
         if (preserveRoadContext) {
-            reassertKnownRoadSpeedLimit("force_inactive_" + cleanSource);
             AppLog.navigation(app, "NAV_SPEED_LIMIT_PRESERVED reason=force_inactive_"
                     + cleanSource + " value=" + clean(state.speedLimit));
         } else if (clearRoadSpeedLimit) {
             lastSentSpeedLimit = 0;
-            sendSpeedLimitFrame(0);
-            AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=force_inactive_"
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_UNAVAILABLE reason=force_inactive_"
                     + cleanSource);
         }
         AppLog.line(app, "Navigation forced off: " + cleanSource);
@@ -3569,7 +3570,7 @@ public final class NavigationFeature {
             publishNavigationState();
         }
         if (confirmedRoadLimitClear) {
-            sendRoadSpeedLimitClear("authoritative_zero");
+            forgetRoadSpeedLimit("authoritative_zero");
         } else {
             sendSpeed(acceptedRoadLimit);
         }
@@ -3602,15 +3603,16 @@ public final class NavigationFeature {
         }
         expireStaleYandexCurrentSpeed("snapshot_refresh");
         expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "snapshot_refresh");
-        maybeReassertRoadSpeedLimitForTransport("yandex_snapshot_refresh");
+        if (roadLimitPresent && roadLimitKmh > 0) {
+            sendSpeedLimitFrame(roadLimitKmh);
+        }
         return true;
     }
 
-    /** Checks only transport epoch/expiry; an empty heartbeat must not extend road-data TTL. */
+    /** An empty heartbeat only expires local data; it never sends a sign. */
     public synchronized void observeYandexTransportHeartbeat() {
         expireStaleYandexCurrentSpeed("empty_heartbeat");
         expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "empty_heartbeat");
-        maybeReassertRoadSpeedLimitForTransport("empty_heartbeat");
     }
 
     public synchronized NavigationMotionPolicy.State freshMotionState(int movingThresholdKmh) {
@@ -3751,7 +3753,7 @@ public final class NavigationFeature {
                         state.currentStreet, state.nextStreet, state.finishStreet,
                         "", state.currentSpeed, state.source, now);
                 publishNavigationState();
-                sendRoadSpeedLimitClear("authoritative_zero_debounced");
+                forgetRoadSpeedLimit("authoritative_zero_debounced");
             }
         }, YANDEX_ZERO_SPEED_LIMIT_CONFIRM_MS + 25L);
     }
@@ -3776,7 +3778,7 @@ public final class NavigationFeature {
                 state.currentStreet, state.nextStreet, state.finishStreet,
                 "", state.currentSpeed, state.source, System.currentTimeMillis());
         publishNavigationState();
-        sendRoadSpeedLimitClear("stale_" + clean(reason));
+        forgetRoadSpeedLimit("stale_" + clean(reason));
         AppLog.navigation(app, "NAV_SPEED_LIMIT_EXPIRED"
                 + " value=" + clean(expired)
                 + " reason=" + clean(reason));
@@ -3790,13 +3792,12 @@ public final class NavigationFeature {
                 GPS_CURRENT_SPEED_FALLBACK_MAX_AGE_MS);
     }
 
-    private void sendRoadSpeedLimitClear(String reason) {
+    private void forgetRoadSpeedLimit(String reason) {
         speedLimitTextUntil = 0L;
         clearOverspeedTextWindow();
         if (lastSentSpeedLimit != 0) {
             lastSentSpeedLimit = 0;
-            sendSpeedLimitFrame(0);
-            AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=" + clean(reason));
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_UNAVAILABLE reason=" + clean(reason));
         }
         sendConfiguredText();
     }
@@ -3816,10 +3817,10 @@ public final class NavigationFeature {
         if (changed) {
             lastSentSpeedLimit = kmh;
             speedLimitTextUntil = now + SPEED_LIMIT_TEXT_MS;
-            sendSpeedLimitFrame(kmh);
+        }
+        // Successful delivery owns deduplication, independently of UI/cache resets.
+        if (sendSpeedLimitFrame(kmh) == AdapterTxOutcome.WRITTEN) {
             AppLog.line(app, "Navigation speed limit: " + kmh);
-        } else {
-            maybeReassertRoadSpeedLimitForTransport("same_speed_limit");
         }
         sendConfiguredText();
     }
@@ -4080,6 +4081,7 @@ public final class NavigationFeature {
     }
 
     private void publishNavigationState() {
+        roadSpeedLimitTx.setAllowed(roadSpeedLimitOutputAllowed());
         long now = System.currentTimeMillis();
         if (!NavigationModeSettings.isFinishDirection(app)) {
             boolean droppedFinishDirectionVisual = false;
@@ -6080,9 +6082,7 @@ public final class NavigationFeature {
 
     public synchronized void resendKnownRouteData() {
         expireStaleYandexRoadSpeedLimit(System.currentTimeMillis(), "resend");
-        if (!TextUtils.isEmpty(state.speedLimit)) {
-            sendSpeed(state.speedLimit);
-        }
+        // A cached sign is never replayed by route/background/transport refreshes.
         if (!state.active) return;
         if (!TextUtils.isEmpty(state.routeDistance)) {
             sendEtaIfChanged(distanceValue(state.routeDistance), isKm(state.routeDistance));
@@ -6092,44 +6092,25 @@ public final class NavigationFeature {
         }
     }
 
-    private void reassertKnownRoadSpeedLimit(String reason) {
-        if (expireStaleYandexRoadSpeedLimit(
-                System.currentTimeMillis(), "reassert_" + clean(reason))) {
-            return;
-        }
-        int kmh = speedNumber(state.speedLimit);
-        if (kmh <= 0) return;
-        lastSentSpeedLimit = kmh;
-        sendSpeedLimitFrame(kmh);
-        AppLog.navigation(app, "NAV_SPEED_LIMIT_REASSERT reason=" + clean(reason)
-                + " value=" + kmh);
-    }
-
+    /** The sign is an event: only a fresh positive sample may reach this boundary. */
     private AdapterTxOutcome sendSpeedLimitFrame(int kmh) {
-        AdapterTxOutcome outcome = sender.sendSpeedLimit(Math.max(0, kmh));
-        if (outcome == AdapterTxOutcome.WRITTEN) {
-            lastSpeedLimitWrittenUsbEpoch = AdapterGateway.get(app).connectionEpoch();
-        }
+        int value = Math.max(0, Math.min(255, kmh));
+        boolean allowed = roadSpeedLimitOutputAllowed();
+        if (!roadSpeedLimitTx.shouldSend(value, allowed)) return AdapterTxOutcome.BLOCKED;
+        AdapterTxOutcome outcome = sender.sendSpeedLimit(value);
+        if (outcome == AdapterTxOutcome.WRITTEN) roadSpeedLimitTx.written(value);
         return outcome;
     }
 
-    private void maybeReassertRoadSpeedLimitForTransport(String reason) {
-        if (expireStaleYandexRoadSpeedLimit(
-                System.currentTimeMillis(), "transport_" + clean(reason))) {
-            return;
-        }
-        int kmh = speedNumber(state.speedLimit);
-        AdapterGateway gateway = AdapterGateway.get(app);
-        long connectionEpoch = gateway.connectionEpoch();
-        if (!YandexRoadContextPolicy.shouldReassertTx(
-                kmh, gateway.usbReady(), connectionEpoch,
-                lastSpeedLimitWrittenUsbEpoch)) {
-            return;
-        }
-        AdapterTxOutcome outcome = sendSpeedLimitFrame(kmh);
-        AppLog.navigation(app, "NAV_SPEED_LIMIT_REASSERT reason=" + clean(reason)
-                + " value=" + kmh + " epoch=" + connectionEpoch
-                + " outcome=" + outcome);
+    private boolean roadSpeedLimitOutputAllowed() {
+        return AppSettings.navigationEnabled(app)
+                && (!AppSettings.navSpeedLimitRouteOnly(app)
+                || (state.active && !state.finishReached));
+    }
+
+    /** Applying a mode never replays a stored sign; the next fresh sample uses it. */
+    public synchronized void onSpeedLimitSettingsChanged() {
+        roadSpeedLimitTx.setAllowed(roadSpeedLimitOutputAllowed());
     }
 
     private void sendRouteLoadingVisual() {
@@ -6633,13 +6614,11 @@ public final class NavigationFeature {
                 preserveRoadContext ? state.source : clean(source), now);
         publishNavigationState();
         if (preserveRoadContext) {
-            sendSpeedLimitFrame(speedNumber(retainedSpeedLimit));
             AppLog.navigation(app, "NAV_SPEED_LIMIT_PRESERVED reason=finish_"
                     + clean(source) + " value=" + clean(retainedSpeedLimit));
         } else if (clearRoadSpeedLimit) {
             lastSentSpeedLimit = 0;
-            sendSpeedLimitFrame(0);
-            AppLog.navigation(app, "NAV_SPEED_LIMIT_CLEAR reason=finish_"
+            AppLog.navigation(app, "NAV_SPEED_LIMIT_UNAVAILABLE reason=finish_"
                     + clean(source));
         }
         startFinishHold();

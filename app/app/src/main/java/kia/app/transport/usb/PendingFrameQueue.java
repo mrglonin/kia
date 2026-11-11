@@ -12,8 +12,9 @@ import kia.app.protocol.adapter.AdapterProtocol;
  *
  * <p>Vehicle/media commands retain FIFO ordering. Navigation frames describe current UI state, so
  * replaying every historical distance or maneuver after reconnect is actively harmful. They are
- * coalesced by command id, and navigation-off invalidates every older route frame. The road speed
- * limit is an independent latest-only state and survives route shutdown for replay after reconnect.
+ * coalesced by command id, and navigation-off invalidates every older route frame. Road speed
+ * limits are live observations and are never queued: replay could restore a stale sign or bypass
+ * the current route-only output setting after reconnect.
  */
 final class PendingFrameQueue {
     private final int maxSize;
@@ -44,8 +45,7 @@ final class PendingFrameQueue {
                 AdapterProtocol.CMD_MANEUVER,
                 AdapterProtocol.CMD_ETA,
                 AdapterProtocol.CMD_ETA_TIME,
-                AdapterProtocol.CMD_NAV_TEXT,
-                AdapterProtocol.CMD_SPEED_LIMIT
+                AdapterProtocol.CMD_NAV_TEXT
         };
         for (int command : navigationOrder) {
             Iterator<byte[]> iterator = frames.iterator();
@@ -71,7 +71,7 @@ final class PendingFrameQueue {
         Iterator<byte[]> iterator = frames.iterator();
         while (iterator.hasNext()) {
             byte[] queued = iterator.next();
-            if (isNavigationFrame(queued) && !isSpeedLimitFrame(queued)) {
+            if (isNavigationFrame(queued)) {
                 iterator.remove();
             }
         }
@@ -102,14 +102,11 @@ final class PendingFrameQueue {
                 && (frame[5] & 0xff) == 0;
     }
 
-    static boolean isSpeedLimitFrame(byte[] frame) {
-        return command(frame) == AdapterProtocol.CMD_SPEED_LIMIT;
-    }
-
-    /** Firmware blocks and raw CAN actions have their own acknowledgement/retry owners. */
+    /** Firmware/raw actions own their retries; speed signs require a new live observation. */
     static boolean isReplaySafe(byte[] frame) {
         int command = command(frame);
-        return command != AdapterProtocol.CMD_FIRMWARE
+        return command != AdapterProtocol.CMD_SPEED_LIMIT
+                && command != AdapterProtocol.CMD_FIRMWARE
                 && command != AdapterProtocol.CMD_RAW_CAN_TX;
     }
 
