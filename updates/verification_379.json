@@ -6,7 +6,7 @@
     "version_code": 379,
     "asset_name": "kia_379_sunroof.apk",
     "download_url": "https://github.com/mrglonin/kia/releases/download/v23.25-379/kia_379_sunroof.apk",
-    "sha256": "ee8876221981d427fc80618316cf36155312f860eeffd8e742ba616455843461",
+    "sha256": "f35e5aefed258c3ea218176fa082aae120c3718dbef961f28e4cf47dd78d790a",
     "size": 7752646
   },
   "source_base": "0b6d704ca65b84d0d0e5c54bc0c46dda9795f281",
@@ -27,22 +27,25 @@
     "offline_queue_replay": false,
     "route_only_setting": true,
     "default_route_only": false,
-    "timeout_setting": false
+    "timeout_setting": false,
+    "route_state_resolved_before_speed_sample": true,
+    "unconfirmed_restored_route_blocks_route_only": true
   },
   "validation": {
     "focused_unit_tests": 51,
     "failures": 0,
     "settings_persistence_migration_assertions": 9,
-    "actual_navigation_feature_reflection_scenarios": 11,
+    "actual_navigation_feature_reflection_scenarios": 12,
     "emulator_in_place_upgrade": "378 to 379; install-r successful",
     "physical_head_unit_tested": false,
-    "emulator_installed_apk_sha256": "ee8876221981d427fc80618316cf36155312f860eeffd8e742ba616455843461",
     "emulator_first_install_time_preserved": true,
     "emulator_route_only_persisted_after_restart": true,
     "emulator_default_always_restored": true,
     "emulator_speed_packet": "BB 41 A1 07 44 50 38",
     "emulator_usb_outcome": "BLOCKED (no physical adapter)",
-    "emulator_zero_packet_attempts_after_no_limit": 0
+    "emulator_zero_packet_attempts_after_no_limit": 0,
+    "emulator_installed_apk_sha256": "f35e5aefed258c3ea218176fa082aae120c3718dbef961f28e4cf47dd78d790a",
+    "restored_unconfirmed_route_regression": "Reproduced before fix; blocked after fix"
   },
   "limits": [
     "Receiver interpretation and autonomous sign expiry require confirmation in the vehicle.",

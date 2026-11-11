@@ -16,7 +16,7 @@
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.25-sunroof` / `379` | `updates/kia_379_sunroof.apk`, 7 752 646 байт | `ee8876221981d427fc80618316cf36155312f860eeffd8e742ba616455843461` |
+| KIA app | `23.25-sunroof` / `379` | `updates/kia_379_sunroof.apk`, 7 752 646 байт | `f35e5aefed258c3ea218176fa082aae120c3718dbef961f28e4cf47dd78d790a` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
 
 В `379` нулевые/пустые значения и сохранённые знаки из фоновых повторов не отправляются. Поддерживаются все значения `1–255`, включая `5` и `10`; режим выбирается в настройках навигации. [Отчёт 379](updates/verification_379.json).

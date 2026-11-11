@@ -438,12 +438,6 @@ public final class YandexCoreBridgeClient {
                         + " timestamp=" + timestampElapsed);
                 return snapshotResult(ACTIVE_POLL_MS, false);
             }
-            // The lifecycle callback is still a full, fresh road-context snapshot. Apply its
-            // speed fields before holding the route; otherwise the limit expires while Yandex is
-            // merely moving to background operation.
-            if (freshness <= MAX_ACTIVE_FRESHNESS_MS) {
-                sendSpeedSnapshot(snapshot, freshness);
-            }
             clearPendingManeuverRollover();
             String suspensionIdentity = lower(callback) + "|"
                     + (routePresentKnown ? String.valueOf(routePresent) : "unknown") + "|"
@@ -453,6 +447,10 @@ public final class YandexCoreBridgeClient {
             lastBackgroundSuspensionIdentity = suspensionIdentity;
             NavigationFeature.get(app).onYandexBackgroundGuidanceSuspended(
                     callback, routePresentKnown && routePresent, suspensionTransition);
+            // Resolve route ownership before the sign's route-only gate reads it.
+            if (freshness <= MAX_ACTIVE_FRESHNESS_MS) {
+                sendSpeedSnapshot(snapshot, freshness);
+            }
             if (suspensionTransition) {
                 AppLog.line(app, "Yandex Core Bridge: held route during background suspension"
                         + " callback=" + callback
@@ -494,9 +492,11 @@ public final class YandexCoreBridgeClient {
             resetManeuverDistanceGuard();
         }
         String signature = snapshotSignature(state, snapshot);
-        sendSpeedSnapshot(snapshot, freshness);
+        // Apply the current route state before road-sign TX, including OFF/FINISHED
+        // and the first ACTIVE snapshot. Road context still updates in free drive.
         if (YandexCoreBridgeContract.STATE_OFF.equals(state)
                 && YandexCoreBridgeContract.STATE_OFF.equals(lastState)) {
+            sendSpeedSnapshot(snapshot, freshness);
             lastSignature = signature;
             return snapshotResult(IDLE_POLL_MS, true);
         }
@@ -506,6 +506,7 @@ public final class YandexCoreBridgeClient {
                         .touchYandexCoreBridgeHeartbeat(hasRouteMetrics(snapshot));
                 if (replay) sendActiveSnapshot(freshness, snapshot);
             }
+            sendSpeedSnapshot(snapshot, freshness);
             return snapshotResult(routeLive ? ACTIVE_POLL_MS : IDLE_POLL_MS, true);
         }
         if (YandexCoreBridgeContract.STATE_FINISHED.equals(state)
@@ -523,6 +524,7 @@ public final class YandexCoreBridgeClient {
             } else {
                 sendLoading("finished_unconfirmed", freshness, snapshot);
             }
+            sendSpeedSnapshot(snapshot, freshness);
             return snapshotResult(ACTIVE_POLL_MS, true);
         }
         lastState = state;
@@ -530,18 +532,22 @@ public final class YandexCoreBridgeClient {
 
         if (YandexCoreBridgeContract.STATE_OFF.equals(state)) {
             sendOff("off", freshness, snapshot);
+            sendSpeedSnapshot(snapshot, freshness);
             return snapshotResult(IDLE_POLL_MS, true);
         }
         if (YandexCoreBridgeContract.STATE_FINISHED.equals(state)) {
             sendFinished(freshness, snapshot);
+            sendSpeedSnapshot(snapshot, freshness);
             return snapshotResult(IDLE_POLL_MS, true);
         }
         if (YandexCoreBridgeContract.STATE_LOADING.equals(state)
                 || YandexCoreBridgeContract.STATE_REROUTING.equals(state)) {
             sendLoading(state, freshness, snapshot);
+            sendSpeedSnapshot(snapshot, freshness);
             return snapshotResult(ACTIVE_POLL_MS, true);
         }
         sendActiveSnapshot(freshness, snapshot);
+        sendSpeedSnapshot(snapshot, freshness);
         return snapshotResult(ACTIVE_POLL_MS, true);
     }
 

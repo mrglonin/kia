@@ -6105,7 +6105,7 @@ public final class NavigationFeature {
     private boolean roadSpeedLimitOutputAllowed() {
         return AppSettings.navigationEnabled(app)
                 && (!AppSettings.navSpeedLimitRouteOnly(app)
-                || (state.active && !state.finishReached));
+                || (state.active && !state.finishReached && !restoredRouteAwaitingConfirmation));
     }
 
     /** Applying a mode never replays a stored sign; the next fresh sample uses it. */
