@@ -72,6 +72,7 @@ public final class SettingsTransfer {
             "nav_finish_compass_auto",
             "nav_overspeed_text",
             "nav_speed_limit_route_only",
+            "nav_speed_limit_repeat_enabled",
             "nav_overlay",
             "nav_micro_maneuvers",
             "nav_straight_until_main",

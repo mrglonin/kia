@@ -1,9 +1,11 @@
 package kia.app.navigation.domain;
 
-/** Positive road-sign events, with deduplication based on successful delivery. */
+/** Positive road-sign transitions, with duplicate samples suppressed after successful delivery. */
 public final class RoadSpeedLimitTxPolicy {
     public static final long RETRY_WINDOW_MS = 3000L;
+    private int lastObserved;
     private int lastWritten;
+    private boolean writtenForObservedSign;
     private boolean allowed;
     private boolean firstInScope = true;
     private int pending;
@@ -15,15 +17,22 @@ public final class RoadSpeedLimitTxPolicy {
         if (!allowed) cancelPending();
     }
 
+    /** A changed positive value starts a new sign event, even when an earlier write failed. */
     public boolean shouldSend(int kmh, boolean outputAllowed) {
         setAllowed(outputAllowed);
-        return allowed && kmh > 0 && kmh <= 255
-                && (firstInScope || kmh != lastWritten);
+        if (kmh <= 0 || kmh > 255) return false;
+        if (kmh != lastObserved) {
+            lastObserved = kmh;
+            writtenForObservedSign = false;
+        }
+        return allowed && (firstInScope || !writtenForObservedSign);
     }
 
     public void written(int kmh) {
         if (kmh <= 0 || kmh > 255) return;
         lastWritten = kmh;
+        if (lastObserved == 0) lastObserved = kmh;
+        if (kmh == lastObserved) writtenForObservedSign = true;
         firstInScope = false;
         cancelPending();
     }
@@ -32,6 +41,16 @@ public final class RoadSpeedLimitTxPolicy {
     public boolean acceptFreshSample(int kmh, boolean outputAllowed, long nowElapsed) {
         cancelPending();
         if (!shouldSend(kmh, outputAllowed)) return false;
+        pending = kmh;
+        pendingSince = nowElapsed;
+        return true;
+    }
+
+    /** A scheduled repeat reopens delivery only for the currently observed positive sign. */
+    public boolean beginRepeat(int kmh, boolean outputAllowed, long nowElapsed) {
+        setAllowed(outputAllowed);
+        if (!allowed || kmh <= 0 || kmh > 255 || kmh != lastObserved) return false;
+        writtenForObservedSign = false;
         pending = kmh;
         pendingSince = nowElapsed;
         return true;
@@ -50,5 +69,13 @@ public final class RoadSpeedLimitTxPolicy {
     public void cancelPending() {
         pending = 0;
         pendingSince = 0L;
+    }
+
+    public int lastObservedValue() {
+        return lastObserved;
+    }
+
+    public int lastWrittenValue() {
+        return lastWritten;
     }
 }

@@ -1,0 +1,70 @@
+{
+  "created_utc": "2026-11-12T05:04:05.536338+00:00",
+  "status": "VERIFIED_SOFTWARE_PHYSICAL_CLUSTER_ACCEPTANCE_PENDING",
+  "artifact": {
+    "version_name": "23.27-sunroof",
+    "version_code": 381,
+    "asset_name": "kia_381_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.27-381/kia_381_sunroof.apk",
+    "sha256": "662038f7531bcb4aa4d4eb7295a40af35db184ea088c4cbdeb5c0e44380e7ca2",
+    "size": 7756742
+  },
+  "source_base": "1a3c1b9464b25e18dd90a42340afacc5b13210b0",
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "build": {
+    "method": "All current Java/resources compiled using Android SDK tools; complete existing external DEX and Kotlin metadata preserved",
+    "gradle_and_lint_completed": false,
+    "signature_and_zipalign_verified": true,
+    "dependency_classes_preserved": 1025,
+    "kotlin_builtins_preserved": 7
+  },
+  "behavior": {
+    "wire_format": "BB 41 A1 07 44 SPEED SUM",
+    "deduplication": "current observed positive sign event",
+    "return_60_after_failed_40_is_new_event": true,
+    "periodic_repeat_checkbox": true,
+    "periodic_repeat_default": false,
+    "periodic_repeat_interval_ms": 15000,
+    "positive_source_freshness_ms": 12000,
+    "new_value_sent_immediately": true,
+    "same_value_fresh_samples_do_not_postpone_repeat": true,
+    "missing_or_zero_cancels_repeats": true,
+    "zero_frames_sent": false,
+    "failed_write_retry_interval_ms": 250,
+    "failed_write_retry_window_ms": 3000,
+    "checkbox_persisted_and_exported": true,
+    "settings_schema": 54
+  },
+  "validation": {
+    "focused_unit_tests": 76,
+    "settings_unit_tests": 12,
+    "settings_migration_persistence_assertions": 13,
+    "failures": 0,
+    "380_return_bug_reproduced_on_installed_apk": true,
+    "independent_code_review": "No blockers found",
+    "physical_head_unit_tested": false,
+    "installed_runtime_checks": 49,
+    "installed_runtime_checks_breakdown": [
+      30,
+      13,
+      6
+    ],
+    "return_bug_fixed_with_repeat_off": true,
+    "default_repeat_false_with_absent_preference": true,
+    "periodic_intervals_measured_ms": [
+      15000,
+      15001
+    ],
+    "active_timer_cancelled_by_checkbox_off": true,
+    "checkbox_visible_and_on_off_survive_restart": true,
+    "emulator_upgrade": "380 to 381; adb install -r",
+    "installed_apk_sha256": "662038f7531bcb4aa4d4eb7295a40af35db184ea088c4cbdeb5c0e44380e7ca2",
+    "fixtures_removed": true,
+    "final_repeat_setting_off": true,
+    "emulator_stopped": true
+  },
+  "limits": [
+    "USB port in runtime checks is replaced by an in-memory receiver; physical vehicle acceptance remains unverified.",
+    "A completed serial write is not an acknowledgement from the instrument cluster."
+  ]
+}

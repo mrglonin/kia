@@ -13,7 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 
 public final class SettingsTransferTest {
-    private static final int CURRENT_SCHEMA = 53;
+    private static final int CURRENT_SCHEMA = 54;
 
     @Test
     public void speedLimitModeTransfersBothChoicesAndRequiresBoolean() {
@@ -26,6 +26,22 @@ public final class SettingsTransferTest {
         }
         assertInvalidAppValue("nav_speed_limit_route_only", "true");
         assertInvalidAppValue("nav_speed_limit_route_only", 1);
+    }
+
+    @Test
+    public void speedLimitRepeatTransfersIndependentlyFromRouteModeAndRequiresBoolean() {
+        for (boolean routeOnly : new boolean[]{false, true}) {
+            for (boolean repeatEnabled : new boolean[]{false, true}) {
+                Map<String, Object> app = new LinkedHashMap<>();
+                app.put("nav_speed_limit_route_only", routeOnly);
+                app.put("nav_speed_limit_repeat_enabled", repeatEnabled);
+                SettingsTransfer.ValidatedImport result = SettingsTransfer.validatePreferenceMaps(
+                        files(app, null), CURRENT_SCHEMA);
+                assertEquals(app, result.files.get("Kia"));
+            }
+        }
+        assertInvalidAppValue("nav_speed_limit_repeat_enabled", "true");
+        assertInvalidAppValue("nav_speed_limit_repeat_enabled", 1);
     }
 
     @Test

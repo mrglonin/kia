@@ -3927,7 +3927,7 @@ public final class MainActivity extends Activity {
                 AppSettings.navFinishCompassAuto(this), this::toggleFinishCompassAuto);
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "Ограничение скорости в приборке",
-                "Передаётся только известный лимит, один раз при изменении. Пустые значения не отправляются.");
+                "Передаётся известный лимит при изменении. Пустые значения не отправляются.");
         boolean speedLimitRouteOnly = AppSettings.navSpeedLimitRouteOnly(this);
         addActionGridColumns(panel, 1,
                 action("Только при активном маршруте", "во время ведения по маршруту",
@@ -3936,6 +3936,10 @@ public final class MainActivity extends Activity {
                 action("Всегда, когда известен лимит", "в том числе без активного маршрута",
                         choiceColor(!speedLimitRouteOnly), !speedLimitRouteOnly,
                         () -> setNavSpeedLimitRouteOnly(false)));
+        addInlineSwitch(panel, "Повторять ограничение каждые 15 секунд",
+                "Периодически отправлять известный лимит в приборку",
+                AppSettings.navSpeedLimitRepeatEnabled(this),
+                (button, checked) -> setNavSpeedLimitRepeatEnabled(checked));
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "1. Настройки основной навигации",
                 normalMode ? "манёвр маршрута, серая дорога и текстовые строки"
@@ -5407,6 +5411,13 @@ public final class MainActivity extends Activity {
         AppSettings.setNavSpeedLimitRouteOnly(this, routeOnly);
         NavigationFeature.get(this).onSpeedLimitSettingsChanged();
         renderTab();
+        refresh();
+    }
+
+    private void setNavSpeedLimitRepeatEnabled(boolean enabled) {
+        if (AppSettings.navSpeedLimitRepeatEnabled(this) == enabled) return;
+        AppSettings.setNavSpeedLimitRepeatEnabled(this, enabled);
+        NavigationFeature.get(this).onSpeedLimitSettingsChanged();
         refresh();
     }
 

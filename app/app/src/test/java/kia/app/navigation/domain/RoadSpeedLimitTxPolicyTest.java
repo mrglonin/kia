@@ -96,15 +96,97 @@ public final class RoadSpeedLimitTxPolicyTest {
     }
 
     @Test
-    public void newestSampleReplacesPendingAndReturnToWrittenValueCancelsIt() {
+    public void newestSampleReplacesPendingIncludingReturnToAnEarlierWrittenValue() {
         RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
         assertTrue(policy.acceptFreshSample(40, true, 1000L));
         policy.written(40);
         assertTrue(policy.acceptFreshSample(60, true, 1100L));
         assertTrue(policy.acceptFreshSample(80, true, 1200L));
         assertEquals(80, policy.pendingValue(1300L, true));
-        assertFalse(policy.acceptFreshSample(40, true, 1400L));
-        assertEquals(0, policy.pendingValue(1500L, true));
+        assertTrue(policy.acceptFreshSample(40, true, 1400L));
+        assertEquals(40, policy.pendingValue(1500L, true));
+        policy.written(40);
+        assertFalse(policy.acceptFreshSample(40, true, 1600L));
+    }
+
+    @Test
+    public void returnToSixtyAfterFailedFortyIsANewSignEvent() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertTrue(policy.acceptFreshSample(60, true, 1000L));
+        policy.written(60);
+        assertFalse(policy.acceptFreshSample(60, true, 1100L));
+        assertTrue(policy.acceptFreshSample(40, true, 1200L));
+        // The USB result was BLOCKED; the receiver's actual state is unknown.
+        assertEquals(40, policy.pendingValue(1300L, true));
+        assertTrue(policy.acceptFreshSample(60, true, 1400L));
+        assertEquals(60, policy.pendingValue(1500L, true));
+        policy.written(60);
+        assertEquals(0, policy.pendingValue(1600L, true));
+        assertFalse(policy.acceptFreshSample(60, true, 1700L));
+    }
+
+    @Test
+    public void missingDataPreservesTheLastObservedPositiveTransition() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertTrue(policy.acceptFreshSample(60, true, 1000L));
+        policy.written(60);
+        assertFalse(policy.acceptFreshSample(0, true, 1100L));
+        assertFalse(policy.acceptFreshSample(-1, true, 1200L));
+        assertFalse(policy.acceptFreshSample(60, true, 1300L));
+
+        assertTrue(policy.acceptFreshSample(40, true, 1400L));
+        assertFalse(policy.acceptFreshSample(0, true, 1500L));
+        assertFalse(policy.acceptFreshSample(-1, true, 1600L));
+        assertEquals(0, policy.pendingValue(1700L, true));
+        assertTrue(policy.acceptFreshSample(60, true, 1800L));
+        assertEquals(60, policy.pendingValue(1900L, true));
+        policy.written(60);
+        assertFalse(policy.acceptFreshSample(60, true, 2000L));
+    }
+
+    @Test
+    public void scheduledRepeatReopensWrittenSignAndSuccessRestoresFreshSampleDeduplication() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertTrue(policy.acceptFreshSample(60, true, 1000L));
+        policy.written(60);
+        assertFalse(policy.acceptFreshSample(60, true, 1500L));
+        assertTrue(policy.beginRepeat(60, true, 16000L));
+        assertEquals(60, policy.pendingValue(16250L, true));
+        assertEquals(60, policy.lastObservedValue());
+        assertEquals(60, policy.lastWrittenValue());
+        policy.written(60);
+        assertEquals(0, policy.pendingValue(16500L, true));
+        assertFalse(policy.acceptFreshSample(60, true, 17000L));
+    }
+
+    @Test
+    public void failedScheduledRepeatRemainsRetryableWhenTheSameFreshSampleArrives() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertTrue(policy.acceptFreshSample(60, true, 1000L));
+        policy.written(60);
+        assertTrue(policy.beginRepeat(60, true, 16000L));
+        assertEquals(60, policy.pendingValue(16250L, true));
+        assertTrue(policy.acceptFreshSample(60, true, 16500L));
+        assertEquals(60, policy.pendingValue(16750L, true));
+        policy.written(60);
+        assertFalse(policy.acceptFreshSample(60, true, 17000L));
+    }
+
+    @Test
+    public void scheduledRepeatRequiresTheKnownCurrentSignAndDoesNotExtendItByPolling() {
+        RoadSpeedLimitTxPolicy policy = new RoadSpeedLimitTxPolicy();
+        assertFalse(policy.beginRepeat(60, true, 1000L));
+        assertEquals(0, policy.lastObservedValue());
+        assertTrue(policy.acceptFreshSample(40, true, 2000L));
+        assertFalse(policy.beginRepeat(60, true, 2100L));
+        assertEquals(40, policy.pendingValue(2200L, true));
+        policy.written(40);
+        assertFalse(policy.beginRepeat(0, true, 2300L));
+        assertTrue(policy.beginRepeat(40, true, 17000L));
+        assertEquals(40, policy.pendingValue(19999L, true));
+        assertEquals(0, policy.pendingValue(20000L, true));
+        assertFalse(policy.beginRepeat(40, false, 21000L));
+        assertEquals(0, policy.pendingValue(21250L, false));
     }
 
     @Test
