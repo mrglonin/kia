@@ -1,0 +1,41 @@
+{
+  "created_utc": "2026-11-24T08:57:49.090281+00:00",
+  "artifact": {
+    "version_name": "23.33-sunroof",
+    "version_code": 387,
+    "asset_name": "kia_387_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.33-387/kia_387_sunroof.apk",
+    "sha256": "b9c0d959f3abe0a4776aef37024e16807f99852d81ec74a3019b02dc469f995b",
+    "size": 8659592
+  },
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "source_base": "f6229656fd1c6e644ce5e35d7c8e6b8107cc7f74",
+  "build": {
+    "variant": "release",
+    "jdk": 17,
+    "kotlin": "2.3.21",
+    "zipalign": true,
+    "zip_crc": true,
+    "signature_matches_384": true
+  },
+  "validation": {
+    "release_unit_tests": {
+      "tests": 519,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "lint_errors": 0,
+    "lint_warnings": 108,
+    "runtime_kotlin_sources": 158,
+    "exposed_jvm_contracts": {
+      "classes": 220,
+      "members": 1771,
+      "compile_time_constants": 225,
+      "failures": 0
+    },
+    "physical_car_tested": false,
+    "emulator": "Android release update with retained settings and UI checks. Navigation and ADAS checked with and without a simulated TEYES service.",
+    "sunroof_preview": "The Android renderer and RoofSlide were sampled at 30 fps for four seconds, including opening, closing and intermediate positions."
+  }
+}
