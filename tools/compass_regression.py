@@ -15,6 +15,8 @@ Android orientation/geomagnetic calculations and peripheral services are fixture
 boundaries; these checks do not establish physical compass accuracy or USB output.
 """
 
+from fixture_compiler import compile_sources, sources as resolve_sources
+
 import argparse
 import hashlib
 import json
@@ -535,6 +537,7 @@ def main():
         "CompassMonitor.java", "CompassLocationPolicy.java", "CompassTxPolicy.java")]
     tests = [test_dir / name for name in (
         "CompassLocationPolicyTest.java", "CompassTxPolicyTest.java")]
+    production, tests = resolve_sources(production), resolve_sources(tests)
     missing = [str(path) for path in production + tests if not path.is_file()]
     if missing:
         raise SystemExit("Required source files missing: " + ", ".join(missing))
@@ -548,9 +551,7 @@ def main():
         fixture.write_text(content.lstrip("\n"), encoding="utf-8")
         fixture_files.append(fixture)
     classpath = os.pathsep.join(map(str, (classes, junit, hamcrest)))
-    command = [javac, "-encoding", "UTF-8", "-cp", classpath, "-d", str(classes)]
-    command.extend(str(path) for path in fixture_files + production + tests)
-    compiled = subprocess.run(command, text=True, capture_output=True)
+    compiled, classpath = compile_sources(source, java, javac, classes, fixture_files + production + tests, classpath)
     compile_log = compiled.stdout + compiled.stderr
     (output / "compile.txt").write_text(compile_log, encoding="utf-8")
     if compiled.returncode:

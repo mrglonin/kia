@@ -16,6 +16,9 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from fixture_compiler import compile_sources, sources as resolve_sources
+
 FIXTURES = {'android/os/Build.java': 'package android.os; public class Build {public static class VERSION '
                           '{public static int SDK_INT=33;}}',
  'android/os/Looper.java': 'package android.os; public class Looper {private static final Looper '
@@ -344,6 +347,7 @@ def main():
     tests = [source / "app/app/src/test/java/kia/app/tpms" / name for name in (
         "TpmsWarningPolicyTest.java", "TpmsAlertLifecycleTest.java",
     )]
+    production, tests = resolve_sources(production), resolve_sources(tests)
     for path in production + tests:
         existing_file(path, "Source file")
     fixtures, classes = output / "fixture-src", output / "classes"
@@ -355,9 +359,8 @@ def main():
         path.write_text(content + "\n", encoding="utf-8")
         fixture_files.append(path)
     classpath = os.pathsep.join(map(str, (classes, android, junit, hamcrest)))
-    command = [str(javac), "--release", "17", "-cp", classpath, "-d", str(classes)]
-    compiled = subprocess.run(command + list(map(str, fixture_files + production + tests)),
-                              text=True, capture_output=True)
+    compiled, classpath = compile_sources(source, java, javac, classes,
+                                          fixture_files + production + tests, classpath)
     (output / "compile.txt").write_text(compiled.stdout + compiled.stderr, encoding="utf-8")
     if compiled.returncode:
         print(compiled.stdout + compiled.stderr, end="")

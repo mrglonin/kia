@@ -6,6 +6,8 @@ No vendor classes exist in the test classpath. The service fixture speaks the re
 Binder wire contract and verifies lookup, delivery, retries, death and stop guards.
 They cannot establish native API permission, physical ACC timing or panel-key routing.
 """
+from fixture_compiler import compile_sources, sources as resolve_sources
+
 import argparse
 import hashlib
 import json
@@ -340,16 +342,16 @@ def main():
         path.write_text(contents)
     production = [source / "app/app/src/main/java/kia/app/sunroof" / name
                   for name in ("TeyesSunroofObserver.java", "TeyesSunroofSignals.java")]
+    production = resolve_sources(production)
     binder_source = source / "app/app/src/main/java/kia/app/sunroof/TeyesSunroofBinder.java"
-    if binder_source.is_file():
-        production.append(binder_source)
-    invocation = [commands["javac"], "-encoding", "UTF-8", "-d", str(classes)]
-    invocation += [str(path) for path in sorted(fixture_root.rglob("*.java"))] + list(map(str, production))
-    compile_run = subprocess.run(invocation, text=True, capture_output=True)
+    if binder_source.is_file() or binder_source.with_suffix(".kt").is_file():
+        production.extend(resolve_sources([binder_source]))
+    compile_run, cp = compile_sources(source, commands["java"], commands["javac"], classes,
+                                      sorted(fixture_root.rglob("*.java")) + production, str(classes))
     (output / "compile.log").write_text(compile_run.stdout + compile_run.stderr)
     if compile_run.returncode:
         raise SystemExit(compile_run.stderr)
-    test_run = subprocess.run([commands["java"], "-cp", str(classes), "kia.app.sunroof.TeyesObserverRegression"],
+    test_run = subprocess.run([commands["java"], "-cp", cp, "kia.app.sunroof.TeyesObserverRegression"],
                               text=True, capture_output=True)
     (output / "regression.log").write_text(test_run.stdout + test_run.stderr)
     receipt = {"source": str(source), "returncode": test_run.returncode,

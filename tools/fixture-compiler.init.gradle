@@ -1,0 +1,10 @@
+allprojects {
+    plugins.withId("org.jetbrains.kotlin.android") {
+        tasks.register("fixtureCompilerClasspath") {
+            doLast {
+                def compiler = configurations.getByName("kotlinCompilerClasspath")
+                println "FIXTURE_COMPILER=" + compiler.files.join(File.pathSeparator)
+            }
+        }
+    }
+}

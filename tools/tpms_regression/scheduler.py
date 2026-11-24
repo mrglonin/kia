@@ -2,6 +2,10 @@
 """Verify actual TPMS controller scheduling, lifecycle and monotonic state with deterministic boundaries."""
 from pathlib import Path
 import argparse, hashlib, json, os, shutil, subprocess, tempfile
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from fixture_compiler import compile_sources, sources as resolve_sources
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source',type=Path,default=Path(__file__).resolve().parents[2])
@@ -248,8 +252,9 @@ test_files=[test/(n.replace('.','/')+'.java') for n in test_names]
 junit=jar(args.junit,'modules-2/files-2.1/junit/junit/4.13.2/*/junit-4.13.2.jar')
 hamcrest=jar(args.hamcrest,'modules-2/files-2.1/org.hamcrest/hamcrest-core/1.3/*/hamcrest-core-1.3.jar')
 classpath=os.pathsep.join(map(str,[CLASSES,junit,hamcrest]))
+production,test_files=resolve_sources(production),resolve_sources(test_files)
 hashes={str(p.relative_to(SOURCE)):hashlib.sha256(p.read_bytes()).hexdigest() for p in production}
-compiled=subprocess.run([java_tool('javac'),'-encoding','UTF-8','-cp',classpath,'-d',str(CLASSES)]+[str(p) for p in FIXTURES.rglob('*.java')]+[str(p) for p in production+test_files],text=True,capture_output=True)
+compiled,classpath=compile_sources(SOURCE,java_tool('java'),java_tool('javac'),CLASSES,list(FIXTURES.rglob('*.java'))+production+test_files,classpath)
 (BASE/'compile.txt').write_text(compiled.stdout+compiled.stderr)
 if compiled.returncode:print(compiled.stdout+compiled.stderr);raise SystemExit(compiled.returncode)
 results=[];runs=[]

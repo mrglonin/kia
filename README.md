@@ -32,7 +32,7 @@ Android-приложение для магнитол TEYES CC4 и CC4 Pro в Kia
 
 ## Разработка
 
-Проект Android Gradle находится в `app/`, пакет приложения — `kia.app`. В сборке используются Java и Kotlin, JDK 17, Android SDK Platform 36 и Build Tools 37.0.0. Сборка запускается штатным Gradle Wrapper.
+Проект Android Gradle находится в `app/`, пакет приложения — `kia.app`. Код Android-приложения написан на Kotlin. Тесты на Java и Kotlin проверяют в том числе совместимость с прежними Java-вызовами. Для сборки нужны JDK 17, Android SDK Platform 36 и Build Tools 37.0.0. Сборка запускается штатным Gradle Wrapper. Скрипты Python в `tools/` используются на компьютере для проверок и диагностики.
 
 ```sh
 cd app

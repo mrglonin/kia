@@ -8,6 +8,12 @@ import os
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from fixture_compiler import compile_sources, sources as resolve_sources
+
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--source', type=Path, default=Path(__file__).resolve().parents[2],
@@ -202,7 +208,8 @@ tests = [testroot/p for p in ['protocol/adapter/AdapterInfoDiscoveryPolicyTest.j
 junit = test_jar(args.junit, 'modules-2/files-2.1/junit/junit/*/*/junit-4*.jar', '--junit')
 hamcrest = test_jar(args.hamcrest, 'modules-2/files-2.1/org.hamcrest/hamcrest-core/*/*/hamcrest-core-*.jar', '--hamcrest')
 cp = os.pathsep.join(map(str, [classes, junit, hamcrest]))
-result = subprocess.run([JAVAC, '-cp', cp, '-d', str(classes), *map(str, sources+tests), *map(str, fixture_root.rglob('*.java'))], capture_output=True, text=True)
+sources, tests = resolve_sources(sources), resolve_sources(tests)
+result, cp = compile_sources(ROOT, JAVA, JAVAC, classes, sources + tests + list(fixture_root.rglob('*.java')), cp)
 (OUT/'compile.log').write_text(result.stdout+result.stderr)
 if result.returncode:
     raise SystemExit(result.stderr)

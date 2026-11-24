@@ -6,6 +6,8 @@ Android display/window/input/clock, native ACC and USB readiness are explicit fi
 No ADB, physical device, Gradle, network or changes to app settings are used.
 """
 from pathlib import Path
+from fixture_compiler import compile_sources, sources as resolve_sources
+
 import argparse
 import hashlib
 import json
@@ -553,10 +555,11 @@ def main():
         'sunroof/SunroofOverlayController.java','sunroof/SunroofAlertPolicy.java',
         'sunroof/SunroofOverlayGeometry.java','sunroof/SunroofStateMemory.java','protocol/adapter/FrameRouter.java',
         'core/model/VehicleState.java','core/model/AdapterState.java','core/model/RctaState.java']]
-    r=subprocess.run([commands['javac'],'-encoding','UTF-8','-d',str(classes),*map(str,paths+prod)],capture_output=True,text=True)
+    prod=resolve_sources(prod)
+    r,cp=compile_sources(root,commands['java'],commands['javac'],classes,paths+prod,str(classes))
     (out/'compile.log').write_text(r.stdout+r.stderr)
     if r.returncode:raise SystemExit(r.stderr)
-    r=subprocess.run([commands['java'],'-cp',str(classes),'kia.app.sunroof.ControllerBackgroundProof'],capture_output=True,text=True)
+    r=subprocess.run([commands['java'],'-cp',cp,'kia.app.sunroof.ControllerBackgroundProof'],capture_output=True,text=True)
     (out/'regression.log').write_text(r.stdout+r.stderr)
     (out/'receipt.json').write_text(json.dumps({'returncode':r.returncode,'source':str(root),
       'production_sha256':{str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in prod},

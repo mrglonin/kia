@@ -5,6 +5,8 @@ Only fixtures and compiled classes are written to the chosen output directory. N
 APK, application source or persisted production preferences are modified. Negative controls
 alter temporary FrameRouter copies, never the source tree.
 """
+from fixture_compiler import compile_sources, sources as resolve_sources
+
 import argparse
 import hashlib
 import json
@@ -160,6 +162,7 @@ def main():
         'protocol/adapter/FrameRouter.java', 'sunroof/SunroofStateMemory.java',
         'sunroof/SunroofAlertPolicy.java', 'sunroof/SunroofOverlayGeometry.java',
         'core/model/VehicleState.java', 'core/model/AdapterState.java', 'core/model/RctaState.java']]
+    production = resolve_sources(production)
     router = production[0]
     router_source = router.read_text()
     fence = '''        if (connectionEpoch < lastSunroofEpoch
@@ -179,16 +182,15 @@ def main():
             paths.append(path)
         sources = list(production)
         if replacement is not None:
-            temporary_router = directory / 'production-control/kia/app/protocol/adapter/FrameRouter.java'
+            temporary_router = directory / 'production-control/kia/app/protocol/adapter' / router.name
             temporary_router.parent.mkdir(parents=True, exist_ok=True)
             temporary_router.write_text(replacement)
             sources[0] = temporary_router
-        result = subprocess.run([commands['javac'], '-encoding', 'UTF-8', '-d', str(classes),
-                                 *map(str, paths + sources)], capture_output=True, text=True)
+        result, cp = compile_sources(root, commands['java'], commands['javac'], classes, paths + sources, str(classes))
         (directory / 'compile.log').write_text(result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError(name + ' failed to compile: ' + result.stderr)
-        result = subprocess.run([commands['java'], '-cp', str(classes), 'kia.app.sunroof.RouterOrderProof'],
+        result = subprocess.run([commands['java'], '-cp', cp, 'kia.app.sunroof.RouterOrderProof'],
                                 capture_output=True, text=True)
         (directory / 'regression.log').write_text(result.stdout + result.stderr)
         return result
@@ -200,10 +202,25 @@ def main():
     controls = []
     if not args.skip_negative_controls:
         signature = 'private synchronized boolean handleSunroof('
+        unlocked = 'private boolean handleSunroof('
+        if router.suffix == '.kt':
+            import re
+            signature_match = re.search(r'@(kotlin\.jvm\.)?Synchronized\s+private\s+fun\s+handleSunroof\s*\(', router_source)
+            fence_match = re.search(
+                r'if\s*\(\s*connectionEpoch\s*<\s*lastSunroofEpoch\s*\|\|\s*'
+                r'\(\s*connectionEpoch\s*==\s*lastSunroofEpoch\s*&&\s*'
+                r'receivedElapsed\s*<\s*lastSunroofReceivedElapsed\s*\)\s*\)\s*'
+                r'(?:\{\s*return\s+true\s*\}|return\s+true\b)',
+                router_source,
+            )
+            if not signature_match or not fence_match:
+                parser.error('Kotlin synchronization/watermark changed; review negative controls.')
+            signature, unlocked = signature_match.group(), 'private fun handleSunroof('
+            fence = fence_match.group()
         if signature not in router_source or fence not in router_source:
             parser.error('Current production synchronization/watermark shape changed; negative controls need explicit review.')
         variants = [
-            ('without-serialization', router_source.replace(signature, 'private boolean handleSunroof(', 1),
+            ('without-serialization', router_source.replace(signature, unlocked, 1),
              'CONCURRENT_OLD_READER_OVERWROTE_NEWER_CLOSE_CACHE'),
             ('without-watermark', router_source.replace(fence, '', 1),
              'OLD_EPOCH_AFTER_CLEAR_OVERWROTE_CLOSED_CACHE'),

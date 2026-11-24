@@ -2,6 +2,7 @@ package kia.app.tpms
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
@@ -56,48 +57,57 @@ internal class RoofSlide(initialOpen: Boolean?) {
 }
 
 /** Body and glass share the original render's 1024 × 1536 coordinate system. */
-internal class DashboardSunroof(private val body: Bitmap) {
+internal class DashboardSunroof(private val body: Bitmap, private val seats: Bitmap?) {
     private val bodyBounds = RectF(0f, 0f, 1024f, 1536f)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val pane = RectF(352f, 425f, 674f, 634f)
-    private val travel = 241f
+    // Coordinates are in the original rendering. Shorten just the opening and
+    // extend the rear glass into the space it frees. The factory seal stays in the image.
+    private val frontTop = 384f
+    private val originalDivider = 666f
+    private val openingHeight = .70f
+    private val divider = frontTop + (originalDivider - frontTop) * openingHeight
+    private val front = RectF(295f, frontTop, 732f, divider)
+    private val rear = RectF(front.left, divider, front.right, 888f)
+    private val frontSource = sourceRect(front.left, frontTop, front.right, originalDivider)
+    private val seatSource = seats?.let {
+        Rect((it.width * .337f).roundToInt(), (it.height * .59f).roundToInt(),
+            (it.width * .674f).roundToInt(), (it.height * .793f).roundToInt())
+    }
+    private val panorama = RectF(288f, 355f, 737f, 889f)
+    private val panoramaShape = Path().apply {
+        moveTo(288f, 390f)
+        cubicTo(313f, 346f, 707f, 346f, 737f, 390f)
+        lineTo(733f, 889f)
+        quadTo(512f, 875f, 292f, 889f)
+        close()
+    }
     private val paneShape = Path().apply {
-        // The two shallow bows follow the cross-members, level across the centreline.
-        moveTo(352f, 447f)
-        quadTo(352f, 429f, 371f, 427f)
-        quadTo(513f, 423f, 655f, 427f)
-        quadTo(674f, 429f, 674f, 447f)
-        lineTo(674f, 617f)
-        quadTo(674f, 632f, 658f, 632f)
-        quadTo(513f, 634f, 368f, 632f)
-        quadTo(352f, 632f, 352f, 617f)
+        // Inner edge of the rubber seal in the user's 480 × 530 roof reference.
+        moveTo(319f, 441f)
+        cubicTo(319f, 414f, 326f, 404f, 350f, 402f)
+        cubicTo(424f, 397f, 604f, 397f, 665f, 402f)
+        cubicTo(691f, 403f, 700f, 412f, 701f, 438f)
+        lineTo(703f, 630f)
+        quadTo(703f, 649f, 687f, 651f)
+        lineTo(337f, 651f)
+        quadTo(321f, 651f, 321f, 633f)
         close()
+        transform(Matrix().apply { setScale(1f, openingHeight, 0f, frontTop) })
     }
-    private val surround = Path().apply {
-        fillType = Path.FillType.EVEN_ODD
-        moveTo(315f, 440f)
-        quadTo(315f, 398f, 357f, 396f)
-        quadTo(512f, 392f, 670f, 396f)
-        quadTo(710f, 398f, 710f, 440f)
-        lineTo(710f, 628f)
-        quadTo(710f, 655f, 683f, 655f)
-        lineTo(342f, 655f)
-        quadTo(315f, 655f, 315f, 628f)
-        close()
-        addPath(paneShape)
-    }
-    private val surroundFinish = LinearGradient(315f, 415f, 708f, 605f,
-        intArrayOf(0xff2b3033.toInt(), 0xff1b1f22.toInt(), 0xff21272b.toInt(),
-            0xff31373b.toInt(), 0xff202528.toInt()),
-        floatArrayOf(0f, .28f, .55f, .78f, 1f), Shader.TileMode.CLAMP)
+    private val pane = RectF().also { paneShape.computeBounds(it, true) }
+    private val travel = divider + 4f - pane.top
+    private fun sourceRect(left: Float, top: Float, right: Float, bottom: Float) = Rect(
+        (left * body.width / 1024f).roundToInt(),
+        (top * body.height / 1536f).roundToInt(),
+        (right * body.width / 1024f).roundToInt(),
+        (bottom * body.height / 1536f).roundToInt())
 
-    // Sample the same section of rear glass that the movable pane parks above.
-    // Its original reflection remains continuous across the sheet and at the parked edges.
-    private val glassSource = Rect(
-        (pane.left * body.width / 1024f).roundToInt(),
-        ((pane.top + travel) * body.height / 1536f).roundToInt(),
-        (pane.right * body.width / 1024f).roundToInt(),
-        ((pane.bottom + travel) * body.height / 1536f).roundToInt())
+    private val reflection = sourceRect(301f, 670f, 725f, 879f)
+    private val skyReflection = LinearGradient(
+        pane.left + 35f, pane.top, pane.right - 40f, pane.bottom,
+        intArrayOf(0x15224355, 0x0e365468, 0x294c7083, 0x38bfd4df,
+            0x153b6076, 0x0a223747),
+        floatArrayOf(0f, .34f, .43f, .49f, .60f, 1f), Shader.TileMode.CLAMP)
 
     fun draw(canvas: Canvas, cx: Float, cy: Float, maxWidth: Float, maxHeight: Float,
              open: Float) {
@@ -109,35 +119,36 @@ internal class DashboardSunroof(private val body: Bitmap) {
         paint.color = -1
         paint.style = Paint.Style.FILL
         canvas.drawBitmap(body, null, bodyBounds, paint)
-        paint.shader = surroundFinish
-        canvas.drawPath(surround, paint)
-        paint.shader = null
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 5f
-        paint.color = 0xff0c1012.toInt()
-        canvas.drawPath(paneShape, paint)
-        paint.style = Paint.Style.FILL
+        canvas.clipPath(panoramaShape)
+        canvas.drawBitmap(body, frontSource, front, paint)
+        if (seats != null && seatSource != null) canvas.drawBitmap(seats, seatSource, rear, paint)
 
+        // Both roof sections transmit the cabin below the same uninterrupted reflection.
+        paint.alpha = 222
+        canvas.drawBitmap(body, reflection, panorama, paint)
         val position = open.coerceIn(0f, 1f)
-        paint.color = SunroofGlass.apertureHighlight(position, 1f)
-        canvas.drawPath(paneShape, paint)
-        canvas.translate(0f, travel * position)
+        if (position > 0f) {
+            val travelY = travel * position
+            val edge = (position * 12f).coerceAtMost(1f)
+            val opening = canvas.save()
+            canvas.clipRect(front.left, front.top, front.right, pane.top + travelY)
+            paint.alpha = (255f * edge).roundToInt()
+            canvas.drawBitmap(body, frontSource, front, paint)
+            paint.color = SunroofGlass.apertureHighlight(position, 1f)
+            canvas.drawPath(paneShape, paint)
+            canvas.restoreToCount(opening)
 
-        val clipped = canvas.save()
-        canvas.clipPath(paneShape)
-        paint.color = 0xf0ffffff.toInt()
-        canvas.drawBitmap(body, glassSource, pane, paint)
-        paint.color = 0x24101b23
-        canvas.drawPath(paneShape, paint)
-        canvas.restoreToCount(clipped)
-
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 2.6f
-        paint.color = 0xb4181d20.toInt()
-        canvas.drawPath(paneShape, paint)
-        paint.strokeWidth = 1.2f
-        paint.color = 0x807b878c.toInt()
-        canvas.drawPath(paneShape, paint)
+            // Once moving, the front pane carries its own reflection over the fixed glass.
+            canvas.translate(0f, travelY)
+            canvas.clipPath(paneShape)
+            paint.color = -1
+            paint.alpha = (201f * edge).roundToInt()
+            canvas.drawBitmap(body, reflection, panorama, paint)
+            paint.shader = skyReflection
+            paint.alpha = (150f * edge).roundToInt()
+            canvas.drawPath(paneShape, paint)
+            paint.shader = null
+        }
         canvas.restoreToCount(saved)
     }
 }

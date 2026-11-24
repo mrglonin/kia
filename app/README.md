@@ -1,14 +1,6 @@
 # KIA Android app
 
-Android source for `kia.app`.
-
-- `applicationId`: `kia.app`
-- `versionName`: `23.19-sunroof`
-- `versionCode`: `373`
-- release APK name: `kia_373_sunroof.apk`
-- min SDK: `29`
-- target SDK: `36`
-- compile SDK: `36`
+Android application for TEYES head units, package `kia.app`. The release version, minimum Android version and output filename are defined in the [app module](app/build.gradle). The [installation guide](../README.md) covers supported hardware and in-app updates.
 
 ## Runtime flow
 
@@ -22,7 +14,9 @@ Main packages:
 - `kia.app.transport.usb`: USB serial connection, permissions, frame reader.
 - `kia.app.protocol.adapter`: adapter packets, checksums, incoming frame routing.
 - `kia.app.media`: media/call capture and cluster output.
-- `kia.app.navigation`: Yandex/2GIS capture, overlay, cluster output.
+- `kia.app.navigation` receives Yandex, MVite and 2GIS events and updates the overlay and cluster.
+- `kia.app.adas` connects to TEYES ADAS and records lane warnings.
+- `kia.app.sunroof` handles the sunroof overlay and audio.
 - `kia.app.tpms`: TPMS polling, dashboard, alert logic.
 - `kia.app.rcta`: RCTA protocol state, overlay, preview, sound.
 - `kia.app.update`: KIA APK and Yandex mod update checks.
@@ -38,21 +32,13 @@ The public setup is for a USB CAN adapter modified and flashed by the Drive2 aut
 
 ## Build
 
-From this folder:
+Use JDK 17 and an Android SDK with Platform 36 and Build Tools 37.0.0. Set `ANDROID_HOME` or configure `sdk.dir` in `local.properties`. Run the Gradle wrapper from this directory.
 
-```bash
-JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
-ANDROID_HOME="/Users/legion/Library/Android/sdk" \
-./gradlew :app:assembleDebug --console=plain
+```sh
+./gradlew :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease
 ```
 
-Release APK:
-
-```bash
-JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" \
-ANDROID_HOME="/Users/legion/Library/Android/sdk" \
-./gradlew :app:assembleRelease --console=plain
-```
+The APK is written to `app/build/outputs/apk/release/`.
 
 Release signing uses `../signing/kia-debug-release.keystore`.
 
@@ -61,8 +47,8 @@ Navigation decisions and adapter TX outcomes are written to the bounded rotating
 
 ## Quick QA broadcast
 
-Use the full adb path if `adb` is not in `PATH`:
+On an emulator, display sample tyre pressures with the following command.
 
 ```bash
-/Users/legion/Library/Android/sdk/platform-tools/adb -s emulator-5554 shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
+adb -e shell am broadcast -n kia.app/.qa.QaReceiver -a kia.app.QA_SCENARIO --es scenario tpms_sample
 ```
