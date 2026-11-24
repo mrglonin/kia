@@ -1,0 +1,33 @@
+{
+  "created_utc": "2026-11-24T08:29:33.703696+00:00",
+  "artifact": {
+    "version_name": "23.30-sunroof",
+    "version_code": 384,
+    "asset_name": "kia_384_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.30-384/kia_384_sunroof.apk",
+    "sha256": "fbb0c774b7c3d945056f3bfbe734f428f2c1e030007a942ea2a9603035d49543",
+    "size": 8239196
+  },
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "source_base": "95027ac1c4b9913998971cb1af5413a58d280635",
+  "build": {
+    "variant": "release",
+    "jdk": 17,
+    "kotlin": "2.3.21",
+    "zipalign": true,
+    "zip_crc": true,
+    "signature_matches_383": true
+  },
+  "validation": {
+    "release_unit_tests": {
+      "tests": 519,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "lint_errors": 0,
+    "lint_warnings": 83,
+    "emulator": "Closed and open sunroof on the Android dashboard, using fixture events through the production vehicle event router.",
+    "physical_car_tested": false
+  }
+}

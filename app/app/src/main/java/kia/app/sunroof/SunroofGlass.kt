@@ -24,7 +24,7 @@ internal class SunroofGlass {
         val corners = opening.width() * .10f
         paint.style = Paint.Style.FILL
         paint.shader = null
-        paint.color = Color.argb((255f * .24f * p * pulse).roundToInt(), 255, 35, 55)
+        paint.color = apertureHighlight(p, pulse)
         canvas.drawRoundRect(opening, corners, corners, paint)
 
         panel.set(opening.left + (retracted.left - opening.left) * p,
@@ -45,6 +45,9 @@ internal class SunroofGlass {
     }
 
     companion object {
+        fun apertureHighlight(open: Float, pulse: Float): Int =
+            Color.argb((255f * .24f * open * pulse).roundToInt(), 255, 35, 55)
+
         const val START_DELAY_MS = 150L
         const val TRAVEL_MS = 900L
     }

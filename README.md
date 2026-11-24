@@ -4,9 +4,9 @@ Android-приложение для магнитол TEYES CC4 и CC4 Pro в Kia
 
 **[Скачать APK для магнитолы](https://github.com/mrglonin/kia/releases/latest)** · [Что изменилось](CHANGELOG.md) · [Проверки сборки](https://github.com/mrglonin/kia/actions/workflows/android.yml)
 
-![Главный экран версии 383 в Android-эмуляторе. В центре вид сверху на Kia Sportage, по сторонам показания четырёх колёс.](docs/screenshots/dashboard-383.png)
+![Главный экран версии 384 в Android-эмуляторе. В центре вид сверху на Kia Sportage, по сторонам показания четырёх колёс.](docs/screenshots/dashboard-384.png)
 
-*Демонстрационные данные в Android-эмуляторе.* [Видео работы главного экрана, MP4](https://github.com/mrglonin/kia/releases/download/v23.29-383/dashboard-383.mp4)
+*Демонстрационные данные в Android-эмуляторе.* [Видео работы главного экрана, MP4](https://github.com/mrglonin/kia/releases/download/v23.30-384/dashboard-384.mp4)
 
 ## Установка и обновление
 
@@ -32,7 +32,7 @@ Android-приложение для магнитол TEYES CC4 и CC4 Pro в Kia
 
 ## Разработка
 
-Проект Android Gradle находится в `app/`, пакет приложения — `kia.app`. Для версии 383 в сборке используются Java и Kotlin, JDK 17, Android SDK Platform 36 и Build Tools 37.0.0. Сборка запускается штатным Gradle Wrapper.
+Проект Android Gradle находится в `app/`, пакет приложения — `kia.app`. В сборке используются Java и Kotlin, JDK 17, Android SDK Platform 36 и Build Tools 37.0.0. Сборка запускается штатным Gradle Wrapper.
 
 ```sh
 cd app
