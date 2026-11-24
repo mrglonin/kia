@@ -6,7 +6,7 @@ Android-приложение для магнитол TEYES CC4 и CC4 Pro в Kia
 
 ![Главный экран версии 387 в Android-эмуляторе. В центре вид сверху на Kia Sportage, по сторонам показания четырёх колёс.](docs/screenshots/dashboard-387.png)
 
-*Демонстрационные данные в Android-эмуляторе.* [Открытие и закрытие люка крупным планом, MP4](https://github.com/mrglonin/kia/releases/download/v23.33-387/dashboard-387-roof.mp4)
+*Демонстрационные данные в Android-эмуляторе.* [Открытие и закрытие люка крупным планом, MP4](https://github.com/mrglonin/kia/releases/download/v23.34-388/dashboard-388-roof.mp4)
 
 ## Установка и обновление
 

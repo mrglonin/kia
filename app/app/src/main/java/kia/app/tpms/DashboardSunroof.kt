@@ -1,9 +1,10 @@
 package kia.app.tpms
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
@@ -96,18 +97,60 @@ internal class DashboardSunroof(private val body: Bitmap, private val seats: Bit
     }
     private val pane = RectF().also { paneShape.computeBounds(it, true) }
     private val travel = divider + 4f - pane.top
+    private val movingPane = Path()
+    private val glassOutsideOpening = Path(panoramaShape).apply {
+        op(paneShape, Path.Op.DIFFERENCE)
+    }
+    private val seal = Path().also {
+        // Use only the narrow photographed gasket around the aperture.
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 11f
+        }.getFillPath(paneShape, it)
+        it.op(paneShape, Path.Op.DIFFERENCE)
+    }
+    private val leadingEdge = Path().apply {
+        moveTo(319f, 441f)
+        cubicTo(319f, 414f, 326f, 404f, 350f, 402f)
+        cubicTo(424f, 397f, 604f, 397f, 665f, 402f)
+        cubicTo(691f, 403f, 700f, 412f, 701f, 438f)
+        transform(Matrix().apply { setScale(1f, openingHeight, 0f, frontTop) })
+    }
+    private val cabinBounds = RectF(bodyBounds).apply {
+        // Crop the view through the shortened opening; keep the wheel and seats to scale.
+        offset(0f, pane.top - 409f)
+    }
+    private val reflectionSource = RectF(sourceRect(301f, 670f, 725f, 879f))
+    private val reflectionMatrix = Matrix().apply {
+        setRectToRect(reflectionSource, panorama, Matrix.ScaleToFit.FILL)
+    }
+    private fun reflection() = BitmapShader(body, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+        .apply { setLocalMatrix(reflectionMatrix) }
+
+    private val fixedGlass = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        shader = reflection()
+        alpha = 231
+    }
+    private val movingReflection = reflection()
+    private val movingMatrix = Matrix()
+    private val panePaint = Paint(fixedGlass).apply { shader = movingReflection }
+    private val seatPaint = Paint(paint).apply {
+        // The rear seat photograph already contains a layer of tint.
+        colorFilter = ColorMatrixColorFilter(floatArrayOf(
+            1.8f, 0f, 0f, 0f, 0f,  0f, 1.8f, 0f, 0f, 0f,
+            0f, 0f, 1.8f, 0f, 0f,  0f, 0f, 0f, 1f, 0f))
+    }
+    private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.4f
+        color = 0xffb8c6cd.toInt()
+    }
+
     private fun sourceRect(left: Float, top: Float, right: Float, bottom: Float) = Rect(
         (left * body.width / 1024f).roundToInt(),
         (top * body.height / 1536f).roundToInt(),
         (right * body.width / 1024f).roundToInt(),
         (bottom * body.height / 1536f).roundToInt())
-
-    private val reflection = sourceRect(301f, 670f, 725f, 879f)
-    private val skyReflection = LinearGradient(
-        pane.left + 35f, pane.top, pane.right - 40f, pane.bottom,
-        intArrayOf(0x15224355, 0x0e365468, 0x294c7083, 0x38bfd4df,
-            0x153b6076, 0x0a223747),
-        floatArrayOf(0f, .34f, .43f, .49f, .60f, 1f), Shader.TileMode.CLAMP)
 
     fun draw(canvas: Canvas, cx: Float, cy: Float, maxWidth: Float, maxHeight: Float,
              open: Float) {
@@ -117,37 +160,45 @@ internal class DashboardSunroof(private val body: Bitmap, private val seats: Bit
         canvas.translate(cx - 512f * scale, cy - 768f * scale)
         canvas.scale(scale, scale)
         paint.color = -1
-        paint.style = Paint.Style.FILL
         canvas.drawBitmap(body, null, bodyBounds, paint)
         canvas.clipPath(panoramaShape)
         canvas.drawBitmap(body, frontSource, front, paint)
-        if (seats != null && seatSource != null) canvas.drawBitmap(seats, seatSource, rear, paint)
+        if (seats != null && seatSource != null) canvas.drawBitmap(seats, seatSource, rear, seatPaint)
 
-        // Both roof sections transmit the cabin below the same uninterrupted reflection.
-        paint.alpha = 222
-        canvas.drawBitmap(body, reflection, panorama, paint)
+        val interior = canvas.save()
+        canvas.clipPath(paneShape)
+        canvas.drawBitmap(body, null, cabinBounds, paint)
+        canvas.restoreToCount(interior)
+
         val position = open.coerceIn(0f, 1f)
-        if (position > 0f) {
-            val travelY = travel * position
-            val edge = (position * 12f).coerceAtMost(1f)
-            val opening = canvas.save()
-            canvas.clipRect(front.left, front.top, front.right, pane.top + travelY)
-            paint.alpha = (255f * edge).roundToInt()
-            canvas.drawBitmap(body, frontSource, front, paint)
+        if (position == 0f) {
+            canvas.drawPath(panoramaShape, fixedGlass)
+        } else {
+            val offset = travel * position
+            paneShape.offset(0f, offset, movingPane)
+            canvas.drawPath(glassOutsideOpening, fixedGlass)
+
+            val exposed = canvas.save()
+            canvas.clipOutPath(movingPane)
             paint.color = SunroofGlass.apertureHighlight(position, 1f)
             canvas.drawPath(paneShape, paint)
-            canvas.restoreToCount(opening)
-
-            // Once moving, the front pane carries its own reflection over the fixed glass.
-            canvas.translate(0f, travelY)
-            canvas.clipPath(paneShape)
+            canvas.clipPath(seal)
             paint.color = -1
-            paint.alpha = (201f * edge).roundToInt()
-            canvas.drawBitmap(body, reflection, panorama, paint)
-            paint.shader = skyReflection
-            paint.alpha = (150f * edge).roundToInt()
-            canvas.drawPath(paneShape, paint)
-            paint.shader = null
+            paint.alpha = (170f * position).roundToInt()
+            canvas.drawBitmap(body, frontSource, front, paint)
+            canvas.restoreToCount(exposed)
+
+            // The two parallel sheets reflect the same sky. The small parallax is
+            // relative to the roof, so the highlight stays continuous across the overlap.
+            movingMatrix.set(reflectionMatrix)
+            movingMatrix.postTranslate(-5f * position, 8f * position)
+            movingReflection.setLocalMatrix(movingMatrix)
+            canvas.drawPath(movingPane, panePaint)
+            val edge = canvas.save()
+            canvas.translate(0f, offset)
+            edgePaint.alpha = (55f * position).roundToInt()
+            canvas.drawPath(leadingEdge, edgePaint)
+            canvas.restoreToCount(edge)
         }
         canvas.restoreToCount(saved)
     }
