@@ -308,10 +308,19 @@ public final class AdapterProtocol {
     }
 
     public static byte[] compassStep(int uiStep) {
-        int ui = nearestCompassUiStep(uiStep);
-        int sent = (36 - ui) % 36;
+        return compassStep(uiStep, false);
+    }
+
+    public static byte[] compassStep(int uiStep, boolean kiaNaviFormat) {
+        int fullCircle = kiaNaviFormat ? 48 : 36;
+        int ui = nearestCompassUiStep(uiStep, fullCircle);
+        int sent = (fullCircle - ui) % fullCircle;
         byte[] frame = new byte[]{(byte) 0xBB, 0x41, (byte) 0xA1, 0x0E, CMD_MANEUVER, 0x08, 0x00, 0x00,
-                (byte) sent, 0x00, 0x78, 0x00, (byte) 0xA0, 0x00};
+                (byte) sent, 0x00, 0x00, 0x00, 0x00, 0x00};
+        if (!kiaNaviFormat) {
+            frame[10] = 0x78;
+            frame[12] = (byte) 0xA0;
+        }
         return checksum(frame);
     }
 
@@ -834,10 +843,10 @@ public final class AdapterProtocol {
         }
     }
 
-    private static int nearestCompassUiStep(int value) {
-        int out = ((value % 36) + 36) % 36;
+    private static int nearestCompassUiStep(int value, int fullCircle) {
+        int out = ((value % fullCircle) + fullCircle) % fullCircle;
         out = Math.round(out / 3f) * 3;
-        return out == 36 ? 0 : out;
+        return out == fullCircle ? 0 : out;
     }
 
     private static int calibratedFinishDirectionAngle(int uiStep) {

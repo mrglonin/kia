@@ -26,9 +26,11 @@ public final class AppSettings {
     private static final String KEY_MEDIA_PROFILE_CONFIGURED = "media_profile_configured";
     private static final String KEY_CALL = "call_enabled";
     private static final String KEY_MEDIA_OVERLAY = "media_overlay";
+    private static final String KEY_ADAS_ENABLED = "adas_enabled";
     private static final String KEY_NAVIGATION = "navigation_enabled";
     private static final String KEY_COMPASS = "compass_enabled";
     private static final String KEY_COMPASS_FORCE = "compass_force";
+    private static final String KEY_COMPASS_KIA_NAVI_FORMAT = "compass_kia_navi_format";
     private static final String KEY_NAV_OUTPUT_MODE = "nav_output_mode";
     private static final String KEY_NAV_TBT = "nav_tbt";
     private static final String KEY_NAV_FINISH_DIRECTION = "nav_finish_direction";
@@ -110,6 +112,7 @@ public final class AppSettings {
     public static final int NAV_SOURCE_AUTO = 0;
     public static final int NAV_SOURCE_YANDEX = 1;
     public static final int NAV_SOURCE_2GIS = 2;
+    public static final int NAV_SOURCE_MVITE = 3;
     public static final int NAV_ETA_TIME_ARRIVAL = 0;
     public static final int NAV_ETA_TIME_REMAINING = 1;
     public static final int FIRMWARE_SOURCE_LATEST = 0;
@@ -505,6 +508,14 @@ public final class AppSettings {
         prefs(context).edit().putBoolean(KEY_NAVIGATION, value).apply();
     }
 
+    public static boolean adasEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_ADAS_ENABLED, false);
+    }
+
+    public static void setAdasEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_ADAS_ENABLED, enabled).apply();
+    }
+
     public static boolean compassEnabled(Context context) {
         return true;
     }
@@ -519,6 +530,14 @@ public final class AppSettings {
 
     public static void setCompassForceEnabled(Context context, boolean value) {
         prefs(context).edit().putBoolean(KEY_COMPASS_FORCE, false).apply();
+    }
+
+    public static boolean compassKiaNaviFormat(Context context) {
+        return prefs(context).getBoolean(KEY_COMPASS_KIA_NAVI_FORMAT, false);
+    }
+
+    public static void setCompassKiaNaviFormat(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_COMPASS_KIA_NAVI_FORMAT, enabled).apply();
     }
 
     public static boolean navTbt(Context context) {
@@ -621,12 +640,12 @@ public final class AppSettings {
 
     public static int navSourceMode(Context context) {
         return clamp(prefs(context).getInt(KEY_NAV_SOURCE_MODE, NAV_SOURCE_YANDEX),
-                NAV_SOURCE_AUTO, NAV_SOURCE_2GIS);
+                NAV_SOURCE_AUTO, NAV_SOURCE_MVITE);
     }
 
     public static void setNavSourceMode(Context context, int value) {
         prefs(context).edit().putInt(KEY_NAV_SOURCE_MODE,
-                clamp(value, NAV_SOURCE_AUTO, NAV_SOURCE_2GIS)).apply();
+                clamp(value, NAV_SOURCE_AUTO, NAV_SOURCE_MVITE)).apply();
     }
 
     public static boolean yandexNavigationEnabled(Context context) {
@@ -645,6 +664,8 @@ public final class AppSettings {
                 return "Yandex";
             case NAV_SOURCE_2GIS:
                 return "2GIS";
+            case NAV_SOURCE_MVITE:
+                return "MVite";
             case NAV_SOURCE_AUTO:
             default:
                 return "Auto";

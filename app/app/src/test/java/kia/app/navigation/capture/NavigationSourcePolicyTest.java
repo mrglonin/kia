@@ -40,6 +40,30 @@ public final class NavigationSourcePolicyTest {
     }
 
     @Test
+    public void mviteRequiresExplicitModeAndCannotMixRoutesWithOtherSources() {
+        for (int mode : new int[]{NavigationSourcePolicy.MODE_AUTO,
+                NavigationSourcePolicy.MODE_YANDEX, NavigationSourcePolicy.MODE_DGIS}) {
+            assertFalse(NavigationSourcePolicy.ingressAllowed(
+                    true, mode, NavigationSourcePolicy.SOURCE_MVITE));
+        }
+        assertFalse(NavigationSourcePolicy.ingressAllowed(false, NavigationSourcePolicy.MODE_MVITE,
+                NavigationSourcePolicy.SOURCE_MVITE));
+        NavigationSourceArbitrator arbiter = new NavigationSourceArbitrator(1000L);
+        assertTrue(arbiter.accept(true, NavigationSourcePolicy.MODE_MVITE,
+                NavigationSourcePolicy.SOURCE_MVITE, NavigationSourcePolicy.EVENT_ROUTE_ACTIVE,
+                100L).claimedOwner());
+        for (int other : new int[]{NavigationSourcePolicy.SOURCE_YANDEX,
+                NavigationSourcePolicy.SOURCE_DGIS}) {
+            assertFalse(arbiter.accept(true, NavigationSourcePolicy.MODE_MVITE, other,
+                    NavigationSourcePolicy.EVENT_ROUTE_END, 200L).accepted);
+        }
+        assertTrue(arbiter.accept(true, NavigationSourcePolicy.MODE_MVITE,
+                NavigationSourcePolicy.SOURCE_MVITE, NavigationSourcePolicy.EVENT_ROUTE_END,
+                300L).accepted);
+        assertEquals(NavigationSourcePolicy.SOURCE_NONE, arbiter.ownerSource());
+    }
+
+    @Test
     public void freshAutoOwnerRejectsOtherRoute() {
         assertEquals(NavigationSourcePolicy.DECISION_DENY_FRESH_OWNER,
                 NavigationSourcePolicy.decide(

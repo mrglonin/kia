@@ -70,6 +70,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import kia.app.R;
+import kia.app.adas.AdasController;
 import kia.app.amp.AmpController;
 import kia.app.amp.AmpVisualizerView;
 import kia.app.core.AppIds;
@@ -144,6 +145,7 @@ public final class MainActivity extends Activity {
     private static final int TAB_NAVIGATION = 2;
     private static final int TAB_CANBUS = 3;
     private static final int TAB_SETTINGS = 4;
+    private static final int TAB_ADAS = 5;
 
     private static final int SETTINGS_TPMS = 0;
     private static final int SETTINGS_MEDIA = 1;
@@ -151,6 +153,7 @@ public final class MainActivity extends Activity {
     private static final int SETTINGS_CANBUS = 3;
     private static final int SETTINGS_RCTA = 4;
     private static final int SETTINGS_GENERAL = 5;
+    private static final int SETTINGS_ADAS = 6;
     private static final int REQUEST_FIRMWARE_FILE = 42;
     private static final int REQUEST_EXPORT_SETTINGS = 43;
     private static final int REQUEST_IMPORT_SETTINGS = 44;
@@ -191,6 +194,9 @@ public final class MainActivity extends Activity {
     private CompoundButton overspeedToggle;
     private CompoundButton autoStartToggle;
     private TextView diagnosticsStatus;
+    private TextView adasStatus;
+    private TextView adasDiagnosticStatus;
+    private View adasDiagnosticButton;
     private TextView canbusDebugStatus;
     private CompoundButton canbusDebugToggle;
     private CompoundButton ampEnabledToggle;
@@ -211,8 +217,8 @@ public final class MainActivity extends Activity {
     private TextView sasRatioStatus;
     private EditText sasRatioInput;
     private View sasRatioPreview;
-    private final View[] navSourceModeViews = new View[3];
-    private final TextView[] navSourceModeChecks = new TextView[3];
+    private final View[] navSourceModeViews = new View[4];
+    private final TextView[] navSourceModeChecks = new TextView[4];
     private final View[] navTextModeViews = new View[3];
     private final TextView[] navTextModeChecks = new TextView[3];
     private final View[] navRouteModeViews = new View[3];
@@ -1028,12 +1034,13 @@ public final class MainActivity extends Activity {
     }
 
     private View tabBar() {
-        tabButtons = new TextView[5];
+        tabButtons = new TextView[6];
         LinearLayout row = row();
         row.setPadding(dp(5), dp(5), dp(5), dp(5));
         row.setBackground(glassPanel(COLOR_ACCENT_BLUE));
         if (AppSettings.mediaTabVisible(this)) addTab(row, TAB_MEDIA, "Медиа");
         addTab(row, TAB_NAVIGATION, "Нави");
+        addTab(row, TAB_ADAS, "ADAS");
         addTab(row, TAB_CANBUS, "CAN");
         addTab(row, TAB_SETTINGS, "Общее");
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -1321,6 +1328,9 @@ public final class MainActivity extends Activity {
             case TAB_NAVIGATION:
                 renderNavigationTab();
                 break;
+            case TAB_ADAS:
+                renderAdasSettingsTab(tabContent);
+                break;
             case TAB_CANBUS:
                 renderCanbusTab();
                 break;
@@ -1393,6 +1403,9 @@ public final class MainActivity extends Activity {
         tpmsSoundToggle = null;
         autoStartToggle = null;
         diagnosticsStatus = null;
+        adasStatus = null;
+        adasDiagnosticStatus = null;
+        adasDiagnosticButton = null;
         canbusDebugStatus = null;
         canbusDebugToggle = null;
         ampEnabledToggle = null;
@@ -2144,6 +2157,7 @@ public final class MainActivity extends Activity {
         item.setPadding(dp(10), 0, dp(10), 0);
         item.setClickable(true);
         item.setFocusable(true);
+        item.setSelected(selected);
         item.setContentDescription("Раздел настроек: " + label);
         item.setBackground(selected
                 ? settingsButtonBackground(true)
@@ -2184,6 +2198,7 @@ public final class MainActivity extends Activity {
             tabs.addView(settingsMenuItem(SETTINGS_MEDIA, "Медиа"), settingsHeaderItemLayout(false));
         }
         tabs.addView(settingsMenuItem(SETTINGS_NAVIGATION, "Навигация"), settingsHeaderItemLayout(false));
+        tabs.addView(settingsMenuItem(SETTINGS_ADAS, "ADAS"), settingsHeaderItemLayout(false));
         tabs.addView(settingsMenuItem(SETTINGS_CANBUS, "Canbus"), settingsHeaderItemLayout(false));
         tabs.addView(settingsMenuItem(SETTINGS_RCTA, "RCTA"), settingsHeaderItemLayout(false));
         tabs.addView(settingsMenuItem(SETTINGS_GENERAL, "Общее"), settingsHeaderItemLayout(false));
@@ -2191,6 +2206,15 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
         outer.addView(scroller, new LinearLayout.LayoutParams(
                 0, isCompact() ? dp(46) : dp(52), 1f));
+        scroller.post(() -> {
+            for (int i = 0; i < tabs.getChildCount(); i++) {
+                View item = tabs.getChildAt(i);
+                if (item.isSelected()) {
+                    scroller.scrollTo(Math.max(0, item.getRight() - scroller.getWidth()), 0);
+                    break;
+                }
+            }
+        });
 
         TextView search = text("⌕", isCompact() ? 25 : 28, Color.WHITE);
         search.setGravity(Gravity.CENTER);
@@ -2263,7 +2287,7 @@ public final class MainActivity extends Activity {
                 String query = input.getText().toString();
                 int target = settingsTabForQuery(query);
                 if (target < 0) {
-                    input.setError("Не найдено. Попробуйте: TPMS, медиа, Yandex, CAN, RCTA, обновление");
+                    input.setError("Не найдено. Попробуйте TPMS, медиа, Yandex, ADAS, CAN или RCTA");
                     return;
                 }
                 settingsTab = target;
@@ -2285,6 +2309,9 @@ public final class MainActivity extends Activity {
     private int settingsTabForQuery(String query) {
         String value = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         if (value.isEmpty()) return settingsTab;
+        if (containsAny(value, "adas", "adac", "адас", "ldw", "полос", "разметк")) {
+            return SETTINGS_ADAS;
+        }
         if (containsAny(value, "tpms", "шин", "давлен", "колес", "температур")) {
             return SETTINGS_TPMS;
         }
@@ -2326,6 +2353,9 @@ public final class MainActivity extends Activity {
             case SETTINGS_NAVIGATION:
                 renderNavigationTab(root);
                 break;
+            case SETTINGS_ADAS:
+                renderAdasSettingsTab(root);
+                break;
             case SETTINGS_CANBUS:
                 renderCanbusTab(root);
                 break;
@@ -2348,6 +2378,8 @@ public final class MainActivity extends Activity {
                 return "Медиа";
             case SETTINGS_NAVIGATION:
                 return "Навигация";
+            case SETTINGS_ADAS:
+                return "ADAS";
             case SETTINGS_CANBUS:
                 return "Canbus";
             case SETTINGS_RCTA:
@@ -3657,10 +3689,11 @@ public final class MainActivity extends Activity {
     private void renderNavigationTab(LinearLayout root) {
         root.addView(navigationLivePanel());
         root.addView(navigationOutputPanel());
-        addSection(root, "Источник", "Yandex использует прямой Core Bridge; Auto оставлен как резервный режим.",
+        addSection(root, "Источник", "Для YNavi MVite выберите отдельный источник.",
                 navSourceAction(AppSettings.NAV_SOURCE_AUTO, "Auto", "fallback Yandex + 2GIS"),
                 navSourceAction(AppSettings.NAV_SOURCE_YANDEX, "Yandex", "только Yandex Core Bridge"),
-                navSourceAction(AppSettings.NAV_SOURCE_2GIS, "2GIS", "только dashboard 2GIS"));
+                navSourceAction(AppSettings.NAV_SOURCE_2GIS, "2GIS", "только dashboard 2GIS"),
+                navSourceAction(AppSettings.NAV_SOURCE_MVITE, "MVite", "данные интеграции YNavi MVite"));
         root.addView(navigationOptionsPanel());
         if (AppSettings.expertMode(this)) {
             navigationDebugToggle = addSettingSwitch(root, "Панель диагностики",
@@ -3823,6 +3856,7 @@ public final class MainActivity extends Activity {
         int mode = AppSettings.navSourceMode(this);
         if (mode == AppSettings.NAV_SOURCE_YANDEX) return "только Yandex";
         if (mode == AppSettings.NAV_SOURCE_2GIS) return "только 2GIS";
+        if (mode == AppSettings.NAV_SOURCE_MVITE) return "только MVite";
         return "Yandex и 2GIS";
     }
 
@@ -3925,6 +3959,10 @@ public final class MainActivity extends Activity {
         finishCompassAutoToggle = addSettingsPanelSwitchHeader(panel, "Компас к финишу",
                 "300 м всегда, до 1 км после последнего манёвра",
                 AppSettings.navFinishCompassAuto(this), this::toggleFinishCompassAuto);
+        addInlineSwitch(panel, "Компас Kia Navi",
+                "16 секторов для совместимой прошивки адаптера",
+                AppSettings.compassKiaNaviFormat(this),
+                (button, checked) -> AppSettings.setCompassKiaNaviFormat(this, checked));
         panel.addView(settingsDivider());
         addSettingsSubHeader(panel, "Ограничение скорости в приборке",
                 "Передаётся известный лимит при изменении. Пустые значения не отправляются.");
@@ -3982,6 +4020,71 @@ public final class MainActivity extends Activity {
                 navMicroDistanceCycleAction(normalMode),
                 navMicroHoldAfterCycleAction(normalMode));
         return panel;
+    }
+
+    private void renderAdasSettingsTab(LinearLayout root) {
+        AdasController controller = AdasController.get(this);
+        LinearLayout panel = settingsPanel(COLOR_ACCENT_BLUE);
+        addSettingsPanelSwitchHeader(panel, "Подключаться к TEYES ADAS",
+                "Получать от штатного приложения данные о разметке и выезде из полосы",
+                AppSettings.adasEnabled(this), (button, enabled) -> {
+                    AppSettings.setAdasEnabled(this, enabled);
+                    if (enabled) AppService.start(this);
+                    controller.applySettings();
+                    refreshAdasPanel();
+                });
+        adasStatus = adasStatusView(panel);
+        root.addView(panel);
+
+        LinearLayout diagnostics = settingsPanel(COLOR_ACCENT);
+        addSettingsPanelHeader(diagnostics, "Диагностика ADAS",
+                "Проверка на 10 секунд доступна и при выключенном постоянном подключении",
+                COLOR_ACCENT);
+        adasDiagnosticStatus = adasStatusView(diagnostics);
+        adasDiagnosticButton = action("Диагностика", "проверить связь и приём событий",
+                COLOR_SUCCESS, () -> {
+                    controller.diagnose();
+                    refreshAdasPanel();
+                });
+        addActionGrid(diagnostics, adasDiagnosticButton,
+                action("Скопировать отчёт", "состояние связи и данные последней проверки",
+                        COLOR_ACCENT_BLUE, this::copyAdasReport));
+        root.addView(diagnostics);
+        refreshAdasPanel();
+    }
+
+    private TextView adasStatusView(LinearLayout panel) {
+        TextView view = text("", isCompact() ? 14 : 16, COLOR_TEXT);
+        view.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(0, dp(10), 0, dp(8));
+        panel.addView(view, lp);
+        return view;
+    }
+
+    private void refreshAdasPanel() {
+        if (adasStatus == null || adasDiagnosticButton == null) return;
+        AdasController.Snapshot state = AdasController.get(this).snapshot();
+        String statusText = "Приложение · " + state.packageStatus
+                + "\nПодключение · " + state.connectionStatus
+                + "\nСобытия · " + state.eventStatus
+                + "\nРазметка · " + state.laneStatus
+                + "\nВыезд по последнему сообщению · " + state.warningStatus;
+        if (!statusText.contentEquals(adasStatus.getText())) adasStatus.setText(statusText);
+        if (!state.diagnosticStatus.contentEquals(adasDiagnosticStatus.getText())) {
+            adasDiagnosticStatus.setText(state.diagnosticStatus);
+        }
+        adasDiagnosticButton.setEnabled(!state.diagnosticRunning);
+        adasDiagnosticButton.setAlpha(state.diagnosticRunning ? 0.6f : 1f);
+    }
+
+    private void copyAdasReport() {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null) return;
+        clipboard.setPrimaryClip(ClipData.newPlainText("TEYES ADAS",
+                AdasController.get(this).report()));
+        Toast.makeText(this, "Отчёт ADAS скопирован", Toast.LENGTH_SHORT).show();
     }
 
     private void renderCanbusTab() {
@@ -4613,6 +4716,7 @@ public final class MainActivity extends Activity {
         if (diagnosticsStatus != null) {
             diagnosticsStatus.setText(canbusStatusText());
         }
+        if (adasStatus != null) refreshAdasPanel();
         if (canbusDebugStatus != null) {
             canbusDebugStatus.setText(canbusDebugText());
         }
@@ -7440,12 +7544,14 @@ public final class MainActivity extends Activity {
         private String sourceTitle(int sourceMode) {
             if (sourceMode == AppSettings.NAV_SOURCE_YANDEX) return "Yandex";
             if (sourceMode == AppSettings.NAV_SOURCE_2GIS) return "2GIS";
+            if (sourceMode == AppSettings.NAV_SOURCE_MVITE) return "MVite";
             return "Auto";
         }
 
         private String sourceHint(int sourceMode) {
             if (sourceMode == AppSettings.NAV_SOURCE_YANDEX) return "только Y";
             if (sourceMode == AppSettings.NAV_SOURCE_2GIS) return "только 2G";
+            if (sourceMode == AppSettings.NAV_SOURCE_MVITE) return "только MV";
             return "Y + 2G";
         }
 
@@ -7540,6 +7646,8 @@ public final class MainActivity extends Activity {
                 return "♪";
             case TAB_NAVIGATION:
                 return "⌖";
+            case TAB_ADAS:
+                return "≋";
             case TAB_CANBUS:
                 return "◇";
             case TAB_SETTINGS:

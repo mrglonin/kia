@@ -2,9 +2,9 @@ plugins {
     id "com.android.application"
 }
 
-def kiaVersionCode = 381
-def kiaVersionName = "23.27-sunroof"
-def kiaReleaseApk = "kia_381_sunroof.apk"
+def kiaVersionCode = 382
+def kiaVersionName = "23.28-sunroof"
+def kiaReleaseApk = "kia_382_sunroof.apk"
 def publicReleaseKey = rootProject.file("../signing/kia-debug-release.keystore")
 
 android {
@@ -55,6 +55,7 @@ android {
 dependencies {
     implementation "com.github.mik3y:usb-serial-for-android:3.8.0"
     testImplementation "junit:junit:4.13.2"
+    testImplementation "org.json:json:20240303"
 }
 
 tasks.register("copyKiaRelease", Copy) {

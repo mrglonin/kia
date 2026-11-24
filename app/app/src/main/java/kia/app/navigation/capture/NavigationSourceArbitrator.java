@@ -44,8 +44,7 @@ public final class NavigationSourceArbitrator {
     }
 
     public synchronized void seed(int source, long nowMs) {
-        if (source != NavigationSourcePolicy.SOURCE_YANDEX
-                && source != NavigationSourcePolicy.SOURCE_DGIS) {
+        if (!NavigationSourcePolicy.validSource(source)) {
             reset();
             return;
         }

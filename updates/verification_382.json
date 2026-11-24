@@ -1,0 +1,68 @@
+{
+  "created_utc": "2026-11-24T08:08:40.297147+00:00",
+  "status": "VERIFIED_SOFTWARE_PHYSICAL_CC4_ACCEPTANCE_PENDING",
+  "artifact": {
+    "version_name": "23.28-sunroof",
+    "version_code": 382,
+    "asset_name": "kia_382_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.28-382/kia_382_sunroof.apk",
+    "sha256": "800dcdf8d3344a8d9297df6c851dfb0985bda54ec3323553709a8a6cee185a8f",
+    "size": 7812398
+  },
+  "source_base": "0aa5059cf3858a15445cb217709fdb3ef06b49e4",
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "build": {
+    "variant": "release",
+    "gradle_tasks": [
+      ":app:assembleRelease",
+      ":app:testReleaseUnitTest",
+      ":app:lintRelease"
+    ],
+    "min_sdk": 29,
+    "target_sdk": 36,
+    "debuggable": false,
+    "matches_381_signer": true,
+    "apk_zip_crc_verified": true,
+    "zipalign_verified": true,
+    "stable_resource_ids": 32,
+    "unchanged_raw_audio_files": 9,
+    "unchanged_kotlin_builtins": 7
+  },
+  "validation": {
+    "release_unit_tests": 514,
+    "unit_test_failures": 0,
+    "unit_test_errors": 0,
+    "unit_tests_skipped": 0,
+    "lint_errors": 0,
+    "lint_warnings": 81,
+    "compass_regression_checks": 38,
+    "emulator_upgrade": {
+      "from": 381,
+      "to": 382,
+      "replaced_in_place": true,
+      "same_app_uid_and_first_install_time": true,
+      "activity_started": true,
+      "modified_tpms_threshold_preserved": true,
+      "installed_apk_matches_release_sha256": true,
+      "adas_tab_diagnosed_missing_package": true,
+      "adas_probe_received_left_and_right_from_fixture": true,
+      "temporary_subscription_released": true
+    },
+    "feature_validation": {
+      "adas_client": "Android emulator with a separate fixture service. Tested registration, no data, left/right lane warnings, test events, disconnect and reconnect, saved and copied reports.",
+      "adas_parcel_compatibility": "Five layouts serialized by the archived TEYES ADAS APK and decoded by Kia on Android.",
+      "mvite": "17 Android emulator checks using fixture broadcasts, including source isolation, maneuvers, ETA, speed limit and camera status."
+    }
+  },
+  "features": {
+    "adas_path": "Настройки → ADAS",
+    "adas_probe_seconds": 10,
+    "adas_background_default": false,
+    "adas_cluster_tx": false,
+    "mvite_source": "manual selection",
+    "kia_navi_compass_default": false
+  },
+  "limits": [
+    "Physical TEYES service event delivery, the installed MVite sender and the optional compass format on the Sportage cluster require vehicle testing."
+  ]
+}

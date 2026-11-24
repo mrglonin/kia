@@ -56,6 +56,7 @@ public final class SettingsTransfer {
 
     private static final Set<String> APP_BOOLEAN_KEYS = names(
             "auto_start",
+            "adas_enabled",
             "sunroof_overlay",
             "sunroof_parking_warning",
             "sunroof_sound",
@@ -67,6 +68,7 @@ public final class SettingsTransfer {
             "navigation_enabled",
             "compass_enabled",
             "compass_force",
+            "compass_kia_navi_format",
             "nav_tbt",
             "nav_finish_direction",
             "nav_finish_compass_auto",

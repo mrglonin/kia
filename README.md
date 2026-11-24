@@ -2,22 +2,24 @@
 
 Подключаем Android-магнитолу TEYES/CC4 к штатной панели Kia через переделанный USB CAN-адаптер: TPMS, медиа, звонки, навигация, RCTA, CANBUS и обновления APK без отдельного закрытого сервера.
 
-Релиз `23.27-sunroof / 381`: исправлен возврат к прежнему ограничению после промежуточной ошибки USB; добавлен отдельный выключенный по умолчанию чекбокс повтора известного лимита каждые 15 секунд. [Проверка 381](updates/verification_381.json).
+В релизе `23.28-sunroof / 382` появились диагностика штатного TEYES ADAS, источник навигации MVite и переключаемый формат компаса Kia Navi. [Проверка 382](updates/verification_382.json).
 
-[![Скачать KIA 381 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20381%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.27-381/kia_381_sunroof.apk)
+[![Скачать KIA 382 APK](https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C-KIA%20382%20APK-17a673?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mrglonin/kia/releases/download/v23.28-382/kia_382_sunroof.apk)
 
-- APK KIA: [kia_381_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.27-381/kia_381_sunroof.apk)
+- APK KIA: [kia_382_sunroof.apk](https://github.com/mrglonin/kia/releases/download/v23.28-382/kia_382_sunroof.apk)
 - APK Yandex Navigator mod: [yandex_navi-7_10-universal-kia-mod-teyes-compat.apk](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk)
 - Манифест обновлений: [updates/latest.json](updates/latest.json)
-- GitHub Release: [`v23.27-381`](https://github.com/mrglonin/kia/releases/tag/v23.27-381)
-- Текущий публичный релиз: `23.27-sunroof` / `381`
+- GitHub Release: [`v23.28-382`](https://github.com/mrglonin/kia/releases/tag/v23.28-382)
+- Текущий публичный релиз: `23.28-sunroof` / `382`
 
 ## Релиз
 
 | Компонент | Версия | Файл | SHA-256 |
 | --- | --- | --- | --- |
-| KIA app | `23.27-sunroof` / `381` | `updates/kia_381_sunroof.apk`, 7 756 742 байт | `662038f7531bcb4aa4d4eb7295a40af35db184ea088c4cbdeb5c0e44380e7ca2` |
+| KIA app | `23.28-sunroof` / `382` | `updates/kia_382_sunroof.apk`, 7 812 398 байт | `800dcdf8d3344a8d9297df6c851dfb0985bda54ec3323553709a8a6cee185a8f` |
 | Yandex Navigator Kia mod | `7.10-kia.20260805-teyes-compat` / `71011062` | [release asset `yandex_navi-7_10-universal-kia-mod-teyes-compat.apk`](https://github.com/mrglonin/kia/releases/download/v23.10-364/yandex_navi-7_10-universal-kia-mod-teyes-compat.apk), 115 302 487 байт | `4933982fff578e64fe7b2d31a67dd0346afa167a27004fcc70e9c0f7646c72b8` |
+
+В `382` кнопка **Настройки → ADAS → Диагностика** за 10 секунд проверяет подключение к TEYES и приём событий о разметке. Постоянную подписку можно включить отдельно. В разделе **Навигация** доступны источник **MVite** и формат **Компас Kia Navi**. [Отчёт 382](updates/verification_382.json).
 
 В `381` переход `60 → 40 → 60` считается новым событием даже при ошибке записи промежуточных 40. В настройках навигации добавлен чекбокс «Повторять ограничение каждые 15 секунд», по умолчанию выключенный. При включении новый лимит отправляется сразу, следующий повтор — через 15 секунд; одинаковые свежие сообщения не сдвигают таймер, отсутствие лимита останавливает его. Выбор сохраняется и входит в экспорт/импорт. [Отчёт 381](updates/verification_381.json).
 

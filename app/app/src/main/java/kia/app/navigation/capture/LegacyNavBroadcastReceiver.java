@@ -39,5 +39,6 @@ public final class LegacyNavBroadcastReceiver extends BroadcastReceiver {
         filter.addAction("com.yf.navinfo");
         filter.addAction("com.teyes.MapAssistantService");
         filter.addAction("android.action.MOBILE_NAVIGATION");
+        filter.addAction(MviteNavigationMessage.ACTION);
     }
 }

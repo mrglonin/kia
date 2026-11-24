@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import kia.app.adas.AdasController;
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.model.AdapterState;
@@ -89,6 +90,7 @@ public final class DiagnosticBundleExporter {
                 .append(" state_age=").append(age(now, rcta.updatedAt)).append('\n');
         out.append("sunroof=").append(kia.app.sunroof.SunroofOverlayController.get(context)
                 .statusSummary()).append('\n');
+        out.append(AdasController.get(context).report()).append('\n');
         out.append("overlay_permission=").append(Build.VERSION.SDK_INT < 23
                 || Settings.canDrawOverlays(context)).append('\n');
         out.append("auto_start=").append(AppSettings.autoStart(context))

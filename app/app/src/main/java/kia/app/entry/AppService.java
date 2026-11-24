@@ -23,6 +23,7 @@ import android.os.PowerManager;
 import android.os.SystemClock;
 
 import kia.app.R;
+import kia.app.adas.AdasController;
 import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.settings.AppSettings;
@@ -169,6 +170,7 @@ public final class AppService extends Service {
         sunroofOverlay = SunroofOverlayController.get(this);
         sunroofOverlay.start();
         serviceRunning = true;
+        AdasController.get(this).applySettings();
         updateCheckHandler.postDelayed(backgroundUpdateCheck, 10_000L);
     }
 
@@ -211,6 +213,7 @@ public final class AppService extends Service {
         rctaOverlay.start();
         if (sunroofOverlay == null) sunroofOverlay = SunroofOverlayController.get(this);
         sunroofOverlay.start();
+        AdasController.get(this).applySettings();
         return foregroundStartMode(true);
     }
 
@@ -224,6 +227,7 @@ public final class AppService extends Service {
     public void onDestroy() {
         serviceRunning = false;
         updateCheckHandler.removeCallbacks(backgroundUpdateCheck);
+        AdasController.get(this).stop();
         if (healthMonitor != null) healthMonitor.stop();
         if (mediaCapture != null) mediaCapture.stop();
         MediaClusterSender.get(this).stopSynchronizedPath();

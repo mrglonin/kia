@@ -4,17 +4,19 @@ package kia.app.navigation.capture;
  * Pure source-selection and ownership decisions for navigation ingress.
  *
  * <p>Mode values intentionally match the persisted navigation source values:
- * {@code 0=Auto, 1=Yandex, 2=2GIS}. Incoming source values use the same Yandex/2GIS numbers, with
+ * {@code 0=Auto, 1=Yandex, 2=2GIS, 3=MVite}. Incoming source values match the explicit modes, with
  * {@link #SOURCE_NONE} reserved for an unowned route.</p>
  */
 public final class NavigationSourcePolicy {
     public static final int MODE_AUTO = 0;
     public static final int MODE_YANDEX = 1;
     public static final int MODE_DGIS = 2;
+    public static final int MODE_MVITE = 3;
 
     public static final int SOURCE_NONE = 0;
     public static final int SOURCE_YANDEX = 1;
     public static final int SOURCE_DGIS = 2;
+    public static final int SOURCE_MVITE = 3;
 
     public static final int EVENT_PASSIVE = 0;
     public static final int EVENT_ROUTE_ACTIVE = 1;
@@ -35,6 +37,8 @@ public final class NavigationSourcePolicy {
         if (!navigationEnabled || !validSource(incomingSource)) return false;
         if (selectedMode == MODE_YANDEX) return incomingSource == SOURCE_YANDEX;
         if (selectedMode == MODE_DGIS) return incomingSource == SOURCE_DGIS;
+        if (selectedMode == MODE_MVITE) return incomingSource == SOURCE_MVITE;
+        if (incomingSource == SOURCE_MVITE) return false;
         return selectedMode == MODE_AUTO;
     }
 
@@ -74,6 +78,7 @@ public final class NavigationSourcePolicy {
     public static String sourceName(int source) {
         if (source == SOURCE_YANDEX) return "yandex";
         if (source == SOURCE_DGIS) return "2gis";
+        if (source == SOURCE_MVITE) return "mvite";
         return "none";
     }
 
@@ -95,7 +100,7 @@ public final class NavigationSourcePolicy {
         }
     }
 
-    private static boolean validSource(int source) {
-        return source == SOURCE_YANDEX || source == SOURCE_DGIS;
+    static boolean validSource(int source) {
+        return source == SOURCE_YANDEX || source == SOURCE_DGIS || source == SOURCE_MVITE;
     }
 }

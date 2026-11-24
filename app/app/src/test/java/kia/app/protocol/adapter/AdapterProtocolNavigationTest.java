@@ -8,6 +8,28 @@ import org.junit.Test;
 
 public final class AdapterProtocolNavigationTest {
     @Test
+    public void compassKeepsLegacyFrameAndUsesKiaNaviWireFormatWhenSelected() {
+        assertEquals("BB 41 A1 0E 45 08 00 00 1B 00 78 00 A0 2B",
+                AdapterProtocol.hex(AdapterProtocol.compassStep(9, false)));
+        assertArrayEquals(AdapterProtocol.compassStep(9), AdapterProtocol.compassStep(9, false));
+        assertEquals("BB 41 A1 0E 45 08 00 00 00 00 00 00 00 F8",
+                AdapterProtocol.hex(AdapterProtocol.compassStep(0, true)));
+        assertEquals("BB 41 A1 0E 45 08 00 00 24 00 00 00 00 1C",
+                AdapterProtocol.hex(AdapterProtocol.compassStep(12, true)));
+        assertEquals("BB 41 A1 0E 45 08 00 00 18 00 00 00 00 10",
+                AdapterProtocol.hex(AdapterProtocol.compassStep(24, true)));
+        assertEquals("BB 41 A1 0E 45 08 00 00 0C 00 00 00 00 04",
+                AdapterProtocol.hex(AdapterProtocol.compassStep(36, true)));
+
+        int[] expectedDirections = {0, 45, 42, 39, 36, 33, 30, 27, 24, 21, 18, 15, 12, 9, 6, 3};
+        for (int sector = 0; sector < expectedDirections.length; sector++) {
+            byte[] frame = AdapterProtocol.compassStep(sector * 3, true);
+            assertEquals(expectedDirections[sector], frame[8] & 0xff);
+            assertTrue(AdapterProtocol.validChecksum(frame));
+        }
+    }
+
+    @Test
     public void speedLimitUsesSevenByteFramesWithExactSpeedAndChecksum() {
         assertSpeedLimitFrame(0, new byte[]{
                 (byte) 0xBB, 0x41, (byte) 0xA1, 0x07, 0x44, 0x00, (byte) 0xE8});

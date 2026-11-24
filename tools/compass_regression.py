@@ -93,9 +93,25 @@ package kia.app.core; public class StateStore { public static kia.app.core.model
     'kia/app/core/model/NavigationState.java': r'''
 package kia.app.core.model; public class NavigationState { public String clusterTx=""; }''',
     'kia/app/core/settings/AppSettings.java': r'''
-package kia.app.core.settings; public class AppSettings { public static boolean navigationEnabled(android.content.Context c){return true;} public static boolean compassForceEnabled(android.content.Context c){return false;} }''',
+package kia.app.core.settings;
+public class AppSettings {
+    public static boolean kiaNaviFormat;
+    public static boolean navigationEnabled(android.content.Context c) { return true; }
+    public static boolean compassForceEnabled(android.content.Context c) { return false; }
+    public static boolean compassKiaNaviFormat(android.content.Context c) { return kiaNaviFormat; }
+}''',
     'kia/app/navigation/cluster/NavigationClusterSender.java': r'''
-package kia.app.navigation.cluster; public class NavigationClusterSender { public static final java.util.List<Integer> sent=new java.util.ArrayList<>(); public NavigationClusterSender(android.content.Context c){} public kia.app.protocol.adapter.AdapterTxOutcome sendCompassStep(int step){sent.add(step);return kia.app.protocol.adapter.AdapterTxOutcome.WRITTEN;} }''',
+package kia.app.navigation.cluster;
+public class NavigationClusterSender {
+    public static final java.util.List<Integer> sent = new java.util.ArrayList<>();
+    public static final java.util.List<Boolean> formats = new java.util.ArrayList<>();
+    public NavigationClusterSender(android.content.Context c) {}
+    public kia.app.protocol.adapter.AdapterTxOutcome sendCompassStep(int step, boolean kiaNaviFormat) {
+        sent.add(step);
+        formats.add(kiaNaviFormat);
+        return kia.app.protocol.adapter.AdapterTxOutcome.WRITTEN;
+    }
+}''',
     'kia/app/navigation/compass/CompassFixRegression.java': r'''
 package kia.app.navigation.compass;
 
@@ -105,6 +121,7 @@ import android.location.LocationManager;
 import android.hardware.SensorManager;
 import android.os.SystemClock;
 import kia.app.core.StateStore;
+import kia.app.core.settings.AppSettings;
 import kia.app.navigation.cluster.NavigationClusterSender;
 import kia.app.navigation.domain.NavigationFeature;
 import java.lang.reflect.*;
@@ -143,7 +160,9 @@ public final class CompassFixRegression {
         Fixture() {
             SystemClock.now=100000;
             StateStore.state.clusterTx="";
+            AppSettings.kiaNaviFormat=false;
             NavigationClusterSender.sent.clear();
+            NavigationClusterSender.formats.clear();
             NavigationFeature.instance=new NavigationFeature();
             c.services.put(Context.LOCATION_SERVICE,lm);
             c.services.put(Context.SENSOR_SERVICE,sm);
@@ -368,16 +387,65 @@ public final class CompassFixRegression {
                 check(NavigationFeature.instance.lastSpeedLocation!=null && NavigationFeature.instance.lastSpeedLocation.getSpeed()==0,"cache lost stopped navigation speed behind position-only winner");
             }
         });
-        test("existing circular math and all 144 canonical transitions remain valid", () -> {
+        test("compass sends a new format immediately using the actual last heading", () -> {
+            Fixture f = new Fixture();
+            f.start();
+            SystemClock.now += 3001;
+            f.accept(fix("gps", 0, 1003001, 12, true));
+            check(NavigationClusterSender.sent.equals(java.util.List.of(0)), "legacy rounding changed");
+            AppSettings.kiaNaviFormat = true;
+            f.tick();
+            check(NavigationClusterSender.sent.equals(java.util.List.of(0, 3)), "converted an already-rounded legacy step");
+            check(NavigationClusterSender.formats.equals(java.util.List.of(false, true)), "wrong TX format");
+            AppSettings.kiaNaviFormat = false;
+            f.tick();
+            check(NavigationClusterSender.sent.equals(java.util.List.of(0, 3, 0)), "legacy fallback did not send");
+            check(NavigationClusterSender.formats.equals(java.util.List.of(false, true, false)), "wrong fallback format");
+        });
+        test("selected compass format does not replay a persisted direction from the other scale", () -> {
+            Fixture f = new Fixture();
+            StateStore.state.clusterTx = "compass step=27 bytes=old outcome=WRITTEN";
+            AppSettings.kiaNaviFormat = true;
+            f.start();
+            SystemClock.now += 3001;
+            f.tick();
+            check(NavigationClusterSender.sent.isEmpty(), "startup replayed a frame from the other format");
+            f.accept(fix("gps", 0, 1003001, 270, true));
+            check(NavigationClusterSender.sent.equals(java.util.List.of(36)), "new west step did not use 48-unit scale");
+            check(NavigationClusterSender.formats.equals(java.util.List.of(true)), "first compass frame used wrong format");
+        });
+        test("switch while navigating defers compass TX until the route releases the cluster", () -> {
+            Fixture f = new Fixture();
+            f.start();
+            SystemClock.now += 3001;
+            f.accept(fix("gps", 0, 1003001, 0, true));
+            NavigationFeature.instance.routeActive = true;
+            AppSettings.kiaNaviFormat = true;
+            f.tick();
+            check(NavigationClusterSender.formats.equals(java.util.List.of(false)), "compass replaced active guidance");
+            NavigationFeature.instance.routeActive = false;
+            f.tick();
+            check(NavigationClusterSender.sent.equals(java.util.List.of(0, 0)), "compass did not reassert the same step");
+            check(NavigationClusterSender.formats.equals(java.util.List.of(false, true)), "deferred frame used old format");
+        });
+        test("existing circular blend and shortest-path transitions in both formats remain valid", () -> {
             Fixture f=new Fixture();
             for(int deg=-1080;deg<=1080;deg++) {
                 float out=(float)call(f.m,"normalize",new Class<?>[]{float.class},(float)deg);
                 check(out>=0 && out<360 && Math.abs((((deg%360)+360)%360)-out)<0.0001,"normalize "+deg);
             }
             check((float)call(f.m,"blendDegrees",new Class<?>[]{float.class,float.class,float.class},350f,10f,0.5f)==0,"circular blend");
-            for(int a=0;a<36;a+=3)for(int b=0;b<36;b+=3) {
-                int cur=a;for(int i=0;i<6&&cur!=b;i++)cur=(int)call(null,"nextStep",new Class<?>[]{int.class,int.class},cur,b);
-                check(cur==b,"transition "+a+" -> "+b);
+            for (boolean kiaNaviFormat : new boolean[]{false, true}) {
+                int fullCircle = kiaNaviFormat ? 48 : 36;
+                for (int a = 0; a < fullCircle; a += 3) {
+                    for (int b = 0; b < fullCircle; b += 3) {
+                        int current = a;
+                        for (int i = 0; i < fullCircle / 6 && current != b; i++) {
+                            current = CompassTxPolicy.nextStep(current, b, kiaNaviFormat);
+                        }
+                        check(current == b, "transition " + a + " -> " + b + " on " + fullCircle);
+                    }
+                }
             }
         });
         System.out.println("RESULT passed="+passed+" failed="+failed+" total="+(passed+failed));
@@ -404,7 +472,8 @@ public class NavigationFeature {
  }
  public void updateDeviceHeading(float h,float a,String name){lastHeading=h;}
  public boolean finishDirectionHeadingNeeded(){return false;}
- public boolean activeForCompassSuppression(){return false;}
+ public boolean routeActive;
+ public boolean activeForCompassSuppression(){return routeActive;}
  public boolean finishCompassSuppressed(){return false;}
 }
 ''',

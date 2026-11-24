@@ -23,6 +23,7 @@ import kia.app.core.AppLog;
 import kia.app.core.StateStore;
 import kia.app.core.model.NavigationState;
 import kia.app.navigation.cluster.NavigationClusterSender;
+import kia.app.navigation.capture.MviteNavigationMessage;
 import kia.app.navigation.capture.NavigationSourceArbitrator;
 import kia.app.navigation.capture.NavigationSourcePolicy;
 import kia.app.navigation.capture.TeyesIngressPolicy;
@@ -33,6 +34,8 @@ import kia.app.protocol.adapter.AdapterTxOutcome;
 
 public final class NavigationFeature {
     private static final String TAG = "KiaNav";
+    private static final String MVITE_SOURCE = "yandex_mvite";
+    private static final long MVITE_CAMERA_FRESH_MS = 12000L;
 
     public static final String ACTION_MANEUVER = "kia.app.ACTION_MANEUVER_DATA";
     public static final String ACTION_ETA = "kia.app.ACTION_ETA_DATA";
@@ -115,6 +118,16 @@ public final class NavigationFeature {
     private boolean navigationEnabledSynced;
     private boolean lastNavigationEnabled;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private int mviteExitNumber;
+    private MviteNavigationMessage mviteRoundabout;
+    private boolean mviteOverspeed;
+    private String mviteCameraDistance = "";
+    private final Runnable mviteCameraExpiry = () -> {
+        synchronized (NavigationFeature.this) {
+            mviteCameraDistance = "";
+            sendConfiguredText();
+        }
+    };
     private NavigationState state = NavigationState.empty();
     private long lastDirectManeuverAt;
     private long lastRouteFinishEtaAt;
@@ -412,6 +425,7 @@ public final class NavigationFeature {
 
     private static int navigationSourceFamily(String value) {
         String source = clean(value).toLowerCase(Locale.US);
+        if (MVITE_SOURCE.equals(source)) return NavigationSourcePolicy.SOURCE_MVITE;
         if (source.contains("2gis") || source.contains("dublgis")) {
             return NavigationSourcePolicy.SOURCE_DGIS;
         }
@@ -619,24 +633,121 @@ public final class NavigationFeature {
         } else if (ACTION_SPEED.equals(action) || KIA_ACTION_SPEED.equals(action)) {
             handleSpeed(intent);
         } else if (ACTION_EXCEEDED.equals(action) || KIA_ACTION_EXCEEDED.equals(action)) {
-            boolean exceeded = bool(intent, "exceeded", false);
-            if (exceeded) startOverspeedTextWindow();
-            else clearOverspeedTextWindow();
-            state = new NavigationState(state.active, state.finishReached, exceeded,
-                    state.maneuver, state.maneuverText, state.maneuverDistance,
-                    state.routeDistance, state.routeTime, state.arrivalTime,
-                    state.currentStreet, state.nextStreet, state.finishStreet,
-                    state.speedLimit, state.currentSpeed, first(text(intent, "source"), action),
-                    System.currentTimeMillis());
-            publishNavigationState();
-            sendConfiguredText();
-            if (state.active) AppLog.line(app, "Navigation exceeded=" + exceeded);
+            applyNavigationExceeded(bool(intent, "exceeded", false), source);
         }
         if (fullSnapshotMicroCleared
                 && !incomingRouteIdChangesActiveRoute(intent)
                 && !shouldTransmitActiveMicroToCluster()) {
             restoreMainVisualAfterMicroEnd("full_snapshot:" + clean(source), false);
         }
+    }
+
+    public synchronized void handleMvite(MviteNavigationMessage message) {
+        int event = switch (message.kind()) {
+            case ROUTE_ACTIVE -> message.active() ? NavigationSourcePolicy.EVENT_ROUTE_ACTIVE
+                    : NavigationSourcePolicy.EVENT_ROUTE_END;
+            case MANEUVER -> NavigationSourcePolicy.EVENT_ROUTE_ACTIVE;
+            default -> NavigationSourcePolicy.EVENT_PASSIVE;
+        };
+        if (!acceptNavigationSource(NavigationSourcePolicy.SOURCE_MVITE, event,
+                message.kind().name())) return;
+
+        switch (message.kind()) {
+            case ROUTE_ACTIVE:
+                if (message.active()) {
+                    if (!state.active) setActive(true, MVITE_SOURCE);
+                    touchYandexWatchdog(MVITE_SOURCE);
+                } else {
+                    resetMviteRouteContext();
+                    if (state.active) setActive(false, MVITE_SOURCE);
+                }
+                break;
+            case MANEUVER:
+                if (isRoundaboutManeuver(message.maneuver())) {
+                    mviteRoundabout = message;
+                } else if (mviteRoundabout != null) {
+                    mviteRoundabout = null;
+                    mviteExitNumber = 0;
+                }
+                applyMviteManeuver(message);
+                break;
+            case EXIT_NUMBER:
+                if (mviteExitNumber == message.value()) break;
+                mviteExitNumber = message.value();
+                if (state.active && mviteRoundabout != null) applyMviteManeuver(mviteRoundabout);
+                break;
+            case ROUTE_DISTANCE:
+            case REMAINING_TIME:
+            case ARRIVAL_TIME:
+                if (!state.active || state.finishReached) break;
+                touchYandexWatchdog(MVITE_SOURCE);
+                Intent eta = new Intent(ACTION_ETA).putExtra("source", MVITE_SOURCE);
+                if (message.kind() == MviteNavigationMessage.Kind.ROUTE_DISTANCE) {
+                    eta.putExtra("remaining_meters", String.valueOf(message.distanceMeters()));
+                } else if (message.kind() == MviteNavigationMessage.Kind.REMAINING_TIME) {
+                    int hours = message.value() / 60;
+                    int minutes = message.value() % 60;
+                    eta.putExtra("route_time", hours > 0 ? hours + " ч " + minutes + " мин"
+                            : minutes + " мин");
+                    eta.putExtra("arrival_time", state.arrivalTime);
+                } else {
+                    eta.putExtra("arrival_time", message.text());
+                }
+                handleEta(eta);
+                break;
+            case SPEED_LIMIT:
+                handleSpeed(new Intent(ACTION_SPEED).putExtra("source", MVITE_SOURCE)
+                        .putExtra("speed_limit", message.value())
+                        .putExtra("exceeded", mviteOverspeed));
+                break;
+            case OVERSPEED:
+                mviteOverspeed = message.active();
+                applyNavigationExceeded(mviteOverspeed, MVITE_SOURCE);
+                break;
+            case CAMERA:
+                handler.removeCallbacks(mviteCameraExpiry);
+                mviteCameraDistance = message.active() && state.active ? message.text() : "";
+                if (!mviteCameraDistance.isEmpty()) {
+                    handler.postDelayed(mviteCameraExpiry, MVITE_CAMERA_FRESH_MS);
+                }
+                sendConfiguredText();
+                break;
+        }
+    }
+
+    private void applyMviteManeuver(MviteNavigationMessage message) {
+        if (!state.active && !isFinishManeuver(message.maneuver())) setActive(true, MVITE_SOURCE);
+        if (!state.active) return;
+        touchYandexWatchdog(MVITE_SOURCE);
+        Intent guidance = new Intent(ACTION_MANEUVER).putExtra("source", MVITE_SOURCE)
+                .putExtra("imageId", message.maneuver())
+                .putExtra("distance", String.valueOf(message.distanceMeters()))
+                .putExtra("unit", "m").putExtra("next_street", message.text());
+        if (mviteRoundabout == message && mviteExitNumber > 0) {
+            guidance.putExtra("roundabout_exit", mviteExitNumber + " съезд");
+        }
+        handleManeuver(guidance);
+    }
+
+    private void resetMviteRouteContext() {
+        mviteExitNumber = 0;
+        mviteRoundabout = null;
+        mviteOverspeed = false;
+        mviteCameraDistance = "";
+        handler.removeCallbacks(mviteCameraExpiry);
+    }
+
+    private void applyNavigationExceeded(boolean exceeded, String source) {
+        if (exceeded) startOverspeedTextWindow();
+        else clearOverspeedTextWindow();
+        state = new NavigationState(state.active, state.finishReached, exceeded,
+                state.maneuver, state.maneuverText, state.maneuverDistance,
+                state.routeDistance, state.routeTime, state.arrivalTime,
+                state.currentStreet, state.nextStreet, state.finishStreet,
+                state.speedLimit, state.currentSpeed, source, System.currentTimeMillis());
+        publishNavigationState();
+        sendConfiguredText();
+        if (state.active) AppLog.line(app, "Navigation exceeded=" + exceeded);
     }
 
     private static int yandexIngressEvent(Intent intent) {
@@ -1686,6 +1797,7 @@ public final class NavigationFeature {
     private void forceInactive(String source) {
         long now = System.currentTimeMillis();
         String cleanSource = clean(source);
+        if (MVITE_SOURCE.equals(state.source)) resetMviteRouteContext();
         if (yandexContextHardReset(cleanSource)) {
             lastYandexCurrentSpeedAt = 0L;
         }
@@ -5777,10 +5889,18 @@ public final class NavigationFeature {
     }
 
     public synchronized void setSourceMode(int mode) {
+        int previous = AppSettings.navSourceMode(app);
         AppSettings.setNavSourceMode(app, mode);
         int selected = AppSettings.navSourceMode(app);
         String source = clean(state.source).toLowerCase(Locale.US);
-        if (selected == AppSettings.NAV_SOURCE_YANDEX && source.contains("2gis")) {
+        if (previous != selected && (selected == AppSettings.NAV_SOURCE_MVITE
+                || previous == AppSettings.NAV_SOURCE_MVITE)) {
+            resetMviteRouteContext();
+            cancelRoadSpeedLimitDelivery();
+            if (state.active || !TextUtils.isEmpty(state.speedLimit)) {
+                forceInactive("source_mode_" + AppSettings.navSourceLabel(app));
+            }
+        } else if (selected == AppSettings.NAV_SOURCE_YANDEX && source.contains("2gis")) {
             forceInactive("source_mode_yandex");
         } else if (selected == AppSettings.NAV_SOURCE_2GIS && isYandexSource(state.source)) {
             forceInactive("source_mode_2gis");
@@ -5806,6 +5926,11 @@ public final class NavigationFeature {
         int mode = AppSettings.navTextMode(app);
         if (finishDirectionShouldOverride()) {
             if (!sendDirectionToFinishIfNeeded(false)) sendFinishDirectionPlaceholder(false);
+            return;
+        }
+        if (AppSettings.navOverspeedTextEnabled(app) && MVITE_SOURCE.equals(state.source)
+                && mviteOverspeed && !mviteCameraDistance.isEmpty()) {
+            sendNavigationText("Камера " + mviteCameraDistance);
             return;
         }
         if (AppSettings.navOverspeedTextEnabled(app)

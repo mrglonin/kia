@@ -44,6 +44,7 @@
         <package android:name="com.syu.tire" />
         <package android:name="com.syu.canbus" />
         <package android:name="com.yf.navinfo" />
+        <package android:name="com.teyes.adas" />
         <package android:name="com.teyes.assistant" />
         <package android:name="ru.yandex.yandexnavi" />
         <package android:name="ru.dublgis.dgismobile" />
@@ -158,6 +159,7 @@
                 <action android:name="com.yf.navinfo" />
                 <action android:name="com.teyes.MapAssistantService" />
                 <action android:name="android.action.MOBILE_NAVIGATION" />
+                <action android:name="ssa.labs.monjaro.YN_HOOK" />
             </intent-filter>
         </receiver>
 

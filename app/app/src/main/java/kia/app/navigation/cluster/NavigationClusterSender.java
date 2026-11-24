@@ -111,11 +111,12 @@ public final class NavigationClusterSender {
         return outcome;
     }
 
-    public AdapterTxOutcome sendCompassStep(int uiStep) {
-        byte[] frame = AdapterProtocol.compassStep(uiStep);
+    public AdapterTxOutcome sendCompassStep(int uiStep, boolean kiaNaviFormat) {
+        byte[] frame = AdapterProtocol.compassStep(uiStep, kiaNaviFormat);
         AdapterTxOutcome outcome = AdapterGateway.get(app).send(
                 AdapterCommand.quiet("nav compass", frame));
-        recordTx("compass step=" + uiStep + " bytes=" + AdapterProtocol.hex(frame), outcome);
+        String format = kiaNaviFormat ? " format=kia-navi" : "";
+        recordTx("compass step=" + uiStep + format + " bytes=" + AdapterProtocol.hex(frame), outcome);
         return outcome;
     }
 

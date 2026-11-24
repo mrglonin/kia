@@ -77,6 +77,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private long lastCompassTxAttemptAt;
     private int lastTransmittedStep = -1;
     private int lastAttemptedStep = -1;
+    private float lastHeading = Float.NaN;
     private float smoothedSensorHeading = Float.NaN;
     private float lastPublishedSensorHeading = Float.NaN;
     private int sensorAccuracy = SensorManager.SENSOR_STATUS_UNRELIABLE;
@@ -85,6 +86,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     private boolean sensorRegistered;
     private boolean animationRunning;
     private boolean lastCompassSendAllowed;
+    private boolean kiaNaviFormat;
     private boolean preferGeomagneticSensor;
     private Location lastLocation;
 
@@ -92,13 +94,14 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         @Override
         public void run() {
             animationRunning = false;
+            refreshCompassFormat();
             if (!running || targetStep < 0 || !canSendCompass()) return;
             if (displayedStep < 0) {
                 sendStep(targetStep);
                 return;
             }
             if (displayedStep == targetStep) return;
-            if (!sendStep(nextStep(displayedStep, targetStep))) return;
+            if (!sendStep(CompassTxPolicy.nextStep(displayedStep, targetStep, kiaNaviFormat))) return;
             if (displayedStep != targetStep) {
                 animationRunning = true;
                 handler.postDelayed(this, ANIMATION_STEP_MS);
@@ -163,6 +166,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         }
         running = true;
         startedAt = SystemClock.elapsedRealtime();
+        refreshCompassFormat();
         AdapterGateway gateway = AdapterGateway.get(app);
         lastUsbEpoch = gateway.connectionEpoch();
         lastCompassSendAllowed = false;
@@ -198,6 +202,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         lastSuccessfulCompassTxAt = 0L;
         lastCompassTxAttemptAt = 0L;
         lastAttemptedStep = -1;
+        lastHeading = Float.NaN;
         smoothedSensorHeading = Float.NaN;
         lastPublishedSensorHeading = Float.NaN;
         preferGeomagneticSensor = false;
@@ -564,8 +569,9 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     }
 
     private void updateTargetStep(float heading) {
-        int step = Math.round(normalize(heading) / 30f) * 3;
-        if (step == 36) step = 0;
+        lastHeading = heading;
+        refreshCompassFormat();
+        int step = CompassTxPolicy.headingStep(heading, kiaNaviFormat);
         boolean sameTarget = step == targetStep;
         targetStep = step;
         restoreDisplayedStepFromStore();
@@ -605,36 +611,45 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
 
     private void restoreDisplayedStepFromStore() {
         if (displayedStep >= 0) return;
-        int stored = lastCompassStepFromStore();
+        NavigationState navigation = StateStore.navigation();
+        if (navigation == null) return;
+        int stored = CompassTxPolicy.storedStep(navigation.clusterTx, kiaNaviFormat);
         if (stored < 0) return;
         displayedStep = stored;
         AppLog.line(app, "Compass: restored step=" + displayedStep
-                + (targetStep >= 0 ? " target=" + normalizeStep(targetStep) : ""));
+                + (targetStep >= 0 ? " target=" + targetStep : ""));
     }
 
-    private static int lastCompassStepFromStore() {
-        NavigationState navigation = StateStore.navigation();
-        if (navigation == null) return -1;
-        return CompassTxPolicy.storedStep(navigation.clusterTx);
+    private void refreshCompassFormat() {
+        boolean selected = AppSettings.compassKiaNaviFormat(app);
+        if (selected == kiaNaviFormat) return;
+        kiaNaviFormat = selected;
+        displayedStep = -1;
+        targetStep = Float.isNaN(lastHeading) ? -1 : CompassTxPolicy.headingStep(lastHeading, selected);
+        lastTransmittedStep = -1;
+        lastAttemptedStep = -1;
+        lastSuccessfulCompassTxAt = 0L;
+        lastCompassTxAttemptAt = 0L;
+        animationRunning = false;
+        handler.removeCallbacks(animate);
     }
 
     private boolean sendStep(int step) {
         if (!canSendCompass()) return false;
         AdapterGateway gateway = AdapterGateway.get(app);
         if (!gateway.usbReady()) return false;
-        int normalizedStep = normalizeStep(step);
         long now = SystemClock.elapsedRealtime();
         if (!CompassTxPolicy.retryAllowed(
-                normalizedStep, lastAttemptedStep,
+                step, lastAttemptedStep,
                 now, lastCompassTxAttemptAt, COMPASS_TX_RETRY_MS)) {
             return false;
         }
-        lastAttemptedStep = normalizedStep;
+        lastAttemptedStep = step;
         lastCompassTxAttemptAt = now;
-        AdapterTxOutcome outcome = sender.sendCompassStep(normalizedStep);
+        AdapterTxOutcome outcome = sender.sendCompassStep(step, kiaNaviFormat);
         if (outcome == AdapterTxOutcome.WRITTEN) {
-            displayedStep = normalizedStep;
-            lastTransmittedStep = normalizedStep;
+            displayedStep = step;
+            lastTransmittedStep = step;
             lastSuccessfulCompassTxAt = now;
             lastCompassSendAllowed = true;
             lastUsbEpoch = gateway.connectionEpoch();
@@ -650,8 +665,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     }
 
     private void sendCurrentStepIfNeeded(boolean force) {
-        if (displayedStep < 0
-                || (!force && normalizeStep(displayedStep) == lastTransmittedStep)) return;
+        if (displayedStep < 0 || (!force && displayedStep == lastTransmittedStep)) return;
         sendStep(displayedStep);
     }
 
@@ -666,6 +680,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
     }
 
     private void refreshCompassTxContext(long now) {
+        refreshCompassFormat();
         AdapterGateway gateway = AdapterGateway.get(app);
         boolean sendAllowed = canSendCompass();
         boolean usbReady = gateway.usbReady();
@@ -687,7 +702,7 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         if (!reassert && !keepAlive && !retry) return;
         if (reassert) lastTransmittedStep = -1;
         restoreDisplayedStepFromStore();
-        if (displayedStep < 0 && targetStep >= 0) displayedStep = normalizeStep(targetStep);
+        if (displayedStep < 0 && targetStep >= 0) displayedStep = targetStep;
         sendCurrentStepIfNeeded(true);
         startAnimationIfNeeded();
     }
@@ -716,21 +731,6 @@ public final class CompassMonitor implements LocationListener, SensorEventListen
         NavigationFeature navigation = NavigationFeature.get(app);
         return (!navigation.activeForCompassSuppression() && !navigation.finishCompassSuppressed())
                 || AppSettings.compassForceEnabled(app);
-    }
-
-    private static int nextStep(int current, int target) {
-        int c = normalizeStep(current);
-        int t = normalizeStep(target);
-        int forward = (t - c + 36) % 36;
-        int backward = (c - t + 36) % 36;
-        if (forward == 0) return t;
-        return normalizeStep(c + (forward <= backward ? 3 : -3));
-    }
-
-    private static int normalizeStep(int step) {
-        int out = ((step % 36) + 36) % 36;
-        out = Math.round(out / 3f) * 3;
-        return out == 36 ? 0 : out;
     }
 
     private void acquireWakeLock() {

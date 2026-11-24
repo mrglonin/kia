@@ -61,6 +61,15 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
     static void receiveLegacy(Context context, Intent intent) {
         if (context == null || intent == null) return;
         String action = intent.getAction();
+        if (MviteNavigationMessage.ACTION.equals(action)) {
+            if (!sourceIngressAllowed(context, NavigationSourcePolicy.SOURCE_MVITE)) return;
+            String payload = intent.getStringExtra("payload");
+            MviteNavigationMessage message = MviteNavigationMessage.parse(payload);
+            if (message == null || duplicate(action + '|' + payload)) return;
+            prepareService(context);
+            NavigationFeature.get(context).handleMvite(message);
+            return;
+        }
         if (!knownLegacyAction(action)) {
             AppLog.navigation(context, "Navigation legacy broadcast rejected: action=" + action);
             return;
@@ -185,8 +194,11 @@ public final class NavBroadcastReceiver extends BroadcastReceiver {
     }
 
     private static boolean duplicate(Intent intent) {
+        return duplicate(signature(intent));
+    }
+
+    private static boolean duplicate(String signature) {
         long now = System.currentTimeMillis();
-        String signature = signature(intent);
         synchronized (NavBroadcastReceiver.class) {
             if (signature.equals(lastSignature) && now - lastSignatureAt <= DUPLICATE_WINDOW_MS) {
                 return true;
