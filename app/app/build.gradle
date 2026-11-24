@@ -3,9 +3,9 @@ plugins {
     id "org.jetbrains.kotlin.android"
 }
 
-def kiaVersionCode = 384
-def kiaVersionName = "23.30-sunroof"
-def kiaReleaseApk = "kia_384_sunroof.apk"
+def kiaVersionCode = 385
+def kiaVersionName = "23.31-sunroof"
+def kiaReleaseApk = "kia_385_sunroof.apk"
 def publicReleaseKey = rootProject.file("../signing/kia-debug-release.keystore")
 
 android {

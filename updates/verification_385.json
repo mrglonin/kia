@@ -1,0 +1,33 @@
+{
+  "created_utc": "2026-11-24T08:38:52.620350+00:00",
+  "artifact": {
+    "version_name": "23.31-sunroof",
+    "version_code": 385,
+    "asset_name": "kia_385_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.31-385/kia_385_sunroof.apk",
+    "sha256": "3ca3a76cdb6d421178e1ab18e089c9bac5bf1000614a348b4bed6b4d2c45689e",
+    "size": 8238748
+  },
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "source_base": "b0051ebce75d8a0d794c9095dfc92e97d6a36673",
+  "build": {
+    "variant": "release",
+    "jdk": 17,
+    "kotlin": "2.3.21",
+    "zipalign": true,
+    "zip_crc": true,
+    "signature_matches_384": true
+  },
+  "validation": {
+    "release_unit_tests": {
+      "tests": 519,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "lint_errors": 0,
+    "lint_warnings": 83,
+    "emulator": "Frameless dashboard roof in both positions, using simulated vehicle events on Android. The release video shows the opening and closing transitions.",
+    "physical_car_tested": false
+  }
+}
