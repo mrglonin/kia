@@ -1,0 +1,32 @@
+{
+  "created_utc": "2026-11-24T09:17:17.909994+00:00",
+  "artifact": {
+    "version_name": "23.34-sunroof",
+    "version_code": 388,
+    "asset_name": "kia_388_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.34-388/kia_388_sunroof.apk",
+    "sha256": "7512d195a7f63f29997bbd02dbe8c8eefe7e18fd9d3dd1b5240ce4c456b5553e",
+    "size": 8661288
+  },
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "source_base": "0a72dfd59363fb45af816590988c962015842d58",
+  "build": {
+    "variant": "release",
+    "jdk": 17,
+    "kotlin": "2.3.21",
+    "zipalign": true,
+    "zip_crc": true,
+    "signature_matches_387": true
+  },
+  "validation": {
+    "release_unit_tests": {
+      "tests": 519,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "lint_errors": 0,
+    "lint_warnings": 108,
+    "physical_car_tested": false
+  }
+}
