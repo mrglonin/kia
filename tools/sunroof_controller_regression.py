@@ -237,7 +237,9 @@ public class ControllerBackgroundProof {
   worker.start();worker.join();Handler.drain();
  }
  static void reset()throws Exception{
-  roof.stop();android.content.Context.clearPreferences();android.os.PowerManager.interactive=true;kia.app.protocol.adapter.AdapterGateway.connected=true;kia.app.protocol.adapter.AdapterGateway.epoch=1;SunroofSoundPlayer.warningPlays=0;SunroofSoundPlayer.transitionPlays=0;SunroofSoundPlayer.actualStops=0;SunroofSoundPlayer.playing=false;kia.app.core.settings.AppSettings.masterEnabled=true;kia.app.core.settings.AppSettings.parkingEnabled=true;kia.app.core.settings.AppSettings.transitionEnabled=false;StateStore.setVehicle(context,VehicleState.empty());Handler.drain();
+  roof.stop();
+  roof.setActivityVisible(false);
+  android.content.Context.clearPreferences();android.os.PowerManager.interactive=true;kia.app.protocol.adapter.AdapterGateway.connected=true;kia.app.protocol.adapter.AdapterGateway.epoch=1;SunroofSoundPlayer.warningPlays=0;SunroofSoundPlayer.transitionPlays=0;SunroofSoundPlayer.actualStops=0;SunroofSoundPlayer.playing=false;kia.app.core.settings.AppSettings.masterEnabled=true;kia.app.core.settings.AppSettings.parkingEnabled=true;kia.app.core.settings.AppSettings.transitionEnabled=false;StateStore.setVehicle(context,VehicleState.empty());Handler.drain();
   TpmsAlertController.severity=0;TpmsWarningOverlayController.visible=false;wm.attachImmediately=true;wm.adds=0;wm.removes=0;
   SystemClock.now=100;rootClock();router=new FrameRouter(context);roof.start();frame(false,100);
  }
@@ -299,6 +301,89 @@ public class ControllerBackgroundProof {
   reset();kia.app.core.settings.AppSettings.transitionEnabled=true;frame(true,200);
   SunroofOverlayView immediate=view();immediate.detach();roof.apply();
   check(view()!=null&&view()!=immediate&&view().isAttachedToWindow()&&wm.adds==2&&wm.removes==1,"synchronous attachment was not tracked for later genuine detach recovery");
+ }
+ static void foregroundRegressions()throws Exception{
+  reset();
+  roof.setActivityVisible(true);
+  kia.app.core.settings.AppSettings.transitionEnabled=true;
+  frame(true,200);
+  check(view()==null&&wm.adds==0,"real opening added an overlay while the activity was visible");
+  check(StateStore.vehicle().sunroofKnown&&StateStore.vehicle().sunroofOpen,
+   "foreground suppression lost the real open state used by the dashboard");
+  check(SunroofStateMemory.snapshot(context).open,"foreground suppression lost the stored roof state");
+  check(SunroofSoundPlayer.transitionPlays==1&&SunroofSoundPlayer.playing,
+   "foreground opening did not play its enabled transition voice");
+  frame(true,201);roof.apply();Handler.advance(1_100);
+  check(view()==null&&wm.adds==0&&SunroofSoundPlayer.transitionPlays==1
+   &&SunroofSoundPlayer.actualStops==0&&SunroofSoundPlayer.playing,
+   "a duplicate packet or refresh disturbed the foreground opening cue");
+  roof.setActivityVisible(false);
+  check(view()==null&&wm.adds==0&&SunroofSoundPlayer.transitionPlays==1,
+   "backgrounding replayed the opening transition from the dashboard");
+  SunroofSoundPlayer.complete();
+  frame(false,1_200);
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.CLOSING,
+   "a fresh closing event did not show its window in the background");
+  check(SunroofSoundPlayer.transitionPlays==2&&SunroofSoundPlayer.playing,
+   "a fresh background event did not play its own transition voice");
+  roof.setActivityVisible(true);
+  check(view()==null&&wm.removes==1&&SunroofSoundPlayer.playing
+   &&SunroofSoundPlayer.actualStops==0,
+   "foregrounding did not remove the shown transition while preserving its voice");
+  roof.setActivityVisible(false);
+  check(view()==null&&wm.adds==1&&SunroofSoundPlayer.transitionPlays==2,
+   "the already shown transition reappeared after returning to the background");
+
+  reset();
+  roof.setActivityVisible(true);
+  frame(true,200);
+  TpmsAlertController.severity=2;
+  TpmsWarningOverlayController.visible=true;
+  roof.apply();
+  check(roof.statusSummary().contains("critical_defer"),"hazard fixture did not enter the critical defer path");
+  roof.setActivityVisible(false);
+  TpmsWarningOverlayController.visible=false;
+  roof.apply();
+  check(view()==null&&wm.adds==0,"clearing a hazard replayed an opening already handled in the dashboard");
+
+  reset();
+  roof.setActivityVisible(true);
+  acc(true,150);frame(true,200);acc(false,300);
+  check(view()==null&&wm.adds==0,"real parking warning opened over the visible activity");
+  check(SunroofSoundPlayer.warningPlays==1&&SunroofSoundPlayer.playing,
+   "foreground parking warning lost its mandatory cue");
+  for(String reason:new String[]{"homekey","recentapps"}){
+   context.sendBroadcast(new android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
+    .putExtra("reason",reason));
+   check(!SunroofStateMemory.snapshot(context).acknowledged&&SunroofSoundPlayer.playing,
+    "system navigation with no roof window acknowledged the warning: "+reason);
+  }
+  roof.setActivityVisible(false);
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,
+   "the unacknowledged parking warning did not appear in the background");
+  roof.setActivityVisible(true);
+  check(view()==null&&SunroofSoundPlayer.playing&&SunroofSoundPlayer.actualStops==0
+   &&!SunroofStateMemory.snapshot(context).acknowledged,
+   "returning to the dashboard cut short or acknowledged the parking warning");
+  SunroofSoundPlayer.complete();roof.apply();
+  roof.setActivityVisible(false);
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING
+   &&!SunroofSoundPlayer.playing&&SunroofSoundPlayer.warningPlays==1,
+   "returning to the background lost the warning or replayed its completed cue");
+  view().dismiss.run();
+  check(view()==null&&SunroofStateMemory.snapshot(context).acknowledged,
+   "the restored parking warning could not be acknowledged");
+
+  reset();
+  roof.setActivityVisible(true);
+  roof.preview(true);
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.OPENING,
+   "the visible activity blocked an explicit opening preview");
+  roof.previewParkingWarning();
+  check(view()!=null&&view().kind==SunroofAlertPolicy.Kind.PARKING_WARNING,
+   "the visible activity blocked an explicit parking preview");
+  check(!StateStore.vehicle().sunroofOpen&&!SunroofStateMemory.snapshot(context).open,
+   "a foreground preview modified the real roof state");
  }
  static void sleepAudioRegressions()throws Exception{
   // Reproduce the physical ordering: ACC off, then native sleep 51 ms into the cue.
@@ -457,6 +542,7 @@ public class ControllerBackgroundProof {
   }
   pendingAttachmentRegressions();
   sleepAudioRegressions();
+  foregroundRegressions();
   roof.stop();System.out.println("Sunroof controller production regression passed: "+checks+" assertions");
  }
 }

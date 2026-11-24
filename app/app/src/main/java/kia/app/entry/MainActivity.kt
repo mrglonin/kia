@@ -728,6 +728,11 @@ class MainActivity : Activity() {
         return isLandscapeWindow() || screenWidthDp() >= 620
     }
 
+    override fun onStart() {
+        super.onStart()
+        SunroofOverlayController.get(this).setActivityVisible(true)
+    }
+
     override @SuppressLint("UnspecifiedRegisterReceiverFlag") protected fun onResume() {
         super.onResume()
         activityVisible = true
@@ -771,6 +776,11 @@ class MainActivity : Activity() {
             unregisterReceiver(stateReceiver)
         } catch (ignored: Exception) {}
         super.onPause()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        SunroofOverlayController.get(this).setActivityVisible(false)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

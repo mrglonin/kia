@@ -43,6 +43,7 @@ class SunroofOverlayController private constructor(context: Context) {
     @kotlin.concurrent.Volatile private var diagnostics: String = "running=false window=false"
     private var lastDiagnosticKey: String = ""
     private var running: Boolean = false
+    private var activityVisible = false
     private var observerRunning: Boolean = false
     private var accKnown: Boolean = false
     private var accOn: Boolean = false
@@ -145,6 +146,16 @@ class SunroofOverlayController private constructor(context: Context) {
 
     fun apply() {
         postCurrent(Runnable { if (running) applyOnMain() })
+    }
+
+    fun setActivityVisible(visible: Boolean) {
+        postCurrent(
+            Runnable {
+                if (activityVisible == visible) return@Runnable
+                activityVisible = visible
+                if (running) applyOnMain()
+            }
+        )
     }
 
     @kotlin.jvm.Synchronized
@@ -359,9 +370,12 @@ class SunroofOverlayController private constructor(context: Context) {
                     real.kind == kia.app.sunroof.SunroofAlertPolicy.Kind.CLOSING
             ) {
                 realSequenceDeferred = true
+                val handledInActivity =
+                    shownSequence == real.sequence && !shownDemo && (activityVisible || overlay == null)
                 if (
-                    now - realSequenceStartedAt >=
-                        SunroofOverlayController.DEFERRED_TRANSITION_TTL_MS
+                    handledInActivity ||
+                        now - realSequenceStartedAt >=
+                            SunroofOverlayController.DEFERRED_TRANSITION_TTL_MS
                 ) {
                     policy.finish(real.sequence)
                 }
@@ -421,9 +435,16 @@ class SunroofOverlayController private constructor(context: Context) {
             return
         }
         permissionLogged = false
-        show(next, demo != null)
+        val demonstration = demo != null
+        val showWindow = !activityVisible || demonstration
+        present(next, demonstration, showWindow)
         reportDecision(
-            if (overlay == null) "window_failed" else "shown",
+            when {
+                !showWindow -> "activity_visible"
+                overlay != null -> "shown"
+                shownSequence == next.sequence -> "transition_handled"
+                else -> "window_failed"
+            },
             next,
             enabled,
             connected,
@@ -567,14 +588,16 @@ class SunroofOverlayController private constructor(context: Context) {
         hide()
     }
 
-    private fun show(
+    private fun present(
         decision: kia.app.sunroof.SunroofAlertPolicy.Decision,
         demonstration: Boolean,
+        showWindow: Boolean,
     ) {
         val warning: Boolean =
             decision.kind == kia.app.sunroof.SunroofAlertPolicy.Kind.PARKING_WARNING
         val allowAudio: Boolean = warning || AppSettings.sunroofTransitionSoundEnabled(app)
         sound.setEnabled(allowAudio)
+        if (!showWindow) removeOverlay()
         val preserveWarningAudio: Boolean =
             warning && !demonstration && realWarningAudioSequence == decision.sequence
         // addView can return before the first attachment callback. A second state
@@ -583,17 +606,48 @@ class SunroofOverlayController private constructor(context: Context) {
             if (preserveWarningAudio) hideWindow() else hide()
         }
         if (
-            overlay != null &&
-                shownSequence == decision.sequence &&
+            shownSequence == decision.sequence &&
                 shownKind == decision.kind &&
-                shownDemo == demonstration
+                shownDemo == demonstration &&
+                (!showWindow || overlay != null || !warning)
         ) {
+            // A transient already handled inside KIA should not animate again outside it.
             if (allowAudio && !audioEnabled) playDecisionAudio(decision, demonstration)
             audioEnabled = allowAudio
             return
         }
         if (preserveWarningAudio) hideWindow() else hide()
-        if (windowManager == null) return
+        if (showWindow && !attachOverlay(decision, demonstration, warning, preserveWarningAudio))
+            return
+        shownSequence = decision.sequence
+        shownKind = decision.kind
+        shownDemo = demonstration
+        sound.setEnabled(allowAudio)
+        audioEnabled = allowAudio
+        if (allowAudio) playDecisionAudio(decision, demonstration)
+        if (!warning) {
+            val sequence: Long = decision.sequence
+            val current: Long = generation
+            finishTransient = Runnable {
+                if (
+                    generation != current || shownSequence != sequence || shownDemo != demonstration
+                )
+                    return@Runnable
+                if (demonstration) demo = qaPolicy.finish(sequence) else policy.finish(sequence)
+                hide()
+                applyOnMain()
+            }
+            main.postDelayed(finishTransient!!, SunroofOverlayView.TRANSIENT_DURATION_MS)
+        }
+    }
+
+    private fun attachOverlay(
+        decision: kia.app.sunroof.SunroofAlertPolicy.Decision,
+        demonstration: Boolean,
+        warning: Boolean,
+        preserveWarningAudio: Boolean,
+    ): Boolean {
+        if (windowManager == null) return false
         val next: SunroofOverlayView = SunroofOverlayView(windowContext!!)
         next.addOnAttachStateChangeListener(
             object : View.OnAttachStateChangeListener {
@@ -614,18 +668,12 @@ class SunroofOverlayController private constructor(context: Context) {
                 android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
         )
         try {
-            windowManager.addView(next, layoutParams(warning, carWidthPx))
             overlay = next
+            windowManager.addView(next, layoutParams(warning, carWidthPx))
             overlayWasAttached = next.isAttachedToWindow()
-            shownSequence = decision.sequence
-            shownKind = decision.kind
-            shownDemo = demonstration
             next.present(decision.kind!!, Runnable { this.dismissOnMain() })
         } catch (error: RuntimeException) {
-            next.stopAnimations()
-            try {
-                windowManager.removeViewImmediate(next)
-            } catch (ignored: RuntimeException) {}
+            removeOverlay()
             if (!preserveWarningAudio) sound.stop()
             finishUnavailableTransient(decision, demonstration)
             status = "Люк: окно недоступно"
@@ -633,26 +681,10 @@ class SunroofOverlayController private constructor(context: Context) {
                 windowFailureLogged = true
                 AppLog.line(app, "Sunroof overlay add failed " + error.javaClass.getSimpleName())
             }
-            return
+            return false
         }
         windowFailureLogged = false
-        sound.setEnabled(allowAudio)
-        audioEnabled = allowAudio
-        if (allowAudio) playDecisionAudio(decision, demonstration)
-        if (!warning) {
-            val sequence: Long = decision.sequence
-            val current: Long = generation
-            finishTransient = Runnable {
-                if (
-                    generation != current || shownSequence != sequence || shownDemo != demonstration
-                )
-                    return@Runnable
-                if (demonstration) demo = qaPolicy.finish(sequence) else policy.finish(sequence)
-                hide()
-                applyOnMain()
-            }
-            main.postDelayed(finishTransient!!, SunroofOverlayView.TRANSIENT_DURATION_MS)
-        }
+        return true
     }
 
     private fun hide() {
@@ -680,11 +712,15 @@ class SunroofOverlayController private constructor(context: Context) {
         if (finishTransient != null) main.removeCallbacks(finishTransient!!)
         finishTransient = null
         audioEnabled = false
+        shownSequence = Long.MIN_VALUE
+        shownKind = kia.app.sunroof.SunroofAlertPolicy.Kind.NONE
+        removeOverlay()
+    }
+
+    private fun removeOverlay() {
         val previous = overlay
         overlay = null
         overlayWasAttached = false
-        shownSequence = Long.MIN_VALUE
-        shownKind = kia.app.sunroof.SunroofAlertPolicy.Kind.NONE
         if (previous != null) {
             previous.stopAnimations()
             if (windowManager != null) {
@@ -776,7 +812,10 @@ class SunroofOverlayController private constructor(context: Context) {
                         apply()
                     } else if (Intent.ACTION_CLOSE_SYSTEM_DIALOGS.equals(action)) {
                         val reason = intent.getStringExtra("reason")
-                        if ("homekey".equals(reason) || "recentapps".equals(reason)) {
+                        if (
+                            overlay != null &&
+                                ("homekey".equals(reason) || "recentapps".equals(reason))
+                        ) {
                             dismissCurrent()
                         }
                     }
