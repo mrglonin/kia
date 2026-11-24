@@ -1,0 +1,39 @@
+{
+  "created_utc": "2026-11-24T12:52:23.110574+00:00",
+  "artifact": {
+    "version_name": "23.35-sunroof",
+    "version_code": 389,
+    "asset_name": "kia_389_sunroof.apk",
+    "download_url": "https://github.com/mrglonin/kia/releases/download/v23.35-389/kia_389_sunroof.apk",
+    "sha256": "46bdb50797ea16522a64b146ae6205ce82f91108f847572b8601484096af284f",
+    "size": 8662524
+  },
+  "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
+  "source_base": "378679af7fe96e84fb16b66a26ed891ca1345b0e",
+  "build": {
+    "variant": "release",
+    "jdk": 17,
+    "kotlin": "2.3.21",
+    "zipalign": true,
+    "zip_crc": true,
+    "signature_matches_388": true
+  },
+  "validation": {
+    "release_unit_tests": {
+      "tests": 519,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "lint_errors": 0,
+    "lint_warnings": 109,
+    "foreground_roof_emulator": {
+      "local_build_version_code": 388,
+      "local_apk_sha256": "6e00dc75930f1fbd5005561d0177861a581018795ff8421b78053174e091a9f2",
+      "scenarios": 6,
+      "assertions": 122,
+      "failures": 0
+    },
+    "physical_car_tested": false
+  }
+}
