@@ -151,6 +151,7 @@ public final class NavigationFeature {
     private int lastSentSpeedLimit = -1;
     private final RoadSpeedLimitTxPolicy roadSpeedLimitTx = new RoadSpeedLimitTxPolicy();
     private final RoadSpeedLimitRepeatPolicy roadSpeedLimitRepeat = new RoadSpeedLimitRepeatPolicy();
+    private DashboardRoadSpeedLimit dashboardRoadLimit = DashboardRoadSpeedLimit.NONE;
     private int knownRoadSpeedLimitSource;
     private int knownRoadSpeedLimitSourceMode;
     private String pendingRoadSpeedLimitTrigger = "fresh";
@@ -350,6 +351,7 @@ public final class NavigationFeature {
         navigationEnabledSynced = true;
         lastNavigationEnabled = enabled;
         if (!enabled) {
+            dashboardRoadLimit = DashboardRoadSpeedLimit.NONE;
             cancelRoadSpeedLimitDelivery();
             if (changed || state.active || state.finishReached
                     || state.speedExceeded || !TextUtils.isEmpty(state.speedLimit)
@@ -398,6 +400,7 @@ public final class NavigationFeature {
                 && stateSource != source;
         if (event == NavigationSourcePolicy.EVENT_ROUTE_ACTIVE
                 && (result.switchedOwner || stateOwnedByOther)) {
+            dashboardRoadLimit = DashboardRoadSpeedLimit.NONE;
             cancelRoadSpeedLimitDelivery();
             AppLog.navigation(app, "NAV_SOURCE_HANDOFF "
                     + NavigationSourcePolicy.sourceName(
@@ -434,6 +437,12 @@ public final class NavigationFeature {
             return NavigationSourcePolicy.SOURCE_YANDEX;
         }
         return NavigationSourcePolicy.SOURCE_NONE;
+    }
+
+    public synchronized DashboardRoadSpeedLimit dashboardRoadSpeedLimit() {
+        return NavigationSourcePolicy.ingressAllowed(AppSettings.navigationEnabled(app),
+                AppSettings.navSourceMode(app), dashboardRoadLimit.source)
+                ? dashboardRoadLimit : DashboardRoadSpeedLimit.NONE;
     }
 
     public synchronized boolean active() {
@@ -1010,7 +1019,7 @@ public final class NavigationFeature {
                                                  String rawJson) {
         handleDgisDashboard(activeMode, maneuverIcon, maneuverDescription, maneuverDistance,
                 totalDistance, remainingTime, arrivalTime, speedLimit, exceeded,
-                Double.NaN, Double.NaN, rawJson);
+                Double.NaN, Double.NaN, rawJson, true);
     }
 
     public synchronized void handleDgisDashboard(String activeMode, String maneuverIcon,
@@ -1019,7 +1028,7 @@ public final class NavigationFeature {
                                                  String remainingTime, String arrivalTime,
                                                  String speedLimit, boolean exceeded,
                                                  double destinationLat, double destinationLon,
-                                                 String rawJson) {
+                                                 String rawJson, boolean newSnapshot) {
         String mode = clean(activeMode).toLowerCase(Locale.US);
         String routeDistance = dashboardDistance(totalDistance);
         String routeTime = clean(remainingTime);
@@ -1041,10 +1050,15 @@ public final class NavigationFeature {
             return;
         }
         rememberFinishPoint(destinationLat, destinationLon, "2gis_dashboard");
+        if (!routeMode && !routeData && state.source.toLowerCase(Locale.US).contains("2gis")
+                && state.active) {
+            forceInactive("2gis_dashboard_idle");
+        }
+        if (newSnapshot) {
+            dashboardRoadLimit = dashboardRoadLimit.observe(NavigationSourcePolicy.SOURCE_DGIS,
+                    speedLimit, SystemClock.elapsedRealtime());
+        }
         if (!routeMode && !routeData) {
-            if (state.source.toLowerCase(Locale.US).contains("2gis") && state.active) {
-                forceInactive("2gis_dashboard_idle");
-            }
             applyDgisRoadSpeedLimit(speedLimit, exceeded, (routeMode || routeData) && !finish);
             return;
         }
@@ -1213,6 +1227,7 @@ public final class NavigationFeature {
             }
             inactiveReason = cleanSource;
             boolean preserveRoadContext = shouldPreserveRoadContext(cleanSource, now);
+            if (!preserveRoadContext) dashboardRoadLimit = DashboardRoadSpeedLimit.NONE;
             String retainedSpeedLimit = preserveRoadContext ? state.speedLimit : "";
             String retainedSource = preserveRoadContext ? state.source : cleanSource;
             boolean retainedExceeded = preserveRoadContext && state.speedExceeded;
@@ -1803,6 +1818,7 @@ public final class NavigationFeature {
         }
         sourceArbitrator.release(navigationSourceFamily(state.source));
         boolean preserveRoadContext = shouldPreserveRoadContext(cleanSource, now);
+        if (!preserveRoadContext) dashboardRoadLimit = DashboardRoadSpeedLimit.NONE;
         String retainedSpeedLimit = preserveRoadContext ? state.speedLimit : "";
         String retainedSource = preserveRoadContext ? state.source : cleanSource;
         boolean retainedExceeded = preserveRoadContext && state.speedExceeded;
@@ -3623,6 +3639,10 @@ public final class NavigationFeature {
         if (roadLimitSampleFresh && (roadLimitClearSignal || speedNumber(limit) <= 0)) {
             cancelRoadSpeedLimitDelivery();
         }
+        if (roadLimitPresent) {
+            dashboardRoadLimit = dashboardRoadLimit.observe(navigationSourceFamily(source),
+                    roadLimitClearSignal ? "" : limit, nowElapsed);
+        }
         boolean confirmedRoadLimitClear = false;
         if (!TextUtils.isEmpty(current) && yandexSource && currentSampleFresh) {
             lastYandexCurrentSpeedAt = nowElapsed;
@@ -3736,6 +3756,10 @@ public final class NavigationFeature {
             lastYandexCurrentSpeedAt = nowElapsed;
             scheduleYandexCurrentSpeedExpiry();
         }
+        if (roadLimitPresent && navigationSourceFamily(state.source) == NavigationSourcePolicy.SOURCE_YANDEX) {
+            dashboardRoadLimit = dashboardRoadLimit.observe(NavigationSourcePolicy.SOURCE_YANDEX,
+                    roadLimitKmh, nowElapsed);
+        }
         if (roadLimitPresent && roadLimitKmh > 0) {
             lastYandexRoadSpeedLimitAt = nowElapsed;
             yandexSpeedLimitClearCandidateAt = 0L;
@@ -3757,6 +3781,9 @@ public final class NavigationFeature {
 
     /** A new source sample explicitly lacking a road limit revokes only pending delivery. */
     public synchronized void observeYandexRoadSpeedLimitMissing() {
+        if (dashboardRoadLimit.source == NavigationSourcePolicy.SOURCE_YANDEX) {
+            dashboardRoadLimit = DashboardRoadSpeedLimit.NONE;
+        }
         if (roadSpeedLimitRepeat.currentValue() > 0
                 && knownRoadSpeedLimitSource == NavigationSourcePolicy.SOURCE_YANDEX) {
             cancelRoadSpeedLimitDelivery();
@@ -5892,6 +5919,7 @@ public final class NavigationFeature {
         int previous = AppSettings.navSourceMode(app);
         AppSettings.setNavSourceMode(app, mode);
         int selected = AppSettings.navSourceMode(app);
+        if (previous != selected) dashboardRoadLimit = DashboardRoadSpeedLimit.NONE;
         String source = clean(state.source).toLowerCase(Locale.US);
         if (previous != selected && (selected == AppSettings.NAV_SOURCE_MVITE
                 || previous == AppSettings.NAV_SOURCE_MVITE)) {

@@ -1,5 +1,6 @@
 package kia.app.tpms;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -18,6 +19,8 @@ import java.util.Locale;
 import java.util.Map;
 
 import kia.app.R;
+import kia.app.sunroof.SunroofStateMemory;
+import kia.app.navigation.domain.DashboardRoadSpeedLimit;
 import kia.app.core.model.NavigationState;
 import kia.app.core.model.TpmsState;
 import kia.app.core.model.VehicleState;
@@ -29,7 +32,10 @@ public final class TpmsDashboardView extends View {
     private final Map<Integer, Bitmap> cache = new HashMap<>();
     private TpmsState state = TpmsState.empty();
     private NavigationState navigation = NavigationState.empty();
-    private VehicleState vehicle = VehicleState.empty();
+    private final RoofSlide roofSlide;
+    private DashboardSunroof carRenderer;
+    private Boolean reportedRoof;
+    private DashboardRoadSpeedLimit roadLimit = DashboardRoadSpeedLimit.NONE;
     private float motionSpeedKmh;
     private float compactSpeedBadgeOffset = Float.NaN;
     private boolean widgetMode;
@@ -41,6 +47,8 @@ public final class TpmsDashboardView extends View {
     public TpmsDashboardView(Context context) {
         super(context);
         paint.setFilterBitmap(true);
+        SunroofStateMemory.Snapshot last = SunroofStateMemory.snapshot(context);
+        roofSlide = new RoofSlide(last.known ? Boolean.valueOf(last.open) : null);
     }
 
     public void setState(TpmsState value) {
@@ -57,13 +65,21 @@ public final class TpmsDashboardView extends View {
         if (wasMoving || moving()) invalidate();
     }
 
-    public void setNavigationState(NavigationState value) {
+    public void setNavigationState(NavigationState value, DashboardRoadSpeedLimit limit) {
         navigation = value == null ? NavigationState.empty() : value;
+        if (roadLimit != limit) {
+            roadLimit = limit;
+            updateAccessibilitySummary();
+        }
         invalidate();
     }
 
     public void setVehicleState(VehicleState value) {
-        vehicle = value == null ? VehicleState.empty() : value;
+        Boolean open = value != null && value.sunroofKnown ? Boolean.valueOf(value.sunroofOpen) : null;
+        if (open == null ? reportedRoof == null : open.equals(reportedRoof)) return;
+        reportedRoof = open;
+        roofSlide.update(open, isShown() && ValueAnimator.areAnimatorsEnabled(), SystemClock.uptimeMillis());
+        updateAccessibilitySummary();
         invalidate();
     }
 
@@ -116,7 +132,8 @@ public final class TpmsDashboardView extends View {
     private void scheduleFreshnessRefresh() {
         removeCallbacks(freshnessRefresh);
         if (state == null || state.known == null || state.wheelUpdatedAt == null) return;
-        long nextDelay = Long.MAX_VALUE;
+        long signRemaining = roadLimit.remainingMs(SystemClock.elapsedRealtime());
+        long nextDelay = signRemaining > 0L ? signRemaining : Long.MAX_VALUE;
         for (int wheel = 0; wheel < TpmsState.WHEEL_COUNT; wheel++) {
             if (!known(wheel) || !state.isWheelFresh(wheel)) continue;
             long remaining = TpmsState.WHEEL_STALE_AFTER_MS + 1L - state.wheelAgeMs(wheel);
@@ -126,7 +143,9 @@ public final class TpmsDashboardView extends View {
     }
 
     private void updateAccessibilitySummary() {
-        setContentDescription(state == null ? "TPMS: нет данных" : state.summary());
+        String summary = state == null ? "TPMS: нет данных" : state.summary();
+        int limit = speedLimitKmh();
+        setContentDescription(limit > 0 ? summary + ". Ограничение скорости " + limit + " км/ч" : summary);
     }
 
     private void drawDarkBackground(Canvas canvas) {
@@ -231,7 +250,7 @@ public final class TpmsDashboardView extends View {
         drawCompactNavigationHints(canvas, width, pad);
         float carW = Math.min(width * (narrowTall ? 0.64f : 0.64f), topH * (narrowTall ? 0.68f : 0.66f));
         float carH = Math.min(topH * (narrowTall ? 0.86f : 0.92f), height * (narrowTall ? 0.47f : 0.52f));
-        drawFitAspect(canvas, carTopViewRes(), carCx, carCy, carW, carH);
+        drawSportage(canvas, carCx, carCy, carW, carH);
         if (hasAlert()) {
             float warningSize = Math.min(width * 0.20f, topH * 0.26f);
             drawFitAspect(canvas, R.drawable.tpms_car_warning_center,
@@ -271,7 +290,7 @@ public final class TpmsDashboardView extends View {
         drawCompactRoad(canvas, carCx, roadTop, roadBottom, width * 0.10f, width * 0.25f);
         drawNavigationHints(canvas,
                 pad + cardW + gap, width - pad - cardW - gap, pad);
-        drawFitAspect(canvas, carTopViewRes(), carCx, carCy,
+        drawSportage(canvas, carCx, carCy,
                 Math.max(120f, width - cardW * 2f - pad * 5f), height * 0.96f);
         if (hasAlert()) {
             float warningSize = Math.min(height * 0.26f, 76f);
@@ -283,14 +302,20 @@ public final class TpmsDashboardView extends View {
     private void drawCompactGridOnly(Canvas canvas, int width, int height) {
         float pad = clamp(Math.min(width, height) * 0.038f, 9f, 16f);
         float gap = clamp(Math.min(width, height) * 0.025f, 7f, 12f);
-        drawCompactNavigationHints(canvas, width, pad);
+        float top = pad;
+        int limit = speedLimitKmh();
+        if (limit > 0 && height >= 240) {
+            float radius = clamp(height * 0.06f, 14f, 26f);
+            drawSpeedLimitBadge(canvas, width * 0.5f, pad + radius, radius, limit);
+            top += radius * 2f + gap;
+        }
         float cardW = (width - pad * 2f - gap) / 2f;
-        float cardH = (height - pad * 2f - gap) / 2f;
-        drawCompactTireCard(canvas, TpmsState.WHEEL_FL, pad, pad, cardW, cardH);
-        drawCompactTireCard(canvas, TpmsState.WHEEL_FR, pad + cardW + gap, pad, cardW, cardH);
-        drawCompactTireCard(canvas, TpmsState.WHEEL_RL, pad, pad + cardH + gap, cardW, cardH);
+        float cardH = (height - pad - top - gap) / 2f;
+        drawCompactTireCard(canvas, TpmsState.WHEEL_FL, pad, top, cardW, cardH);
+        drawCompactTireCard(canvas, TpmsState.WHEEL_FR, pad + cardW + gap, top, cardW, cardH);
+        drawCompactTireCard(canvas, TpmsState.WHEEL_RL, pad, top + cardH + gap, cardW, cardH);
         drawCompactTireCard(canvas, TpmsState.WHEEL_RR, pad + cardW + gap,
-                pad + cardH + gap, cardW, cardH);
+                top + cardH + gap, cardW, cardH);
     }
 
     private void drawCompactTireCard(Canvas canvas, int wheel, float x, float y, float w, float h) {
@@ -495,13 +520,25 @@ public final class TpmsDashboardView extends View {
         }
     }
 
-    private int carTopViewRes() {
-        return vehicle != null && vehicle.sunroofKnown && vehicle.sunroofOpen
-                ? R.drawable.kia_top_view_sunroof_open
-                : R.drawable.kia_top_view;
+    private void drawSportage(Canvas canvas, float cx, float cy, float maxW, float maxH) {
+        if (carRenderer == null) {
+            Bitmap car = bitmap(R.drawable.sportage_dashboard);
+            if (car == null) return;
+            carRenderer = new DashboardSunroof(car);
+        }
+        long now = SystemClock.uptimeMillis();
+        carRenderer.draw(canvas, cx, cy, maxW * .90f, maxH * .84f, roofSlide.position(now));
+        if (roofSlide.moving(now)) postInvalidateOnAnimation();
     }
 
     private void drawSpeedLimitBadge(Canvas canvas, float cx, float cy, float radius, int limit) {
+        float progress = clamp((SystemClock.elapsedRealtime() - roadLimit.changedAt) / 260f, 0f, 1f);
+        if (progress < 1f) {
+            float remaining = (1f - progress) * (1f - progress);
+            cy += radius * 0.22f * remaining;
+            radius *= 1f - 0.20f * remaining;
+            postInvalidateOnAnimation();
+        }
         paint.clearShadowLayer();
         paint.setShader(null);
         paint.setStyle(Paint.Style.FILL);
@@ -514,9 +551,7 @@ public final class TpmsDashboardView extends View {
         paint.setStyle(Paint.Style.FILL);
         paint.setTypeface(Typeface.DEFAULT_BOLD);
         paint.setTextAlign(Paint.Align.CENTER);
-        setFittingTextSize(String.valueOf(limit), radius * 1.16f,
-                clamp(radius * 0.98f, narrowTallWidgetMode() ? 38f : 46f,
-                        narrowTallWidgetMode() ? 58f : 84f), 30f);
+        setFittingTextSize(String.valueOf(limit), radius * 1.34f, radius * 1.02f, radius * 0.64f);
         paint.setColor(0xff111111);
         drawTextCenterY(canvas, String.valueOf(limit), cx, cy, paint);
     }
@@ -605,7 +640,7 @@ public final class TpmsDashboardView extends View {
     }
 
     private int speedLimitKmh() {
-        return parseKmh(navigation == null ? "" : navigation.speedLimit, false);
+        return roadLimit.valueAt(SystemClock.elapsedRealtime());
     }
 
     private int currentSpeedKmh() {
@@ -713,7 +748,7 @@ public final class TpmsDashboardView extends View {
         float carH = 660f * scale;
         float carCx = ox + 640f * scale;
         float carCy = oy + 360f * scale;
-        drawFitAspect(canvas, carTopViewRes(), carCx, carCy, carW, carH);
+        drawSportage(canvas, carCx, carCy, carW, carH);
         if (hasAlert()) {
             float warningSize = 150f * scale;
             drawFitAspect(canvas, R.drawable.tpms_car_warning_center,

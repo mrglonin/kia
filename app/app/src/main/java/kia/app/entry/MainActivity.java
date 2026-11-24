@@ -1478,7 +1478,7 @@ public final class MainActivity extends Activity {
         dashboard.setState(state);
         dashboard.setWidgetMode(tpmsWidgetMode());
         dashboard.setMotionSpeedKmh(navigationSpeedKmh());
-        dashboard.setNavigationState(StateStore.navigation());
+        dashboard.setNavigationState(StateStore.navigation(), NavigationFeature.get(this).dashboardRoadSpeedLimit());
         dashboard.setVehicleState(StateStore.vehicle());
         stage.addView(dashboard, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -4691,8 +4691,10 @@ public final class MainActivity extends Activity {
     }
 
     private void refresh() {
-        if (shouldRerenderTpms()) {
-            renderTab();
+        if (tpmsDashboard != null && shouldRerenderTpms()) {
+            TpmsState tires = StateStore.tpms();
+            rememberTpmsRenderState(tires);
+            tpmsDashboard.setState(tires);
         }
         if (status != null) status.setText(fullStatusText());
         if (tpmsStatus != null) {
@@ -4701,7 +4703,7 @@ public final class MainActivity extends Activity {
         if (tpmsDashboard != null) {
             tpmsDashboard.setWidgetMode(tpmsWidgetMode());
             tpmsDashboard.setMotionSpeedKmh(navigationSpeedKmh());
-            tpmsDashboard.setNavigationState(StateStore.navigation());
+            tpmsDashboard.setNavigationState(StateStore.navigation(), NavigationFeature.get(this).dashboardRoadSpeedLimit());
             tpmsDashboard.setVehicleState(StateStore.vehicle());
         }
         if (navigationStatus != null) {

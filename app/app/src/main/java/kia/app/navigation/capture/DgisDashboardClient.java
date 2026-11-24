@@ -178,13 +178,13 @@ public final class DgisDashboardClient implements ServiceConnection {
             if (now - lastOwnerHeartbeatAt < OWNER_HEARTBEAT_MS) return;
             lastOwnerHeartbeatAt = now;
             if (NavigationFeature.get(app).touchDgisDashboardHeartbeat()) {
-                handleJson(json);
+                handleJson(json, false);
             }
             return;
         }
         lastJson = json;
         lastOwnerHeartbeatAt = SystemClock.elapsedRealtime();
-        handleJson(json);
+        handleJson(json, true);
     }
 
     private boolean sourceEnabled() {
@@ -193,7 +193,7 @@ public final class DgisDashboardClient implements ServiceConnection {
                 AppSettings.dgisNavigationEnabled(app));
     }
 
-    private void handleJson(String json) {
+    private void handleJson(String json, boolean newSnapshot) {
         try {
             JSONObject obj = new JSONObject(json);
             String mode = obj.optString("activeNavigationMode", "");
@@ -219,7 +219,7 @@ public final class DgisDashboardClient implements ServiceConnection {
                     maneuverDistance, totalDistance, remainingTime, arrivalTime,
                     dashboardSpeed(speedLimit), exceeded,
                     destinationPoint == null ? Double.NaN : destinationPoint[0],
-                    destinationPoint == null ? Double.NaN : destinationPoint[1], json);
+                    destinationPoint == null ? Double.NaN : destinationPoint[1], json, newSnapshot);
             logDashboard(mode, maneuverIcon, maneuverDescription, maneuverDistance,
                     totalDistance, remainingTime, arrivalTime, speedLimit);
         } catch (Exception e) {
