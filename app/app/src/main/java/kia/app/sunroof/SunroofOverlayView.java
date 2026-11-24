@@ -6,11 +6,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.LinearGradient;
-import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
-import android.graphics.Shader;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -28,10 +25,7 @@ public final class SunroofOverlayView extends View {
     private final RectF carBounds = new RectF();
     private final RectF roofBounds = new RectF();
     private final RectF glassBounds = new RectF();
-    private final Matrix glassGradientMatrix = new Matrix();
-    private final LinearGradient glassGradient = new LinearGradient(0f, 0f, 1f, 1f,
-            new int[]{0xff273139, 0xff0f171d, 0xff202c35},
-            new float[]{0f, .68f, 1f}, Shader.TileMode.CLAMP);
+    private final SunroofGlass glass = new SunroofGlass();
     private final Bitmap car;
     private ValueAnimator movement;
     private ValueAnimator appearance;
@@ -83,8 +77,8 @@ public final class SunroofOverlayView extends View {
             float target = kind == SunroofAlertPolicy.Kind.OPENING ? 1f : 0f;
             if (ValueAnimator.areAnimatorsEnabled()) {
                 movement = ValueAnimator.ofFloat(roofOpen, target);
-                movement.setStartDelay(150L);
-                movement.setDuration(900L);
+                movement.setStartDelay(SunroofGlass.START_DELAY_MS);
+                movement.setDuration(SunroofGlass.TRAVEL_MS);
                 movement.setInterpolator(new AccelerateDecelerateInterpolator());
                 movement.addUpdateListener(animation -> {
                     roofOpen = (float) animation.getAnimatedValue();
@@ -162,23 +156,8 @@ public final class SunroofOverlayView extends View {
 
         roofBounds.set(left + width * .353f, top + height * .456f,
                 left + width * .653f, top + height * .574f);
-        float corner = roofBounds.width() * .10f;
-        paint.setColor(Color.argb(Math.round(255f * .24f * roofOpen * warningPulse), 255, 35, 55));
-        canvas.drawRoundRect(roofBounds, corner, corner, paint);
-
         glassBounds.set(roofBounds);
-        glassBounds.offset(0f, roofBounds.height() * 1.10f * roofOpen);
-        glassGradientMatrix.setScale(glassBounds.width(), glassBounds.height());
-        glassGradientMatrix.postTranslate(glassBounds.left, glassBounds.top);
-        glassGradient.setLocalMatrix(glassGradientMatrix);
-        paint.setShader(glassGradient);
-        paint.setColor(Color.WHITE);
-        canvas.drawRoundRect(glassBounds, corner, corner, paint);
-        paint.setShader(null);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(Math.max(.6f, width / 230f));
-        paint.setColor(0x8096a3aa);
-        canvas.drawRoundRect(glassBounds, corner, corner, paint);
-        paint.setStyle(Paint.Style.FILL);
+        glassBounds.offset(0f, roofBounds.height() * 1.10f);
+        glass.draw(canvas, roofBounds, glassBounds, roofOpen, warningPulse, Math.max(.6f, width / 230f));
     }
 }

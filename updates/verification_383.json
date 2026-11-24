@@ -5,8 +5,8 @@
     "version_code": 383,
     "asset_name": "kia_383_sunroof.apk",
     "download_url": "https://github.com/mrglonin/kia/releases/download/v23.29-383/kia_383_sunroof.apk",
-    "sha256": "03f3ba1ea348650421347b812b10b72e5f649b42a7d27bcf17f6c18c6e7f992b",
-    "size": 8237012
+    "sha256": "ade714da857c159d8e9ec849f1fbc88b8c82f1cb39bfbd8fce0792455e53b68a",
+    "size": 8237800
   },
   "certificate_sha256": "72631978082200032bd33700f86195786e63a5ddb43166d186baa934c0942ca7",
   "source_base": "31abd29c03e2376ea5e1a39b0c715f2950749177",
@@ -28,6 +28,7 @@
     "lint_errors": 0,
     "lint_warnings": 83,
     "emulator": "Release APK on Android, real dashboard and vehicle event router with fixture navigation and tire/roof inputs. Video includes open/close and speed-limit changes.",
-    "physical_car_tested": false
+    "physical_car_tested": false,
+    "sunroof": "Shared roof and aperture renderer with the existing overlay. Both opening and closing recorded in the Android dashboard with an in-memory USB connection."
   }
 }

@@ -3,9 +3,9 @@ package kia.app.tpms
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.Rect
 import android.graphics.RectF
+import kia.app.sunroof.SunroofGlass
+import kotlin.math.cos
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToLong
@@ -31,10 +31,11 @@ internal class RoofSlide(initialOpen: Boolean?) {
             end = next
             duration = 0
         } else if (next != end) {
+            val reversing = moving(now)
             start = position(now)
             end = next
-            startedAt = now
-            duration = (1540L * abs(end - start)).roundToLong()
+            startedAt = now + if (reversing) 0L else SunroofGlass.START_DELAY_MS
+            duration = (SunroofGlass.TRAVEL_MS * abs(end - start)).roundToLong()
         }
         known = true
     }
@@ -44,7 +45,8 @@ internal class RoofSlide(initialOpen: Boolean?) {
     fun position(now: Long): Float {
         if (!moving(now)) return end
         val t = ((now - startedAt).toFloat() / duration).coerceIn(0f, 1f)
-        return start + (end - start) * t * t * (3f - 2f * t)
+        val eased = ((1.0 - cos(Math.PI * t)) * .5).toFloat()
+        return start + (end - start) * eased
     }
 }
 
@@ -52,13 +54,9 @@ internal class RoofSlide(initialOpen: Boolean?) {
 internal class DashboardSunroof(private val body: Bitmap) {
     private val bodyBounds = RectF(0f, 0f, 1024f, 1536f)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val glassTexture = Rect(body.width * 303 / 1024, body.height * 669 / 1536,
-        body.width * 722 / 1024, body.height * 878 / 1536)
-    private val panel = RectF()
-    private val shape = Path()
-    private val carRoof = Path().apply {
-        addRoundRect(294f, 381f, 732f, 888f, 34f, 33f, Path.Direction.CW)
-    }
+    private val opening = RectF(311f, 393f, 716f, 660f)
+    private val retracted = RectF(297f, 662f, 729f, 887f)
+    private val glass = SunroofGlass()
 
     fun draw(canvas: Canvas, cx: Float, cy: Float, maxWidth: Float, maxHeight: Float,
              open: Float) {
@@ -70,21 +68,7 @@ internal class DashboardSunroof(private val body: Bitmap) {
         paint.color = -1
         paint.style = Paint.Style.FILL
         canvas.drawBitmap(body, null, bodyBounds, paint)
-        if (open < 1f) {
-            // The fixed rear pane in the render already shows the glass fully retracted.
-            val top = 391f + 265f * open
-            panel.set(310f - 9f * open, top, 716f + 9f * open, top + 267f - 31f * open)
-            shape.rewind()
-            shape.addRoundRect(panel, 29f, 30f, Path.Direction.CW)
-            canvas.clipPath(carRoof)
-            canvas.clipPath(shape)
-            paint.alpha = (255f * ((1f - open) / .14f).coerceIn(0f, 1f)).toInt()
-            canvas.drawBitmap(body, glassTexture, panel, paint)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 4f
-            paint.color = android.graphics.Color.argb((paint.alpha * .42f).toInt(), 153, 164, 171)
-            canvas.drawPath(shape, paint)
-        }
+        glass.draw(canvas, opening, retracted, open, 1f, 1024f / 230f)
         canvas.restoreToCount(saved)
     }
 }
